@@ -24,7 +24,7 @@ _A command line tool that writes a bootable drive, on Windows, on macOS, and on 
 
 **Nothing is built yet.**
 This repository holds the rules and the licence, and no code.
-The toolchain is not chosen.
+The toolchain is Rust.
 
 Do not install this.
 There is no release.

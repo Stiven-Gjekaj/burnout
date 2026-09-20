@@ -11,8 +11,9 @@ image formats, hardware reports, and arguments against a decision that is
 already made.
 
 Burnout is in the planning stage.
-The toolchain is not chosen yet, so this guide does not name a build command.
-It names the rules that hold whatever the toolchain turns out to be.
+The toolchain is Rust, and no code exists yet, so this guide names no build
+command.
+It names the rules that hold when the code arrives.
 The [README](README.md) says what the current state is.
 
 ## Ways to contribute
