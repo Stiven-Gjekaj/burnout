@@ -10,6 +10,7 @@ mod alignment;
 mod drive;
 mod error;
 mod file_target;
+mod image;
 mod listing;
 mod memory_target;
 mod progress;
@@ -24,6 +25,7 @@ pub use alignment::{
 pub use drive::{Bus, Connection, DriveId, DriveInfo};
 pub use error::{Error, Result};
 pub use file_target::FileTarget;
+pub use image::{has_boot_table, BOOT_SECTOR_BYTES};
 pub use listing::{by_index, in_list_order, natural_cmp, DriveList};
 pub use memory_target::MemoryTarget;
 pub use progress::{Progress, ProgressEvent, Silent, Stage};
