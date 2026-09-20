@@ -32,7 +32,9 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 > **`burnout list` is built. Nothing writes a drive yet.**
 > The list runs on Windows, on macOS and on Linux, it needs no privilege, and
 > it marks the drive that the running system starts from. There is no release,
-> so build it from the source.
+> so build it from the source. The no-privilege claim is measured on a
+> standard Windows account and on a 4096-byte-sector drive, and
+> [docs/roadmap.md](docs/roadmap.md) holds the numbers.
 > [docs/roadmap.md](docs/roadmap.md) says what comes next, and
 > [docs/milestones.md](docs/milestones.md) holds every decision and the reason
 > behind it.
