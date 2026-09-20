@@ -50,6 +50,38 @@ A pull request that adds a test which opens a path under `/dev`, a
 `\\.\PhysicalDrive` path, or any real disk is refused.
 This holds even when the test passes on your machine.
 
+## How a host backend gets a test
+
+A test may not open a device, and a continuous integration machine has no
+drive to spare. So each host is two files, and that split is the whole reason
+the device layer has any test at all.
+
+    parse.rs   decides everything and makes no system call.
+               It is compiled on ALL THREE hosts, so its tests run three
+               times on every change. Everything that can be wrong is here.
+
+    host.rs    makes system calls and decides nothing. It turns what the host
+               said into plain Rust data and hands it on. It is gated to its
+               own host, and no test reaches it.
+
+The shim never filters, never interprets and never names a field of a drive.
+It hands back a `SysfsSource` on Linux, a `RegistrySnapshot` on macOS and a
+`RawDisk` of raw byte buffers on Windows.
+
+**A pure module must never name a type from `windows-sys`, `core-foundation`
+or `io-kit-sys`.** Those crates belong to one host and do not exist on the
+other two, so one such name deletes two thirds of the tests without a word.
+Each pure module says so at the top.
+
+A test builds the state it needs inside itself, from contents captured by hand
+on a real machine. It never reads the `sysfs` of the computer that runs the
+test, because that computer changes and the test would then pass or fail for a
+reason that has nothing to do with the code.
+
+The shim itself has no test. The gate runs `burnout list` on each host
+instead, which proves the shim compiles, links, finds the host API and
+returns. That is a step and not a test, so the rule above stays absolute.
+
 ## Three more traps that this project creates
 
 **A test can pass for the wrong reason.**
