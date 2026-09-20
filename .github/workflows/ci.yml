@@ -1,0 +1,63 @@
+# Every action is pinned to the commit of a release, and not to a tag.
+# A tag moves. This project asks for root when it runs, and it signs its
+# releases with build provenance, so the gate that produces them is pinned
+# too.
+#
+# dtolnay/rust-toolchain usually reads the toolchain from the name of the ref,
+# as in `@stable`. A pinned commit has no such name, so the toolchain is
+# named in `with`.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  format:
+    name: format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  check:
+    name: check on ${{ matrix.os }}
+    strategy:
+      # One host that fails must not hide the state of the other two. The
+      # exit test of this phase needs all three answers.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # Clippy compiles the tests as well, so it reports what rustc reports.
+      # RUSTFLAGS stays unset, so this step and the next share one build.
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+      # The step that runs `burnout list` on each host arrives with the list
+      # command itself. No test opens a device, so that step is the only
+      # place that proves the device layer of a host works at all.
