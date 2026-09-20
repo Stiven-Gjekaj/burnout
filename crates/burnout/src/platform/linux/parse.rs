@@ -349,6 +349,36 @@ pub fn system_disks(fs: &dyn SysfsSource, mountinfo: &str, swaps: &str) -> BTree
     out
 }
 
+/// Every place that a volume of one drive is mounted.
+///
+/// The deepest path comes first. A file system mounted inside another one
+/// holds the one under it busy, so the one under it cannot go first.
+///
+/// This takes the drives under a device mapper too. A partition of the target
+/// that carries LVM or LUKS reaches the file system through another name, and
+/// unmounting the name that `/dev/sdb2` carries would miss it.
+pub fn mount_points_for_disk(fs: &dyn SysfsSource, mountinfo: &str, disk: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for mount in mountinfo_sources(mountinfo) {
+        let name = if mount.major == 0 {
+            // The file system has no device number of its own. The source
+            // path is the only route left.
+            mount.source.strip_prefix("/dev/").map(|n| n.to_string())
+        } else {
+            disk_for_dev(fs, mount.major, mount.minor)
+        };
+        let Some(name) = name else {
+            continue;
+        };
+        let name = partition_to_disk(fs, &name);
+        if base_disks(fs, &name).contains(disk) && !out.contains(&mount.mount_point) {
+            out.push(mount.mount_point);
+        }
+    }
+    out.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    out
+}
+
 /// Build one drive from what `sysfs` says about it.
 pub fn drive(fs: &dyn SysfsSource, name: &str, system: &BTreeSet<String>) -> Option<DriveInfo> {
     if !is_listable(fs, name) {
@@ -512,6 +542,79 @@ mod tests {
     }
 
     // Lines captured by hand from a running machine.
+    /// One USB stick with two mounted partitions, and the system disk beside
+    /// it. Captured by hand from a Fedora machine.
+    const TWO_DRIVES_MOUNTED: &str = "\
+36 35 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw
+41 36 8:1 / /boot rw,relatime shared:2 - ext4 /dev/sda1 rw
+58 36 8:17 / /run/media/me/BOOT rw,nosuid,nodev shared:3 - vfat /dev/sdb1 rw
+59 36 8:18 / /run/media/me/INSTALL rw,nosuid,nodev shared:4 - exfat /dev/sdb2 rw
+60 59 8:18 /nested /run/media/me/INSTALL/deep rw shared:5 - exfat /dev/sdb2 rw";
+
+    fn with_usb_stick(fs: MapSysfs) -> MapSysfs {
+        let tree = "../../devices/pci0000:00/0000:00:14.0/usb2/2-1/2-1:1.0/host6/target6:0:0/6:0:0:0/block/sdb";
+        fs.link("/sys/dev/block/8:16", tree)
+            .link("/sys/dev/block/8:17", &format!("{tree}/sdb1"))
+            .file("/sys/dev/block/8:17/partition", "1")
+            .link("/sys/dev/block/8:18", &format!("{tree}/sdb2"))
+            .file("/sys/dev/block/8:18/partition", "2")
+            .link("/sys/class/block/sdb1", &format!("{tree}/sdb1"))
+            .file("/sys/class/block/sdb1/partition", "1")
+            .link("/sys/class/block/sdb2", &format!("{tree}/sdb2"))
+            .file("/sys/class/block/sdb2/partition", "2")
+    }
+
+    #[test]
+    fn the_mount_points_of_one_drive_leave_the_other_drive_alone() {
+        // Unmounting a path that belongs to the system disk would take the
+        // running machine apart, so this is the test that matters most here.
+        let fs = with_usb_stick(with_sata_disk(MapSysfs::new()));
+        let points = mount_points_for_disk(&fs, TWO_DRIVES_MOUNTED, "sdb");
+        assert!(points.contains(&"/run/media/me/BOOT".to_string()));
+        assert!(points.contains(&"/run/media/me/INSTALL".to_string()));
+        assert!(!points.contains(&"/".to_string()));
+        assert!(!points.contains(&"/boot".to_string()));
+    }
+
+    #[test]
+    fn the_deepest_mount_point_comes_first() {
+        // A file system mounted inside another holds the one under it busy.
+        let fs = with_usb_stick(with_sata_disk(MapSysfs::new()));
+        let points = mount_points_for_disk(&fs, TWO_DRIVES_MOUNTED, "sdb");
+        let deep = points
+            .iter()
+            .position(|p| p == "/run/media/me/INSTALL/deep")
+            .expect("the nested mount is there");
+        let shallow = points
+            .iter()
+            .position(|p| p == "/run/media/me/INSTALL")
+            .expect("the mount under it is there");
+        assert!(deep < shallow);
+    }
+
+    #[test]
+    fn a_drive_with_nothing_mounted_gives_no_mount_point() {
+        let fs = with_usb_stick(with_sata_disk(MapSysfs::new()));
+        assert!(mount_points_for_disk(&fs, ROOT_ON_SDA2, "sdb").is_empty());
+    }
+
+    #[test]
+    fn a_volume_reached_through_a_device_mapper_still_names_its_drive() {
+        // LUKS on the stick. The mount says dm-0, and dm-0 says sdb2 through
+        // its slaves. A search that only matched the name of the partition
+        // would unmount nothing and then fail to open the drive.
+        let fs = with_usb_stick(with_sata_disk(MapSysfs::new()))
+            .link("/sys/dev/block/253:0", "../../devices/virtual/block/dm-0")
+            .dir("/sys/block/dm-0/slaves", &["sdb2"])
+            .link("/sys/class/block/sdb2", "../../devices/x/block/sdb/sdb2")
+            .file("/sys/class/block/sdb2/partition", "2");
+        let text = "70 36 253:0 / /mnt/secret rw shared:9 - ext4 /dev/mapper/secret rw";
+        assert_eq!(
+            mount_points_for_disk(&fs, text, "sdb"),
+            ["/mnt/secret".to_string()]
+        );
+    }
+
     const ROOT_ON_SDA2: &str =
         "36 35 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw,errors=remount-ro";
     const EFI_ON_SDA1: &str = "40 36 8:1 / /boot/efi rw,relatime shared:5 - vfat /dev/sda1 rw";
