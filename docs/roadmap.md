@@ -49,7 +49,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 
 | | Phase | Size | Release |
 | --- | --- | --- | --- |
-| P0 | Prove the layout | S | |
+| P0 | Prove the layout | S | **done** |
 | P1 | The skeleton and the device layer | L | |
 | P2 | Raw mode | M | **v0.1** |
 | P3 | The partition table and FAT32 | M | |
@@ -62,7 +62,11 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 
 ## P0. Prove the layout
 
-**Size S. Nothing ships. Start this first.**
+**Size S. Done. [The result is here](spike-layout.md).**
+
+Both questions are answered. Windows PE reads exFAT, and Setup does **not**
+find the image across the partition boundary, so `autounattend.xml` with an
+`InstallFrom` path is required on every Windows drive.
 
 Build the two-partition drive by hand, with whatever tools your machine has.
 This is an experiment and not a product, so `diskutil`, `mkfs` and `dd` are

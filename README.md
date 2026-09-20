@@ -274,18 +274,23 @@ A Windows installation needs a licence from Microsoft.
 
 ---
 
-## Two things to prove before any real code
+## What the spike proved
 
-Nobody has run either of these.
-They carry the whole Windows path, and an afternoon answers both.
+Both open questions are answered, against a running Windows 11 Setup.
+[docs/spike-layout.md](docs/spike-layout.md) holds the evidence.
 
-1. **Windows PE reads exFAT.** It has held exFAT support since Windows 10, and
-   that is a claim from documentation and not a measurement.
-2. **Setup finds the install image across the partition boundary.** Test it
-   with the `InstallFrom` path in `autounattend.xml`, and without it.
+- **Windows PE reads exFAT.** It mounted the exFAT partition as `D:` and
+  walked its directory tree. The layout above stands.
+- **Setup does not find the install image across the partition boundary.**
+  The volume was mounted and readable, and Setup still reported a missing
+  media driver. So the `InstallFrom` path in `autounattend.xml` is a
+  **requirement**, not insurance, and Burnout writes that file on every
+  Windows drive whether or not anybody asks for an option.
+- **The hardware checks come off from the same file.** Five `LabConfig`
+  commands, and the refusal screen for TPM 2.0 and Secure Boot never appears.
 
-If exFAT fails there, the layout above changes, and a WIM splitter written in
-Rust comes back.
+One risk came out of it: the path holds a drive letter, and Windows PE assigns
+letters itself. The milestones record what to do about that.
 
 ---
 
