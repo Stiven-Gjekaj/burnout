@@ -61,6 +61,7 @@ dependencies = [
  "core-foundation",
  "core-foundation-sys",
  "io-kit-sys",
+ "libc",
  "windows-sys 0.59.0",
 ]
 
