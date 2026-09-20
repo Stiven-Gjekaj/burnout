@@ -78,6 +78,47 @@ pub fn bus_from_device_path(link_target: &str) -> (Bus, Connection) {
     }
 }
 
+/// The kernel names that `/sys/block` holds and that are not drives.
+///
+/// Each one is a block device, and none of them is a disk that a person
+/// writes an image to.
+const NOT_A_DRIVE: [&str; 8] = [
+    "loop", // a file that the kernel presents as a device
+    "ram",  // a disk in memory
+    "zram", // the same, compressed
+    "sr",   // an optical drive
+    "dm-",  // device mapper, which sits on top of a real drive
+    "md",   // software RAID, which sits on top of real drives
+    "nbd",  // a network block device
+    "fd",   // a floppy drive
+];
+
+/// Whether a kernel name belongs to a drive that Burnout lists.
+///
+/// This looks at the name only. A name that passes still has to carry a size
+/// and stay visible, which [`is_listable`] checks.
+pub fn is_drive_name(kernel_name: &str) -> bool {
+    !kernel_name.is_empty() && !NOT_A_DRIVE.iter().any(|p| kernel_name.starts_with(p))
+}
+
+/// Whether Burnout lists this drive.
+///
+/// A hidden device is one that the kernel keeps for its own use, such as the
+/// single paths under an NVMe drive that has more than one. A device of no
+/// size is a card reader with no card in it, and there is nothing to write.
+pub fn is_listable(fs: &dyn SysfsSource, kernel_name: &str) -> bool {
+    if !is_drive_name(kernel_name) {
+        return false;
+    }
+    if attribute(fs, &format!("{BLOCK}/{kernel_name}/hidden")).as_deref() == Some("1") {
+        return false;
+    }
+    match attribute(fs, &format!("{BLOCK}/{kernel_name}/size")) {
+        Some(size) => size_bytes(&size).map(|b| b > 0).unwrap_or(false),
+        None => false,
+    }
+}
+
 /// The bus and the place of one drive, read through the source.
 ///
 /// The kernel writes the device path into the symbolic link at
@@ -174,6 +215,62 @@ mod tests {
             bus_from_device_path("../devices/platform/something/block/xyz0"),
             (Bus::Unknown, Connection::Unknown)
         );
+    }
+
+    #[test]
+    fn a_real_drive_name_passes() {
+        for name in ["sda", "sdb", "nvme0n1", "mmcblk0", "vda", "hda"] {
+            assert!(is_drive_name(name), "{name} should be a drive");
+        }
+    }
+
+    #[test]
+    fn the_block_devices_that_are_not_drives_are_refused() {
+        for name in [
+            "loop0", "ram0", "zram0", "sr0", "dm-0", "md0", "nbd0", "fd0",
+        ] {
+            assert!(!is_drive_name(name), "{name} should not be a drive");
+        }
+    }
+
+    #[test]
+    fn an_empty_name_is_not_a_drive() {
+        assert!(!is_drive_name(""));
+    }
+
+    #[test]
+    fn a_drive_with_a_size_is_listed() {
+        let fs = MapSysfs::new().file("/sys/block/sda/size", "1953525168");
+        assert!(is_listable(&fs, "sda"));
+    }
+
+    #[test]
+    fn a_card_reader_with_no_card_is_not_listed() {
+        // It reports a size of zero. There is nothing to write to.
+        let fs = MapSysfs::new().file("/sys/block/sdc/size", "0");
+        assert!(!is_listable(&fs, "sdc"));
+    }
+
+    #[test]
+    fn a_hidden_device_is_not_listed() {
+        // An NVMe drive with more than one path hides the single paths.
+        let fs = MapSysfs::new()
+            .file("/sys/block/nvme0c0n1/size", "1953525168")
+            .file("/sys/block/nvme0c0n1/hidden", "1");
+        assert!(!is_listable(&fs, "nvme0c0n1"));
+    }
+
+    #[test]
+    fn a_device_that_reports_no_size_at_all_is_not_listed() {
+        let fs = MapSysfs::new();
+        assert!(!is_listable(&fs, "sda"));
+    }
+
+    #[test]
+    fn a_loop_device_with_a_size_is_still_not_listed() {
+        // The name decides first, so a mounted image never reaches the list.
+        let fs = MapSysfs::new().file("/sys/block/loop0/size", "204800");
+        assert!(!is_listable(&fs, "loop0"));
     }
 
     #[test]
