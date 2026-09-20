@@ -8,8 +8,11 @@
 //! Nothing here is covered by a test, and nothing here may grow a rule.
 
 use std::collections::BTreeMap;
-use std::ffi::{CStr, CString};
+use std::ffi::{c_char, c_void, CStr, CString};
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
+use std::time::{Duration, Instant};
 
 use core_foundation::array::CFArray;
 use core_foundation::base::{CFType, CFTypeRef, TCFType};
@@ -18,6 +21,10 @@ use core_foundation::data::CFData;
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::number::CFNumber;
 use core_foundation::string::{CFString, CFStringRef};
+use core_foundation_sys::base::{CFAllocatorRef, CFRelease};
+use core_foundation_sys::runloop::{
+    kCFRunLoopDefaultMode, CFRunLoopGetCurrent, CFRunLoopRef, CFRunLoopRunInMode,
+};
 use io_kit_sys::keys::kIOServicePlane;
 use io_kit_sys::types::io_object_t;
 use io_kit_sys::{
@@ -25,7 +32,7 @@ use io_kit_sys::{
     IORegistryEntryGetParentEntry, IOServiceGetMatchingServices, IOServiceMatching,
 };
 
-use burnout_core::{DriveInfo, DriveList, Error, Result};
+use burnout_core::{BlockTarget, DriveAccess, DriveId, DriveInfo, DriveList, Error, Result};
 
 use super::model::{Node, RegistrySnapshot, Value};
 use super::parse;
@@ -209,4 +216,224 @@ fn convert(value: &CFType) -> Option<Value> {
         return Some(Value::List(items));
     }
     None
+}
+
+/// Opens the drives of a running macOS host.
+pub struct MacosAccess;
+
+impl DriveAccess for MacosAccess {
+    type Target = MacosDisk;
+
+    fn unmount_volumes(&self, id: &DriveId) -> Result<()> {
+        unmount_whole(id.as_str())
+    }
+
+    fn open(&self, id: &DriveId) -> Result<MacosDisk> {
+        let info = one_drive(id)?;
+        // The raw node, and never /dev/diskN. The raw node skips the buffer
+        // cache, so what is written is on the medium and a read back is a
+        // read of the medium.
+        let file = OpenOptions::new().read(true).write(true).open(&info.node)?;
+        Ok(MacosDisk {
+            file,
+            sector_size: info.logical_sector_size,
+            length: info.size_bytes,
+        })
+    }
+}
+
+/// The description of one drive, out of the list that already works.
+///
+/// The size and the sector size come from the same registry walk that the
+/// list command uses, so there is one place where they are read and one place
+/// where that reading can be wrong.
+fn one_drive(id: &DriveId) -> Result<DriveInfo> {
+    MacosDrives
+        .drives()?
+        .into_iter()
+        .find(|d| d.id == *id)
+        .ok_or_else(|| Error::NoSuchDrive {
+            wanted: id.as_str().to_string(),
+        })
+}
+
+/// Take every volume of one whole disk off its mount point.
+///
+/// Disk Arbitration and not `diskutil`. The framework is the interface that
+/// `diskutil` itself calls, and a program is a tool of the host.
+///
+/// The call is asynchronous: it hands the request to a run loop and answers
+/// through a callback. So this schedules the session, runs the loop until the
+/// callback arrives, and reads what the callback recorded.
+fn unmount_whole(bsd_name: &str) -> Result<()> {
+    let name = CString::new(bsd_name).map_err(|_| Error::Host {
+        source: bsd_name.to_string(),
+        detail: "the name holds a zero byte".to_string(),
+    })?;
+
+    // SAFETY: every pointer below is checked before use, each one is
+    // released once, and the run loop belongs to this thread.
+    unsafe {
+        let session = DASessionCreate(std::ptr::null());
+        if session.is_null() {
+            return Err(Error::Host {
+                source: "DASessionCreate".to_string(),
+                detail: "the session is null".to_string(),
+            });
+        }
+        let disk = DADiskCreateFromBSDName(std::ptr::null(), session, name.as_ptr());
+        if disk.is_null() {
+            CFRelease(session as CFTypeRef);
+            return Err(Error::Host {
+                source: "DADiskCreateFromBSDName".to_string(),
+                detail: format!("{bsd_name} names no disk"),
+            });
+        }
+
+        let run_loop = CFRunLoopGetCurrent();
+        DASessionScheduleWithRunLoop(session, run_loop, kCFRunLoopDefaultMode);
+
+        let mut outcome = Outcome {
+            answered: false,
+            status: 0,
+        };
+        DADiskUnmountVolume(
+            disk,
+            UNMOUNT_WHOLE,
+            answered,
+            &mut outcome as *mut Outcome as *mut c_void,
+        );
+
+        // A deadline, because a file system that will not let go would
+        // otherwise hold this here for ever with nothing on the screen.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !outcome.answered && Instant::now() < deadline {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, 1);
+        }
+
+        DASessionUnscheduleFromRunLoop(session, run_loop, kCFRunLoopDefaultMode);
+        CFRelease(disk as CFTypeRef);
+        CFRelease(session as CFTypeRef);
+
+        if !outcome.answered {
+            return Err(Error::Host {
+                source: "DADiskUnmountVolume".to_string(),
+                detail: format!("{bsd_name} did not answer in thirty seconds"),
+            });
+        }
+        if outcome.status != 0 {
+            return Err(Error::Host {
+                source: "DADiskUnmountVolume".to_string(),
+                detail: format!("{bsd_name} refused with status {:#010x}", outcome.status),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// What the callback of the unmount recorded.
+struct Outcome {
+    answered: bool,
+    status: i32,
+}
+
+/// The callback that Disk Arbitration calls when the unmount is settled.
+///
+/// A null dissenter means the unmount happened. Anything else carries the
+/// reason it did not.
+extern "C" fn answered(_disk: DADiskRef, dissenter: DADissenterRef, context: *mut c_void) {
+    // SAFETY: the context is the Outcome that unmount_whole owns, and that
+    // Outcome outlives the run loop that calls this.
+    let outcome = unsafe { &mut *(context as *mut Outcome) };
+    outcome.answered = true;
+    outcome.status = if dissenter.is_null() {
+        0
+    } else {
+        // SAFETY: the dissenter is live for the length of this call.
+        unsafe { DADissenterGetStatus(dissenter) }
+    };
+}
+
+/// One open macOS drive.
+#[derive(Debug)]
+pub struct MacosDisk {
+    file: File,
+    sector_size: u32,
+    length: u64,
+}
+
+impl Read for MacosDisk {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.file.read(buf)
+    }
+}
+
+impl Write for MacosDisk {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.file.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl Seek for MacosDisk {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.file.seek(pos)
+    }
+}
+
+impl BlockTarget for MacosDisk {
+    fn logical_sector_size(&self) -> u32 {
+        self.sector_size
+    }
+
+    fn length(&self) -> u64 {
+        self.length
+    }
+
+    fn sync(&mut self) -> Result<()> {
+        self.file.flush()?;
+        self.file.sync_all()?;
+        Ok(())
+    }
+}
+
+/// `kDADiskUnmountOptionWhole`, which takes every volume of the disk.
+const UNMOUNT_WHOLE: u32 = 0x0000_0001;
+
+type DASessionRef = *const c_void;
+type DADiskRef = *const c_void;
+type DADissenterRef = *const c_void;
+type DADiskUnmountCallback = extern "C" fn(DADiskRef, DADissenterRef, *mut c_void);
+
+// Disk Arbitration has no binding crate that this project would depend on, so
+// declare the six functions it uses. This is the fallback that the plan named
+// for IOKit, and it is the whole of the interface.
+#[link(name = "DiskArbitration", kind = "framework")]
+extern "C" {
+    fn DASessionCreate(allocator: CFAllocatorRef) -> DASessionRef;
+    fn DASessionScheduleWithRunLoop(
+        session: DASessionRef,
+        run_loop: CFRunLoopRef,
+        mode: CFStringRef,
+    );
+    fn DASessionUnscheduleFromRunLoop(
+        session: DASessionRef,
+        run_loop: CFRunLoopRef,
+        mode: CFStringRef,
+    );
+    fn DADiskCreateFromBSDName(
+        allocator: CFAllocatorRef,
+        session: DASessionRef,
+        name: *const c_char,
+    ) -> DADiskRef;
+    fn DADiskUnmountVolume(
+        disk: DADiskRef,
+        options: u32,
+        callback: DADiskUnmountCallback,
+        context: *mut c_void,
+    );
+    fn DADissenterGetStatus(dissenter: DADissenterRef) -> i32;
 }
