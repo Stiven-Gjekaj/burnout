@@ -112,7 +112,11 @@ The work:
   gives it a file. `burnout` is the command line on top.
 - `Device`, one trait: list, unmount the volumes, open, flush, close.
 - Linux: read `/sys/block` for the size, the model, the vendor and the
-  removable flag. Unmount through `umount`.
+  removable flag. Unmount through the `umount2` system call.
+  `umount` is a program, and this file says below that a tool of the host is
+  not allowed. `umount2` is the peer of `DADiskUnmount` and
+  `FSCTL_DISMOUNT_VOLUME`: three calls, and no subprocess. It also returns an
+  error number rather than a sentence in the language of the host.
 - macOS: IOKit for the list, Disk Arbitration for the unmount. Write to
   `/dev/rdiskN` and never `/dev/diskN`, because the raw node skips the buffer
   cache and is about ten times faster.
