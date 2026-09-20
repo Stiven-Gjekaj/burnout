@@ -130,6 +130,20 @@ pub struct DriveInfo {
 }
 
 impl DriveInfo {
+    /// The answer that the `REMOVABLE` column prints.
+    ///
+    /// The three hosts do not agree about the word. A solid state drive in a
+    /// USB case reports `removable = 0` on Linux and `RemovableMedia =
+    /// FALSE` on Windows, because no medium comes out of it. macOS reports
+    /// the same drive External, because a person unplugs it.
+    ///
+    /// Burnout prints one answer for one drive on all three hosts. Either
+    /// mark is enough, because a person who wants to know whether to write
+    /// the drive asks one question: does this come off my desk.
+    pub fn removable(&self) -> bool {
+        self.removable_media || self.connection == Connection::External
+    }
+
     /// Make a drive with the fields that every host reports, and the
     /// defaults for the rest.
     pub fn new(id: DriveId, node: impl Into<String>, name: impl Into<String>) -> Self {
@@ -168,6 +182,53 @@ mod tests {
             assert!(!bus.label().is_empty());
             assert!(bus.label().len() <= 8, "{bus} is too wide for the column");
         }
+    }
+
+    fn drive() -> DriveInfo {
+        DriveInfo::new(DriveId::new("sda"), "/dev/sda", "a drive")
+    }
+
+    #[test]
+    fn a_usb_stick_is_removable_because_the_medium_comes_out() {
+        let mut d = drive();
+        d.removable_media = true;
+        d.connection = Connection::External;
+        assert!(d.removable());
+    }
+
+    #[test]
+    fn a_usb_solid_state_drive_is_removable_although_no_medium_comes_out() {
+        // This is the case that Linux and Windows call not removable and
+        // macOS calls External. One drive gives one answer.
+        let mut d = drive();
+        d.removable_media = false;
+        d.connection = Connection::External;
+        assert!(d.removable());
+    }
+
+    #[test]
+    fn a_card_reader_is_removable_although_it_sits_inside() {
+        let mut d = drive();
+        d.removable_media = true;
+        d.connection = Connection::Internal;
+        assert!(d.removable());
+    }
+
+    #[test]
+    fn an_internal_disk_is_not_removable() {
+        let mut d = drive();
+        d.removable_media = false;
+        d.connection = Connection::Internal;
+        assert!(!d.removable());
+    }
+
+    #[test]
+    fn a_drive_that_the_host_does_not_describe_is_not_removable() {
+        // Unknown is not a yes. A wrong yes invites a person to write a disk
+        // that does not come off the desk.
+        let d = drive();
+        assert_eq!(d.connection, Connection::Unknown);
+        assert!(!d.removable());
     }
 
     #[test]
