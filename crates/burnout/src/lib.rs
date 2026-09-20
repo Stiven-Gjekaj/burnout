@@ -8,6 +8,7 @@ pub mod commands;
 pub mod elevate;
 pub mod format;
 pub mod platform;
+pub mod report;
 
 use clap::Parser;
 
