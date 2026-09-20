@@ -1,0 +1,7 @@
+# Code owners for Burnout.
+# Owners listed here are automatically requested for review on pull requests
+# that change matching files.
+# See https://docs.github.com/articles/about-code-owners for the format.
+
+# Default owner for everything in the repository.
+* @Stiven-Gjekaj
