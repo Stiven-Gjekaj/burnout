@@ -10,7 +10,19 @@
 
 use std::cmp::Ordering;
 
-use crate::DriveInfo;
+use crate::{DriveInfo, Result};
+
+/// Every whole drive that the host reports.
+///
+/// An implementation opens no device and needs no privilege. A person sees
+/// their drives before they give a password.
+///
+/// A drive that the host describes badly does not fail the whole list. The
+/// implementation drops that drive and carries on, because a list that stops
+/// at an empty card reader is a list that nobody can use.
+pub trait DriveList {
+    fn drives(&self) -> Result<Vec<DriveInfo>>;
+}
 
 /// Compare two host names the way a person counts.
 ///
@@ -174,5 +186,26 @@ mod tests {
     #[test]
     fn an_empty_list_names_no_drive() {
         assert!(by_index(&[], 1).is_none());
+    }
+
+    struct FakeHost(Vec<DriveInfo>);
+
+    impl DriveList for FakeHost {
+        fn drives(&self) -> Result<Vec<DriveInfo>> {
+            Ok(self.0.clone())
+        }
+    }
+
+    #[test]
+    fn a_list_of_drives_goes_through_the_order_and_then_the_number() {
+        let host = FakeHost(vec![drive("disk10"), drive("disk2")]);
+        let list = in_list_order(host.drives().unwrap());
+        assert_eq!(by_index(&list, 1).unwrap().id.as_str(), "disk2");
+    }
+
+    #[test]
+    fn a_host_with_no_drive_is_not_an_error() {
+        let host = FakeHost(Vec::new());
+        assert!(host.drives().unwrap().is_empty());
     }
 }
