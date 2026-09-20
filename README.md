@@ -1,98 +1,288 @@
 <div align="center">
 
+<img src="https://raw.githubusercontent.com/Stiven-Gjekaj/burnout/main/assets/logo.svg" alt="Burnout" width="116">
+
 ### Burnout
 
-_A command line tool that writes a bootable drive, on Windows, on macOS, and on Linux_
+**Writes a bootable USB drive from the command line**
+
+_Two commands. The same two on Windows, on macOS, and on Linux._
 
 <p align="center">
-  <img src="https://img.shields.io/badge/status-planning-orange?style=flat-square" alt="Planning stage"/>
-  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/>
+  <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust"/>
+  <img src="https://img.shields.io/badge/Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"/>
+  <img src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS"/>
+  <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux"/>
 </p>
 
 <p align="center">
-  <a href="#the-state-of-the-project"><b>State</b></a> |
-  <a href="#the-goal"><b>Goal</b></a> |
-  <a href="#planned-features"><b>Features</b></a> |
-  <a href="#contributing"><b>Contributing</b></a>
+  <img src="https://img.shields.io/badge/status-planning-F97316?style=flat-square" alt="Planning stage"/>
+  <img src="https://img.shields.io/badge/code-none_yet-64748B?style=flat-square" alt="No code yet"/>
+  <img src="https://img.shields.io/badge/license-MIT-22C55E?style=flat-square" alt="MIT License"/>
+</p>
+
+<p align="center">
+  <a href="#overview"><b>Overview</b></a> |
+  <a href="#the-two-modes"><b>Modes</b></a> |
+  <a href="#how-burnout-chooses"><b>Detection</b></a> |
+  <a href="#the-layout-that-windows-mode-writes"><b>Layout</b></a> |
+  <a href="#the-shape-of-the-command"><b>Commands</b></a> |
+  <a href="docs/milestones.md"><b>Milestones</b></a>
 </p>
 
 </div>
 
 ---
 
-## The state of the project
-
-**Nothing is built yet.**
-This repository holds the rules and the licence, and no code.
-The toolchain is Rust.
-
-Do not install this.
-There is no release.
-
-[docs/milestones.md](docs/milestones.md) holds every decision that shapes the
-work, the reason behind each one, and the options that lost.
+> [!NOTE]
+> **Nothing is built yet.** This repository holds the rules, the licence and the
+> plan, and no code. The toolchain is Rust. There is no release, so there is
+> nothing to install.
+> [docs/milestones.md](docs/milestones.md) holds every decision, the reason
+> behind it, and the options that lost.
 
 ---
 
-## The goal
+## Overview
 
-Burnout writes a disk image to a drive from the command line.
-It runs on Windows, on macOS, and on Linux, and it behaves the same way on all
-three.
+**Burnout** writes a disk image to a drive.
+You give it an image and a drive, and it makes that drive start.
 
-A copy of the files out of an ISO file is often not enough for Windows.
-The install image can be too large for FAT32.
-The Windows 11 installer can refuse the computer.
-Old firmware needs boot code that the ISO file does not carry.
-Rufus does this work on Windows, and it does it well.
-Burnout aims for the same result from a terminal, on any of the three hosts.
+Most tools of this kind solve one half of the problem.
+A byte copy writes a Linux ISO and fails on Windows.
+Rufus builds a real Windows installer and runs on Windows only.
+So the answer today depends on which image you hold and which computer you sit
+at, and each answer has its own flags to learn.
+
+Burnout removes the choice.
+It reads the image, works out what that image needs, and does it.
+The commands you type on a Mac are the commands you type on Windows, and the
+image decides the rest.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### What it aims to do
+
+- **Write any bootable image.** A Linux ISO, a BSD ISO, a raw `.img`.
+- **Build a real Windows installer**, and not a copy of the files.
+- **Hold a large install image**, with no split and no lost `install.esd`.
+- **Skip the Windows 11 checks** for the TPM, Secure Boot and the RAM.
+- **Skip the Microsoft account step** in Windows Setup.
+- **Verify the write**, and name the check that it ran.
+
+</td>
+<td width="50%" valign="top">
+
+### How it aims to behave
+
+- The same commands on all three operating systems.
+- No flag for a thing that the tool can work out by itself.
+- It never mounts a drive, and it calls no tool of the host.
+- It refuses the disk that your system starts from.
+- It asks for a password through `sudo`, and never reads one itself.
+- It names the target, and you confirm it, one time.
+
+</td>
+</tr>
+</table>
 
 ---
 
-## Planned features
+## The two modes
 
-None of these exists today.
-Each one is a target, and the list is the plan rather than a promise.
+A drive gets one of two treatments.
+They share the device handling and the safety checks, and they share nothing
+else.
 
-- **Write a bootable Windows installer** from an ISO file.
-- **Split a large install image**, so that a FAT32 drive holds it.
-- **Start in UEFI mode and in Legacy BIOS mode** from one drive.
-- **Skip the Windows 11 hardware checks**, when the person asks for it.
-- **Skip the online account step** in Windows Setup, when the person asks.
-- **Make a Windows To Go drive**, which runs Windows from the drive itself.
-- **Verify the write**, by reading the drive back and comparing it.
-- **Write a Linux or BSD image** as a plain copy.
-- **List the drives** with a name that the owner recognises.
-- **Refuse a system disk**, every time, unless the person forces the choice.
+| | **Raw mode** | **Windows mode** |
+| :-- | :-- | :-- |
+| **For** | Linux, BSD, any hybrid ISO, any `.img` | A Windows installer ISO |
+| **What it does** | Copies the image byte for byte | Partitions, formats, writes files |
+| **Partition table** | Comes from inside the image | Burnout creates it |
+| **Verifies by** | One hash of the device against the source | One hash for each file |
+| **Proves** | The drive holds the image | Each file arrived whole |
 
----
+A Linux ISO is already a bootable disk image.
+It carries its own boot code, its own partition table and its own EFI system
+partition inside the file, so writing it means a copy of the bytes.
 
-## Warning
-
-Burnout erases the drive that you give it.
-The erased data does not go anywhere, and no undo exists.
-Read [TERMS.md](TERMS.md) section 4 before you run it.
-
-You supply the operating system image.
-Burnout downloads no operating system, and it gives you no licence for one.
+A Windows ISO is not a bootable disk image.
+It holds no boot code for a USB drive, so a byte copy gives a drive that most
+firmware refuses.
+That one difference is why Windows mode exists, and why a tool like Rufus
+exists at all.
 
 ---
 
-## Contributing
+## How Burnout chooses
 
-- [docs/milestones.md](docs/milestones.md) holds the work that is not built
-  yet, and the reason behind each decision that shapes it.
-- [CONTRIBUTING.md](CONTRIBUTING.md) says how to take part, and holds the rule
-  that no test writes to a real device.
-- [AGENTS.md](AGENTS.md) sets the rules for anybody who changes this
-  repository, human or agent.
-- [SECURITY.md](SECURITY.md) holds the threat model and how to report a
-  vulnerability privately.
-- [SUPPORT.md](SUPPORT.md) says where to ask a question.
-- [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to everybody who takes part.
+You do not tell it. It reads the first 512 bytes.
+
+```mermaid
+flowchart TD
+    A[the image file] --> B{a boot signature and a<br/>partition table in the first 512 bytes?}
+    B -- yes --> C([Raw mode<br/>copy the bytes])
+    B -- no --> D{sources/install.wim or<br/>sources/install.esd inside?}
+    D -- yes --> E([Windows mode<br/>build the installer])
+    D -- no --> F([stop, and say what it found])
+```
+
+`--mode raw|windows` overrides the result.
+It exists for the day the guess is wrong, and a normal person never types it.
+
+---
+
+## The layout that Windows mode writes
+
+```
+        +=================================================================+
+        |  MBR partition table                                            |
+        +===============================+=================================+
+        |  Partition 1                  |  Partition 2                    |
+        |  FAT32, about 1 GB            |  exFAT, the rest of the drive   |
+        |                               |                                 |
+        |  every boot file              |  sources/install.wim            |
+        |  bootmgr, efi/, boot.wim      |  or sources/install.esd         |
+        |  autounattend.xml             |  whole, and never split         |
+        +===============================+=================================+
+                    ^                                  ^
+                    |                                  |
+          UEFI firmware reads this.           Windows PE reads this,
+          It reads FAT only, so every         after it has started from
+          boot file lives here.               partition 1.
+```
+
+Three decisions hold this together, and [the milestones](docs/milestones.md)
+record the reason for each.
+
+- **exFAT, and not NTFS.** macOS mounts NTFS read only, so an NTFS partition
+  would give a Windows path that works on two hosts out of three.
+- **No file is ever split.** exFAT has no 4 GiB limit, so the install image
+  goes on whole. Burnout writes no WIM file, which is also why it stays MIT and
+  needs no wimlib.
+- **MBR, and not GPT.** Burnout writes the table itself, so the spare EFI
+  partition that `diskutil` adds on macOS never appears. It also leaves the
+  door open for Legacy BIOS boot later.
+
+---
+
+## The shape of the command
+
+> [!IMPORTANT]
+> None of this runs yet. This is the interface the plan commits to, and it is
+> here so that it can be argued with before it is built.
+
+A device path cannot be the same on three operating systems.
+`/dev/disk4`, `/dev/sdb` and `\\.\PhysicalDrive2` have nothing in common.
+So a device path is never the target.
+
+```bash
+burnout list
+```
+
+```
+  #  DRIVE                         SIZE      BUS     REMOVABLE
+  1  Samsung SSD 980 PRO           1.0 TB    NVMe    no   (system disk)
+  2  SanDisk Ultra                 32.0 GB   USB     yes
+  3  Generic MassStorage           7.4 GB    USB     yes
+```
+
+```bash
+burnout write ubuntu-24.04.iso 2
+burnout write Win11_24H2.iso 2 --skip-hardware-checks --local-account
+```
+
+Those commands are identical on all three hosts.
+`list` runs with no privilege, so you see your drives before you give a
+password.
+
+<details>
+<summary><b>What happens inside a Windows write</b></summary>
+
+```
+burnout write Win11_24H2.iso 2
+  -> reads the first 512 bytes, finds no hybrid table
+  -> finds sources/install.wim, and selects Windows mode
+  -> checks the privilege, and starts itself again through sudo if it must
+  -> names the target drive, and waits for you to confirm it
+  -> unmounts every volume on the drive
+  -> writes an MBR with two partitions
+  -> formats partition 1 as FAT32, and partition 2 as exFAT
+  -> copies every boot file to partition 1
+  -> copies the install image to partition 2, whole
+  -> writes autounattend.xml for the options that you asked for
+  -> reads each file back, and compares its hash
+  -> flushes, and reports what it verified
+```
+
+Burnout calls no tool of the host at any step above.
+It writes the partition table and both file systems itself, which is the only
+reason the steps are identical on three operating systems.
+
+</details>
+
+---
+
+## Safety
+
+> [!WARNING]
+> **Burnout erases the drive that you give it.**
+> The erased data goes nowhere, and no undo exists. A wrong target, a drive
+> that fails during the write, and a cable that comes loose all give the same
+> result, and none of them is recoverable. Keep a backup of anything you value.
+> Read [TERMS.md](TERMS.md) section 4 before you run it.
+
+What the code must never do, from
+[CONTRIBUTING.md](CONTRIBUTING.md):
+
+- Write to a device that the person did not select and confirm.
+- Write to the disk that the running system starts from.
+- Treat a fixed disk as a removable one.
+- Report a verification pass that it did not run.
+- Hide the target behind a default. The person names the target every time.
+
+**You supply the operating system.**
+Burnout downloads no operating system, hosts none, and gives you a licence for
+none.
+A Windows installation needs a licence from Microsoft.
+
+---
+
+## Project documents
+
+| Document | What it holds |
+| :-- | :-- |
+| [docs/milestones.md](docs/milestones.md) | Every decision, the reason for it, and the options that lost |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to take part, and the rule that no test opens a real device |
+| [AGENTS.md](AGENTS.md) | The rules for anybody who changes this repository, human or agent |
+| [SECURITY.md](SECURITY.md) | The threat model, and how to report a vulnerability privately |
+| [TERMS.md](TERMS.md) | What the tool does to your data, and what you agree to |
+| [SUPPORT.md](SUPPORT.md) | Where to ask a question |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | Applies to everybody who takes part |
+
+---
+
+## Two things to prove before any real code
+
+Nobody has run either of these.
+They carry the whole Windows path, and an afternoon answers both.
+
+1. **Windows PE reads exFAT.** It has held exFAT support since Windows 10, and
+   that is a claim from documentation and not a measurement.
+2. **Setup finds the install image across the partition boundary.** Test it
+   with the `InstallFrom` path in `autounattend.xml`, and without it.
+
+If exFAT fails there, the layout above changes, and a WIM splitter written in
+Rust comes back.
 
 ---
 
 ## Licence
 
 MIT. See [LICENSE](LICENSE) and [TERMS.md](TERMS.md).
+
+<div align="center">
+<sub>Burnout erases drives. Read the warning above before you run it.</sub>
+</div>
