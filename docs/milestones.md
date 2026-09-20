@@ -280,10 +280,30 @@ Three details in the restart:
 - Pass a list of arguments, and never a command string. There is then no
   quoting and no injection.
 
-Set `BURNOUT_ELEVATED=1` before the restart, and refuse to elevate a second
-time.
+Pass `--elevated` on the restart, and refuse to elevate a second time.
 Without that guard, any case where elevation appears to succeed while the
 user id stays wrong asks for a password forever.
+
+**The guard is an argument and not an environment variable.**
+`sudo` clears the environment. `env_reset` is the default in `sudoers`, so a
+variable set before the restart does not reach the second process, the guard
+never fires, and the case it exists for is the case it misses.
+Measured on Fedora Linux 44 with sudo 1.9.17p2:
+
+    $ BURNOUT_ELEVATED=1 sudo -- sh -c 'echo env=[$BURNOUT_ELEVATED] arg=[$1]' sh --elevated
+    env=[] arg=[--elevated]
+
+    $ echo outer=$(id -u); sudo -- id -u
+    outer=1000
+    0
+
+The variable is gone and the argument is there.
+`sudo -E` keeps the variable, and it is no answer: it works only where
+`sudoers` gives that user the `SETENV` tag, so it turns a guard into a thing
+that depends on somebody else's configuration.
+
+A local person who types `--elevated` by hand gets a refusal that says
+Burnout needs root. The flag opens nothing, which is why it can be one.
 
 Try `sudo` first, then `doas`.
 Do not use `pkexec`, which targets a desktop and changes the environment.
