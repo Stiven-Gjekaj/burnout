@@ -7,7 +7,7 @@
 
 use std::collections::BTreeSet;
 
-use burnout_core::{Bus, Connection, DriveId, DriveInfo};
+use burnout_core::{Bus, Connection, DriveId, DriveInfo, Result};
 
 use super::model::{RegistrySnapshot, Value};
 
@@ -41,6 +41,13 @@ pub fn connection_from_location(text: &str) -> Connection {
     }
 }
 
+/// Split a device number the way Darwin builds it.
+pub fn split_dev(dev: u64) -> (i64, i64) {
+    let major = ((dev >> 24) & 0xff) as i64;
+    let minor = (dev & 0xffffff) as i64;
+    (major, minor)
+}
+
 /// Find the media node that carries one device number.
 pub fn media_for_dev(snapshot: &RegistrySnapshot, major: i64, minor: i64) -> Option<usize> {
     snapshot.media.iter().copied().find(|index| {
@@ -50,10 +57,16 @@ pub fn media_for_dev(snapshot: &RegistrySnapshot, major: i64, minor: i64) -> Opt
     })
 }
 
-/// This is what resolves APFS. A system volume sits inside a container, and
-/// the container sits on one or more physical stores. Walking up from the
-/// volume reaches the real drives, and a container built from two stores
-/// reaches both of them.
+/// Every whole drive at or above one media node.
+///
+/// This is what resolves APFS. The chain from a system volume runs
+/// `disk3s1s1`, `AppleAPFSVolume`, `AppleAPFSMedia disk3`,
+/// `AppleAPFSContainerScheme`, `IOMedia disk0s2`, `IOGUIDPartitionScheme`,
+/// `IOMedia disk0`. Walking it reaches the real drive, and a container built
+/// on two stores reaches both of them.
+///
+/// `diskutil` would answer this in one call, and `diskutil` is the tool that
+/// the rules of this project forbid.
 pub fn whole_disks_above(snapshot: &RegistrySnapshot, index: usize) -> Vec<usize> {
     let mut found = Vec::new();
     if is_whole(snapshot, index) {
@@ -69,12 +82,19 @@ pub fn whole_disks_above(snapshot: &RegistrySnapshot, index: usize) -> Vec<usize
     found
 }
 
+/// Whether a node is a whole device rather than a partition.
+///
+/// The class is matched by its ending and not by its whole name.
+/// `IOServiceMatching("IOMedia")` returns the subclasses too, and the
+/// synthesised container of an APFS volume arrives as `AppleAPFSMedia`. A
+/// check for the exact name drops it, and then the drive that the running
+/// system starts from is not marked.
 fn is_whole(snapshot: &RegistrySnapshot, index: usize) -> bool {
     let node = match snapshot.nodes.get(index) {
         Some(n) => n,
         None => return false,
     };
-    node.class == "IOMedia" && node.get("Whole").and_then(Value::as_bool) == Some(true)
+    node.class.ends_with("Media") && node.get("Whole").and_then(Value::as_bool) == Some(true)
 }
 
 /// Build one drive from one whole media node.
@@ -150,6 +170,34 @@ pub fn drive_from_media(
     Some(info)
 }
 
+/// Every whole drive in one snapshot.
+pub fn list_drives(snapshot: &RegistrySnapshot, root_dev: Option<u64>) -> Result<Vec<DriveInfo>> {
+    let system = system_disks(snapshot, root_dev);
+    Ok(snapshot
+        .media
+        .iter()
+        .filter_map(|index| drive_from_media(snapshot, *index, &system))
+        .collect())
+}
+
+/// The drives that the running system starts from.
+pub fn system_disks(snapshot: &RegistrySnapshot, root_dev: Option<u64>) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let Some(dev) = root_dev else {
+        return out;
+    };
+    let (major, minor) = split_dev(dev);
+    let Some(media) = media_for_dev(snapshot, major, minor) else {
+        return out;
+    };
+    for whole in whole_disks_above(snapshot, media) {
+        if let Some(name) = snapshot.get(whole, "BSD Name").and_then(Value::as_text) {
+            out.insert(name.to_string());
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::model::Node;
@@ -194,6 +242,106 @@ mod tests {
             nodes: vec![controller, media],
             media: vec![1],
         }
+    }
+
+    /// An Apple silicon Mac: disk0 holds an APFS container that the system
+    /// volume lives in.
+    fn apple_silicon() -> RegistrySnapshot {
+        let controller = Node::new("IOBlockStorageDriver")
+            .with(
+                "Device Characteristics",
+                characteristics("Apple", "APPLE SSD AP1024Z"),
+            )
+            .with(
+                "Protocol Characteristics",
+                protocol("Apple Fabric", "Internal"),
+            );
+        let disk0 = Node::new("IOMedia")
+            .with("BSD Name", Value::Text("disk0".to_string()))
+            .with("Whole", Value::Bool(true))
+            .with("Size", Value::Int(994_662_584_320))
+            .with("Preferred Block Size", Value::Int(4096))
+            .under(0);
+        let scheme = Node::new("IOGUIDPartitionScheme").under(1);
+        let disk0s2 = Node::new("IOMedia")
+            .with("BSD Name", Value::Text("disk0s2".to_string()))
+            .with("Whole", Value::Bool(false))
+            .with("Size", Value::Int(994_000_000_000))
+            .under(2);
+        let container = Node::new("AppleAPFSContainerScheme").under(3);
+        let disk3 = Node::new("AppleAPFSMedia")
+            .with("BSD Name", Value::Text("disk3".to_string()))
+            .with("Whole", Value::Bool(true))
+            .with("Size", Value::Int(994_000_000_000))
+            .under(4);
+        let volume = Node::new("AppleAPFSVolume")
+            .with("BSD Name", Value::Text("disk3s1s1".to_string()))
+            .with("BSD Major", Value::Int(1))
+            .with("BSD Minor", Value::Int(14))
+            .with("Whole", Value::Bool(false))
+            .under(5);
+        RegistrySnapshot {
+            nodes: vec![controller, disk0, scheme, disk0s2, container, disk3, volume],
+            media: vec![1, 3, 5, 6],
+        }
+    }
+
+    #[test]
+    fn a_darwin_device_number_splits_into_a_major_and_a_minor() {
+        // major 1, minor 14
+        assert_eq!(split_dev((1 << 24) | 14), (1, 14));
+        assert_eq!(split_dev(0), (0, 0));
+    }
+
+    #[test]
+    fn the_system_volume_of_an_apple_silicon_mac_reaches_the_real_drive() {
+        // The volume is disk3s1s1, inside container disk3, on store disk0s2,
+        // on drive disk0. Marking disk3 alone would leave disk0 open.
+        let t = apple_silicon();
+        let got = system_disks(&t, Some((1 << 24) | 14));
+        assert!(
+            got.contains("disk0"),
+            "the physical drive must be marked, got {got:?}"
+        );
+    }
+
+    #[test]
+    fn the_apfs_container_is_marked_as_well_as_the_drive() {
+        let t = apple_silicon();
+        let got = system_disks(&t, Some((1 << 24) | 14));
+        assert!(got.contains("disk3"));
+    }
+
+    #[test]
+    fn a_root_device_that_matches_no_media_marks_nothing() {
+        let t = apple_silicon();
+        assert!(system_disks(&t, Some((99 << 24) | 99)).is_empty());
+    }
+
+    #[test]
+    fn no_root_device_at_all_marks_nothing_and_does_not_fail() {
+        let t = apple_silicon();
+        assert!(system_disks(&t, None).is_empty());
+    }
+
+    #[test]
+    fn a_partition_walks_up_to_exactly_one_whole_drive() {
+        let t = apple_silicon();
+        let wholes = whole_disks_above(&t, 3);
+        let names: Vec<&str> = wholes
+            .iter()
+            .filter_map(|i| t.get(*i, "BSD Name").and_then(Value::as_text))
+            .collect();
+        assert_eq!(names, ["disk0"]);
+    }
+
+    #[test]
+    fn the_list_marks_the_system_drive_and_leaves_the_others_alone() {
+        let t = apple_silicon();
+        let drives = list_drives(&t, Some((1 << 24) | 14)).unwrap();
+        let disk0 = drives.iter().find(|d| d.id.as_str() == "disk0").unwrap();
+        assert!(disk0.system);
+        assert_eq!(disk0.logical_sector_size, 4096);
     }
 
     #[test]
