@@ -1,8 +1,6 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Stiven-Gjekaj/burnout/main/assets/logo.svg" alt="Burnout" width="116">
-
-### Burnout
+<img src="https://raw.githubusercontent.com/Stiven-Gjekaj/burnout/main/assets/wordmark.svg" alt="Burnout" width="420">
 
 **Writes a bootable USB drive from the command line**
 
