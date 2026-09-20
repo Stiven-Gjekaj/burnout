@@ -13,6 +13,7 @@ mod file_target;
 mod listing;
 mod memory_target;
 mod progress;
+mod sha256;
 mod target;
 
 pub use alignment::{
@@ -24,4 +25,5 @@ pub use file_target::FileTarget;
 pub use listing::{by_index, in_list_order, natural_cmp, DriveList};
 pub use memory_target::MemoryTarget;
 pub use progress::{Progress, ProgressEvent, Silent, Stage};
+pub use sha256::{sha256, Digest, Sha256};
 pub use target::{BlockTarget, DriveAccess};
