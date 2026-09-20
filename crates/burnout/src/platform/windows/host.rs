@@ -20,6 +20,7 @@
 
 use std::collections::BTreeSet;
 use std::ffi::c_void;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
 use windows_sys::core::GUID;
@@ -29,17 +30,21 @@ use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
     DIGCF_PRESENT, HDEVINFO, SPDRP_FRIENDLYNAME, SPDRP_REMOVAL_POLICY, SP_DEVICE_INTERFACE_DATA,
     SP_DEVINFO_DATA,
 };
-use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+use windows_sys::Win32::Foundation::{
+    CloseHandle, ERROR_ACCESS_DENIED, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+};
 use windows_sys::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    CreateFileW, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose, FlushFileBuffers, ReadFile,
+    SetFilePointerEx, WriteFile, FILE_BEGIN, FILE_CURRENT, FILE_END, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows_sys::Win32::System::SystemInformation::GetWindowsDirectoryW;
 use windows_sys::Win32::System::IO::DeviceIoControl;
 
-use burnout_core::{DriveInfo, DriveList, Error, Result};
+use burnout_core::{BlockTarget, DriveAccess, DriveId, DriveInfo, DriveList, Error, Result};
 
 use super::parse;
-use super::raw::RawDisk;
+use super::raw::{RawDisk, RawVolume};
 
 /// `SetupDiGetClassDevsW` gives back an `isize` here, and not a pointer, so
 /// the invalid value is written out rather than taken from `HANDLE`.
@@ -383,3 +388,248 @@ fn system_disk_numbers() -> BTreeSet<u32> {
     }
     out
 }
+
+/// Opens the drives of a running Windows host.
+///
+/// **This needs Administrator**, and the rest of this file does not. A write
+/// handle and the two volume controls below are the reason.
+pub struct WindowsAccess;
+
+impl DriveAccess for WindowsAccess {
+    type Target = WindowsDisk;
+
+    fn unmount_volumes(&self, _id: &DriveId) -> Result<()> {
+        // Nothing here, and that is not an oversight.
+        //
+        // `FSCTL_LOCK_VOLUME` holds only while a handle holds it. A call that
+        // locked a volume and returned would have dropped the lock before the
+        // write began, and the file system would come back during the write.
+        // So `open` locks every volume and keeps the handles for as long as
+        // the drive is open.
+        Ok(())
+    }
+
+    fn open(&self, id: &DriveId) -> Result<WindowsDisk> {
+        let number: u32 = id.as_str().parse().map_err(|_| Error::NoSuchDrive {
+            wanted: id.as_str().to_string(),
+        })?;
+        let info = one_drive(id)?;
+
+        // Take the volumes first. A write to the disk under a mounted volume
+        // gives a file system that disagrees with the bytes beneath it.
+        let mut locks = Vec::new();
+        for path in parse::volumes_on_disk(&volumes(), number) {
+            locks.push(lock_volume(&path)?);
+        }
+
+        let handle = open_for_write(&wide(&format!(r"\\.\PhysicalDrive{number}")))?;
+        Ok(WindowsDisk {
+            handle,
+            _locks: locks,
+            sector_size: info.logical_sector_size,
+            length: info.size_bytes,
+        })
+    }
+}
+
+/// The description of one drive, out of the list that already works.
+fn one_drive(id: &DriveId) -> Result<DriveInfo> {
+    WindowsDrives
+        .drives()?
+        .into_iter()
+        .find(|d| d.id == *id)
+        .ok_or_else(|| Error::NoSuchDrive {
+            wanted: id.as_str().to_string(),
+        })
+}
+
+/// Every volume that the system has now, with the disks each one sits on.
+fn volumes() -> Vec<RawVolume> {
+    let mut out = Vec::new();
+    let mut name = [0u16; 260];
+    // SAFETY: the buffer and its length are given together.
+    let search = unsafe { FindFirstVolumeW(name.as_mut_ptr(), name.len() as u32) };
+    if search == INVALID_HANDLE_VALUE {
+        return out;
+    }
+    loop {
+        let text = from_wide(&name);
+        let extents = parse::volume_path_to_open(&text)
+            .map(|path| wide(&path))
+            .and_then(|path| open_for_query(&path))
+            .and_then(|handle| {
+                control(
+                    &handle,
+                    IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
+                    &[],
+                    8 + 24 * 16,
+                )
+            });
+        out.push(RawVolume {
+            guid_path: text,
+            extents,
+        });
+
+        // SAFETY: the search handle is live and the buffer carries its size.
+        let more = unsafe { FindNextVolumeW(search, name.as_mut_ptr(), name.len() as u32) };
+        if more == 0 {
+            break;
+        }
+    }
+    // SAFETY: the search handle is closed once, here.
+    unsafe { FindVolumeClose(search) };
+    out
+}
+
+/// Read a zero terminated wide string out of a fixed buffer.
+fn from_wide(buffer: &[u16]) -> String {
+    let end = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
+    std::ffi::OsString::from_wide(&buffer[..end])
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Take one volume away from the file system, and hold it.
+///
+/// The lock comes first and the dismount second. A dismount with no lock
+/// leaves the file system free to mount the volume again during the write.
+fn lock_volume(path: &str) -> Result<Handle> {
+    let handle = open_for_write(&wide(path))?;
+    if control(&handle, FSCTL_LOCK_VOLUME, &[], 0).is_none() {
+        return Err(Error::Host {
+            source: "FSCTL_LOCK_VOLUME".to_string(),
+            detail: format!("{path} is in use, so close what is reading it and try again"),
+        });
+    }
+    if control(&handle, FSCTL_DISMOUNT_VOLUME, &[], 0).is_none() {
+        return Err(Error::Host {
+            source: "FSCTL_DISMOUNT_VOLUME".to_string(),
+            detail: format!("{path} did not dismount"),
+        });
+    }
+    Ok(handle)
+}
+
+/// Open a device for a write.
+///
+/// This is the one call in this file that needs Administrator.
+fn open_for_write(path: &[u16]) -> Result<Handle> {
+    // SAFETY: the path is a zero terminated wide string.
+    let handle = unsafe {
+        CreateFileW(
+            path.as_ptr(),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if handle == INVALID_HANDLE_VALUE || handle.is_null() {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) {
+            return Err(Error::NeedsPrivilege {
+                remedy: "Start a Command Prompt or PowerShell with \"Run as administrator\", \
+                         and run the same command there."
+                    .to_string(),
+            });
+        }
+        return Err(Error::Io(error));
+    }
+    Ok(Handle(handle))
+}
+
+/// One open Windows disk, with the volumes of that disk locked.
+pub struct WindowsDisk {
+    handle: Handle,
+    /// The locks. They do nothing but exist, and the drive is writable for
+    /// exactly as long as they do.
+    _locks: Vec<Handle>,
+    sector_size: u32,
+    length: u64,
+}
+
+impl Read for WindowsDisk {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let mut read: u32 = 0;
+        // SAFETY: the buffer is owned here and its length is given.
+        let ok = unsafe {
+            ReadFile(
+                self.handle.0,
+                buf.as_mut_ptr(),
+                buf.len() as u32,
+                &mut read,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(read as usize)
+    }
+}
+
+impl Write for WindowsDisk {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut written: u32 = 0;
+        // SAFETY: the buffer is owned here and its length is given.
+        let ok = unsafe {
+            WriteFile(
+                self.handle.0,
+                buf.as_ptr(),
+                buf.len() as u32,
+                &mut written,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(written as usize)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        // SAFETY: the handle is live.
+        let ok = unsafe { FlushFileBuffers(self.handle.0) };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+impl Seek for WindowsDisk {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        let (method, distance) = match pos {
+            SeekFrom::Start(n) => (FILE_BEGIN, n as i64),
+            SeekFrom::End(n) => (FILE_END, n),
+            SeekFrom::Current(n) => (FILE_CURRENT, n),
+        };
+        let mut now: i64 = 0;
+        // SAFETY: the handle is live and the output is owned here.
+        let ok = unsafe { SetFilePointerEx(self.handle.0, distance, &mut now, method) };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(now as u64)
+    }
+}
+
+impl BlockTarget for WindowsDisk {
+    fn logical_sector_size(&self) -> u32 {
+        self.sector_size
+    }
+
+    fn length(&self) -> u64 {
+        self.length
+    }
+
+    fn sync(&mut self) -> Result<()> {
+        self.flush()?;
+        Ok(())
+    }
+}
+
+const FSCTL_LOCK_VOLUME: u32 = 0x0009_0018;
+const FSCTL_DISMOUNT_VOLUME: u32 = 0x0009_0020;
