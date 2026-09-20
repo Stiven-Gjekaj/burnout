@@ -178,11 +178,22 @@ pub fn bus_from_storage_bus_type(value: u8) -> Bus {
     }
 }
 
-/// A removal policy that means the person takes the drive off the desk.
+/// Whether the drive sits where a person can take it off the desk.
 ///
-/// 2 is surprise removal, and 3 is orderly removal. Both are external.
-fn removal_policy_is_external(policy: Option<u32>) -> bool {
-    matches!(policy, Some(2) | Some(3))
+/// The bus decides. `SPDRP_REMOVAL_POLICY` looks like the right answer and is
+/// not: NVMe supports hot plug, so a plain internal NVMe drive reports 2 or 3
+/// as readily as a memory stick does. A build of this code that trusted the
+/// policy called the system drive of a Windows runner removable, which is the
+/// wrong answer in the dangerous direction.
+///
+/// So the policy is read only when the bus says nothing at all.
+fn is_external(bus: Bus, policy: Option<u32>) -> bool {
+    match bus {
+        Bus::Usb | Bus::Sd | Bus::Mmc | Bus::FireWire | Bus::Thunderbolt => true,
+        // 2 is orderly removal and 3 is surprise removal.
+        Bus::Unknown => matches!(policy, Some(2) | Some(3)),
+        _ => false,
+    }
 }
 
 /// Build one drive from the answers about it.
@@ -223,9 +234,7 @@ pub fn drive_from_raw(raw: &RawDisk, system: &BTreeSet<u32>) -> Result<DriveInfo
         .map(|a| a.bytes_per_physical_sector)
         .filter(|s| *s > 0);
     info.bus = bus;
-    info.connection = if matches!(bus, Bus::Usb | Bus::Sd | Bus::Mmc)
-        || removal_policy_is_external(raw.removal_policy)
-    {
+    info.connection = if is_external(bus, raw.removal_policy) {
         burnout_core::Connection::External
     } else {
         burnout_core::Connection::Internal
@@ -411,6 +420,45 @@ mod tests {
             friendly_name: None,
             removal_policy: None,
         }
+    }
+
+    #[test]
+    fn an_internal_nvme_drive_that_allows_hot_plug_is_not_removable() {
+        // A Windows runner reports its own system drive this way: bus NVMe,
+        // removal policy 3. An earlier build trusted the policy and called
+        // the drive that the system starts from removable.
+        let mut disk = raw(
+            0,
+            "Virtual_Disk",
+            "NVME Premium",
+            false,
+            0x11,
+            161_061_273_600,
+        );
+        disk.removal_policy = Some(3);
+        let d = drive_from_raw(&disk, &BTreeSet::new()).unwrap();
+        assert_eq!(d.connection, burnout_core::Connection::Internal);
+        assert!(!d.removable(), "an internal NVMe drive is not removable");
+    }
+
+    #[test]
+    fn a_usb_drive_is_removable_whatever_the_policy_says() {
+        let mut disk = raw(1, "SanDisk", "Ultra", true, 0x07, 1024);
+        disk.removal_policy = Some(1);
+        assert!(drive_from_raw(&disk, &BTreeSet::new()).unwrap().removable());
+    }
+
+    #[test]
+    fn the_policy_is_read_only_when_the_bus_says_nothing() {
+        let mut unknown = raw(2, "Some", "Device", false, 0xFE, 1024);
+        unknown.removal_policy = Some(2);
+        assert!(drive_from_raw(&unknown, &BTreeSet::new())
+            .unwrap()
+            .removable());
+
+        let mut sata = raw(3, "Samsung", "870 EVO", false, 0x0B, 1024);
+        sata.removal_policy = Some(2);
+        assert!(!drive_from_raw(&sata, &BTreeSet::new()).unwrap().removable());
     }
 
     #[test]
