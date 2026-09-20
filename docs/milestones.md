@@ -224,9 +224,14 @@ Write only the entries that the person asks for, and leave the rest of Setup
 interactive.
 
 The path holds a drive letter that Windows PE assigns for itself, and a
-machine with another disk attached may number things differently.
-That is an open problem, and [the spike](spike-layout.md) names three ways
-out.
+machine with another disk attached numbers things differently.
+[The spike](spike-layout.md) measured that, and it closed it.
+A fixed letter fails with `0x80070490` as soon as a second disk exists, so the
+file carries a `RunSynchronous` search that finds the volume holding
+`sources\install.wim` and pins it to `W:` with `diskpart`, and the path then
+names `W:`.
+`diskpart` cannot select a volume by label, so the search is by content and
+not by name.
 
 Two options lost, and both for the same reason.
 

@@ -144,23 +144,67 @@ It is now also the file that makes the two-partition layout work at all.
 Burnout writes it on every Windows drive, whether or not anybody asks for an
 option.
 
-### The risk this opens
+### The risk this opened, and how it closes
 
-The path holds a drive letter, and Windows PE assigns letters itself.
-It chose `D:` here, with one disk and two partitions.
-A machine with another disk attached may number things differently, and then
-the path is wrong and Setup stops exactly as run 1 did.
+A second spike ran with a second disk attached, because a real PC has one.
+The disk was 20 GB with one exFAT partition labelled EXISTING, on NVMe, and
+the test drive stayed on USB.
 
-P6 needs an answer, and this spike does not have one. Three candidates:
+**The letters move.** `diskpart` in Windows PE reported:
 
-1. Give the exFAT partition a known label and find it by label rather than by
-   letter, if the unattend schema allows it.
-2. Put a `RunSynchronous` command before the install that finds the image and
-   fixes the path.
-3. Go back to a single FAT32 partition and split the WIM, which needs no path
-   at all. That is the fallback the roadmap already names.
+| Volume | Letter | Label | File system |
+| --- | --- | --- | --- |
+| 0 | **C** | EXISTING | exFAT |
+| 1 | **D** | BOOT | FAT32 |
+| 2 | **E** | INSTALL | exFAT |
 
----
+With one disk the install partition was `D:`. With two it is `E:`, and `D:` is
+now the boot partition.
+Setup failed at once with **`0x80070490`**, which is `ERROR_NOT_FOUND`: the
+path in the unattend pointed at a partition that holds no install image.
+
+**A fixed drive letter in the unattend file is unusable.** A drive built that
+way works on a bare test machine and fails on every real computer that has a
+disk in it.
+
+#### What does not work
+
+`diskpart` cannot select a volume by its label:
+
+    DISKPART> select volume=INSTALL
+    The arguments specified for this command are not valid.
+
+It takes a volume number or a drive letter, and both of those move.
+
+#### What does work
+
+`diskpart` reassigns a letter once a volume is selected by its current letter:
+
+    DISKPART> select volume=E
+    Volume 2 is the selected volume.
+    DISKPART> assign letter=W
+    DiskPart successfully assigned the drive letter or mount point.
+
+So the unattend file finds the volume by looking for the image on it, and then
+pins that volume to a letter Burnout chose:
+
+    cmd /c for %d in (C D E F G H I J K L M N O P Q R S T U V Y Z) do
+      @if exist %d:\sources\install.wim
+        ((echo select volume=%d&echo assign letter=W)>X:\bo.txt&diskpart /s X:\bo.txt)
+
+`<InstallFrom><Path>` then names `W:\sources\install.wim`, which is a letter
+that nothing else holds.
+The search cannot pick the boot partition by mistake, because the boot
+partition carries `sources\boot.wim` and not `sources\install.wim`.
+
+**Measured with the second disk attached:** Setup started with no error, took
+the language, keyboard and product key screens, and reached the licence terms
+with the edition already chosen out of the image.
+The hardware refusal screen did not appear either.
+
+**So the layout survives.** It needs three things in the unattend file, not
+one: the search that pins the letter, the `InstallFrom` path that uses it, and
+the `LabConfig` keys.
 
 ## The harness
 
