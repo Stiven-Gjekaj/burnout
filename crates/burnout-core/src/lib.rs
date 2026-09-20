@@ -8,6 +8,8 @@
 
 mod drive;
 mod error;
+mod listing;
 
 pub use drive::{Bus, Connection, DriveId, DriveInfo};
 pub use error::{Error, Result};
+pub use listing::{by_index, in_list_order, natural_cmp};
