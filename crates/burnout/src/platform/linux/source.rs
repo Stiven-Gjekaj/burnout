@@ -62,6 +62,14 @@ pub(crate) mod fake {
             self
         }
 
+        pub(crate) fn dir(mut self, path: &str, names: &[&str]) -> Self {
+            self.dirs.insert(
+                path.to_string(),
+                names.iter().map(|n| n.to_string()).collect(),
+            );
+            self
+        }
+
         pub(crate) fn link(mut self, path: &str, target: &str) -> Self {
             self.links.insert(path.to_string(), target.to_string());
             self

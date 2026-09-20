@@ -7,6 +7,8 @@
 //! crates do not exist on the other two, and one such name would delete two
 //! thirds of the tests without a word.
 
+use std::collections::BTreeSet;
+
 use burnout_core::{Bus, Connection, Error, Result};
 
 use super::source::{attribute, SysfsSource};
@@ -164,6 +166,189 @@ pub fn identity(
     (at("vendor"), model, at("serial"))
 }
 
+/// One line of `/proc/self/mountinfo`, reduced to what matters here.
+#[derive(Debug, PartialEq, Eq)]
+pub struct MountSource {
+    /// The major device number of the file system.
+    pub major: u32,
+    /// The minor device number.
+    pub minor: u32,
+    /// Where the file system is mounted.
+    pub mount_point: String,
+    /// What the file system was mounted from.
+    pub source: String,
+}
+
+/// Read `/proc/self/mountinfo`.
+///
+/// A line looks like this, and the optional fields between the mount options
+/// and the single dash are the reason the source cannot be counted from the
+/// front:
+///
+/// ```text
+/// 36 35 98:0 / /boot rw,noatime shared:1 - ext4 /dev/sda1 rw
+/// ```
+pub fn mountinfo_sources(text: &str) -> Vec<MountSource> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let Some(separator) = fields.iter().position(|f| *f == "-") else {
+            continue;
+        };
+        if fields.len() < separator + 3 || separator < 5 {
+            continue;
+        }
+        let Some((major, minor)) = fields[2].split_once(':') else {
+            continue;
+        };
+        let (Ok(major), Ok(minor)) = (major.parse(), minor.parse()) else {
+            continue;
+        };
+        out.push(MountSource {
+            major,
+            minor,
+            mount_point: fields[4].to_string(),
+            source: fields[separator + 2].to_string(),
+        });
+    }
+    out
+}
+
+/// Read the device names out of `/proc/swaps`.
+///
+/// A drive that holds the swap of the running system is not a drive that
+/// anybody should overwrite.
+pub fn swap_sources(text: &str) -> Vec<String> {
+    text.lines()
+        .skip(1)
+        .filter_map(|line| line.split_whitespace().next())
+        .filter(|name| name.starts_with("/dev/"))
+        .map(|name| name.to_string())
+        .collect()
+}
+
+/// The whole drive behind one device number.
+///
+/// `/sys/dev/block/<major>:<minor>` is a link into the device tree. The last
+/// name in it is the device. A partition carries a `partition` file, and then
+/// the drive is the name above it.
+pub fn disk_for_dev(fs: &dyn SysfsSource, major: u32, minor: u32) -> Option<String> {
+    let base = format!("/sys/dev/block/{major}:{minor}");
+    let target = fs.read_link(&base).ok()?;
+    let parts: Vec<&str> = target
+        .split('/')
+        .filter(|c| !c.is_empty() && *c != "." && *c != "..")
+        .collect();
+    if attribute(fs, &format!("{base}/partition")).is_some() {
+        // A partition. The drive is the directory above it.
+        parts
+            .len()
+            .checked_sub(2)
+            .and_then(|i| parts.get(i))
+            .map(|s| s.to_string())
+    } else {
+        parts.last().map(|s| s.to_string())
+    }
+}
+
+/// The real drives under one block device.
+///
+/// A device mapper or a RAID device is not a drive. It sits on other devices,
+/// and `slaves` names them. Root on an encrypted volume or on a mirror has to
+/// mark every drive under it, or Burnout offers to erase the disk that the
+/// running system starts from.
+pub fn base_disks(fs: &dyn SysfsSource, name: &str) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    walk_slaves(fs, name, &mut found, &mut seen);
+    found
+}
+
+fn walk_slaves(
+    fs: &dyn SysfsSource,
+    name: &str,
+    found: &mut BTreeSet<String>,
+    seen: &mut BTreeSet<String>,
+) {
+    // A cycle here would loop forever. The kernel makes none, and a test
+    // double can.
+    if !seen.insert(name.to_string()) {
+        return;
+    }
+    if is_drive_name(name) {
+        found.insert(name.to_string());
+        return;
+    }
+    if let Ok(slaves) = fs.read_dir(&format!("{BLOCK}/{name}/slaves")) {
+        for slave in slaves {
+            // A slave may be a partition, such as sda3 under dm-0. The drive
+            // is the name with the partition number taken off.
+            let disk = partition_to_disk(fs, &slave);
+            walk_slaves(fs, &disk, found, seen);
+        }
+    }
+}
+
+/// The drive that a partition belongs to.
+///
+/// `/sys/class/block/<partition>` links into the device tree, and the drive
+/// is the directory above the partition.
+fn partition_to_disk(fs: &dyn SysfsSource, name: &str) -> String {
+    let base = format!("/sys/class/block/{name}");
+    if attribute(fs, &format!("{base}/partition")).is_none() {
+        return name.to_string();
+    }
+    let Ok(target) = fs.read_link(&base) else {
+        return name.to_string();
+    };
+    let parts: Vec<&str> = target
+        .split('/')
+        .filter(|c| !c.is_empty() && *c != "." && *c != "..")
+        .collect();
+    parts
+        .len()
+        .checked_sub(2)
+        .and_then(|i| parts.get(i))
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| name.to_string())
+}
+
+/// Every drive that the running system needs.
+///
+/// This is deliberately a superset: the root, the boot directory, the EFI
+/// partition and the swap. Refusing one drive too many costs somebody a
+/// second of reading. Refusing one too few costs them the machine.
+pub fn system_disks(fs: &dyn SysfsSource, mountinfo: &str, swaps: &str) -> BTreeSet<String> {
+    const MARKED: [&str; 3] = ["/", "/boot", "/boot/efi"];
+    let mut out = BTreeSet::new();
+
+    for mount in mountinfo_sources(mountinfo) {
+        if !MARKED.contains(&mount.mount_point.as_str()) {
+            continue;
+        }
+        let name = if mount.major == 0 {
+            // The file system has no device number of its own. btrfs and
+            // overlay do this. The source path is the only route left.
+            mount.source.strip_prefix("/dev/").map(|n| n.to_string())
+        } else {
+            disk_for_dev(fs, mount.major, mount.minor)
+        };
+        if let Some(name) = name {
+            let name = partition_to_disk(fs, &name);
+            out.extend(base_disks(fs, &name));
+        }
+    }
+
+    for swap in swap_sources(swaps) {
+        if let Some(name) = swap.strip_prefix("/dev/") {
+            let name = partition_to_disk(fs, name);
+            out.extend(base_disks(fs, &name));
+        }
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::source::fake::MapSysfs;
@@ -215,6 +400,151 @@ mod tests {
             bus_from_device_path("../devices/platform/something/block/xyz0"),
             (Bus::Unknown, Connection::Unknown)
         );
+    }
+
+    // Lines captured by hand from a running machine.
+    const ROOT_ON_SDA2: &str =
+        "36 35 8:2 / / rw,relatime shared:1 - ext4 /dev/sda2 rw,errors=remount-ro";
+    const EFI_ON_SDA1: &str = "40 36 8:1 / /boot/efi rw,relatime shared:5 - vfat /dev/sda1 rw";
+
+    /// A drive, its partition, and the links that tie them together.
+    fn with_sata_disk(fs: MapSysfs) -> MapSysfs {
+        let tree = "../../devices/pci0000:00/0000:00:17.0/ata3/host2/target2:0:0/2:0:0:0/block/sda";
+        fs.link("/sys/dev/block/8:0", tree)
+            .link("/sys/dev/block/8:1", &format!("{tree}/sda1"))
+            .file("/sys/dev/block/8:1/partition", "1")
+            .link("/sys/dev/block/8:2", &format!("{tree}/sda2"))
+            .file("/sys/dev/block/8:2/partition", "2")
+            .link("/sys/class/block/sda1", &format!("{tree}/sda1"))
+            .file("/sys/class/block/sda1/partition", "1")
+            .link("/sys/class/block/sda2", &format!("{tree}/sda2"))
+            .file("/sys/class/block/sda2/partition", "2")
+            .link("/sys/class/block/sda3", &format!("{tree}/sda3"))
+            .file("/sys/class/block/sda3/partition", "3")
+    }
+
+    #[test]
+    fn a_mountinfo_line_gives_the_device_number_and_the_source() {
+        let got = mountinfo_sources(ROOT_ON_SDA2);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].major, 8);
+        assert_eq!(got[0].minor, 2);
+        assert_eq!(got[0].mount_point, "/");
+        assert_eq!(got[0].source, "/dev/sda2");
+    }
+
+    #[test]
+    fn the_optional_fields_do_not_move_the_source() {
+        // The count of fields between the options and the dash changes from
+        // line to line, so the source is found from the dash and not from
+        // the front.
+        let none = "36 35 8:2 / / rw - ext4 /dev/sda2 rw";
+        let two = "36 35 8:2 / / rw shared:1 master:2 - ext4 /dev/sda2 rw";
+        assert_eq!(mountinfo_sources(none)[0].source, "/dev/sda2");
+        assert_eq!(mountinfo_sources(two)[0].source, "/dev/sda2");
+    }
+
+    #[test]
+    fn a_line_with_no_dash_is_skipped_and_does_not_panic() {
+        assert!(mountinfo_sources("36 35 8:2 / / rw ext4 /dev/sda2").is_empty());
+        assert!(mountinfo_sources("").is_empty());
+        assert!(mountinfo_sources("nonsense").is_empty());
+    }
+
+    #[test]
+    fn the_swap_file_gives_its_devices_and_skips_the_header() {
+        let swaps = "Filename\t\t\t\tType\t\tSize\tUsed\tPriority\n\
+                     /dev/sda3                               partition\t8388604\t0\t-2\n";
+        assert_eq!(swap_sources(swaps), ["/dev/sda3"]);
+    }
+
+    #[test]
+    fn a_swap_in_a_file_is_not_a_device() {
+        let swaps = "Filename\tType\tSize\tUsed\tPriority\n/swapfile\tfile\t2097148\t0\t-2\n";
+        assert!(swap_sources(swaps).is_empty());
+    }
+
+    #[test]
+    fn a_partition_resolves_to_the_drive_above_it() {
+        let fs = with_sata_disk(MapSysfs::new());
+        assert_eq!(disk_for_dev(&fs, 8, 2).unwrap(), "sda");
+        assert_eq!(disk_for_dev(&fs, 8, 0).unwrap(), "sda");
+    }
+
+    #[test]
+    fn the_root_partition_marks_its_drive() {
+        let fs = with_sata_disk(MapSysfs::new());
+        assert_eq!(system_disks(&fs, ROOT_ON_SDA2, ""), set(&["sda"]));
+    }
+
+    #[test]
+    fn the_efi_partition_marks_its_drive_as_well() {
+        let fs = with_sata_disk(MapSysfs::new());
+        assert_eq!(system_disks(&fs, EFI_ON_SDA1, ""), set(&["sda"]));
+    }
+
+    #[test]
+    fn a_drive_that_holds_the_swap_is_a_system_drive() {
+        let fs = with_sata_disk(MapSysfs::new());
+        let swaps = "Filename\tType\tSize\tUsed\tPriority\n/dev/sda3\tpartition\t8388604\t0\t-2\n";
+        assert_eq!(system_disks(&fs, "", swaps), set(&["sda"]));
+    }
+
+    #[test]
+    fn root_on_an_encrypted_volume_marks_the_drive_under_it() {
+        // /dev/mapper/root is dm-0, which sits on sda3. Marking dm-0 alone
+        // would leave sda open to be erased.
+        let fs = with_sata_disk(MapSysfs::new())
+            .link("/sys/dev/block/254:0", "../../devices/virtual/block/dm-0")
+            .dir("/sys/block/dm-0/slaves", &["sda3"]);
+        let line = "36 35 254:0 / / rw,relatime shared:1 - ext4 /dev/mapper/root rw";
+        assert_eq!(system_disks(&fs, line, ""), set(&["sda"]));
+    }
+
+    #[test]
+    fn root_on_a_mirror_marks_every_drive_in_it() {
+        let tree_b =
+            "../../devices/pci0000:00/0000:00:17.0/ata4/host3/target3:0:0/3:0:0:0/block/sdb";
+        let fs = with_sata_disk(MapSysfs::new())
+            .link("/sys/dev/block/9:0", "../../devices/virtual/block/md0")
+            .dir("/sys/block/md0/slaves", &["sda1", "sdb1"])
+            .link("/sys/class/block/sdb1", &format!("{tree_b}/sdb1"))
+            .file("/sys/class/block/sdb1/partition", "1");
+        let line = "36 35 9:0 / / rw,relatime shared:1 - ext4 /dev/md0 rw";
+        assert_eq!(system_disks(&fs, line, ""), set(&["sda", "sdb"]));
+    }
+
+    #[test]
+    fn root_on_btrfs_is_found_through_the_source_path() {
+        // btrfs gives the file system a device number of its own, with a
+        // major of zero, so /sys/dev/block holds nothing for it.
+        let fs = with_sata_disk(MapSysfs::new());
+        let line = "36 35 0:35 / / rw,relatime shared:1 - btrfs /dev/sda2 rw,subvol=/@";
+        assert_eq!(system_disks(&fs, line, ""), set(&["sda"]));
+    }
+
+    #[test]
+    fn root_on_an_overlay_marks_no_drive_and_does_not_fail() {
+        // This is a container. The honest answer is that there is no system
+        // drive here. The command that writes a drive then refuses every
+        // fixed disk, because it cannot prove which one is safe.
+        let fs = with_sata_disk(MapSysfs::new());
+        let line = "36 35 0:42 / / rw,relatime - overlay overlay rw,lowerdir=/a,upperdir=/b";
+        assert!(system_disks(&fs, line, "").is_empty());
+    }
+
+    #[test]
+    fn a_ring_of_slaves_does_not_loop_forever() {
+        // The kernel makes no such ring. A test double can, and a walk with
+        // no guard would never return.
+        let fs = MapSysfs::new()
+            .dir("/sys/block/dm-0/slaves", &["dm-1"])
+            .dir("/sys/block/dm-1/slaves", &["dm-0"]);
+        assert!(base_disks(&fs, "dm-0").is_empty());
+    }
+
+    fn set(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| n.to_string()).collect()
     }
 
     #[test]
