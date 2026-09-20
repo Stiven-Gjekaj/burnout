@@ -13,6 +13,7 @@ mod file_target;
 mod listing;
 mod memory_target;
 mod progress;
+mod safety;
 mod sha256;
 mod target;
 
@@ -25,5 +26,8 @@ pub use file_target::FileTarget;
 pub use listing::{by_index, in_list_order, natural_cmp, DriveList};
 pub use memory_target::MemoryTarget;
 pub use progress::{Progress, ProgressEvent, Silent, Stage};
+pub use safety::{
+    check_fits, check_same_drive, check_target, describe, force_phrase, phrase_matches, Force,
+};
 pub use sha256::{sha256, Digest, Sha256};
 pub use target::{BlockTarget, DriveAccess};
