@@ -114,22 +114,43 @@ pub fn restart_arguments(program: &str, exe: &str, arguments: &[String]) -> Vec<
     out
 }
 
-/// Whether this process can already write a raw device.
+/// Whether this process can already write one drive.
+///
+/// This asks the drive and not the user id. Root is the usual way to hold
+/// that permission and it is not the only one: a member of the `disk` group
+/// on Linux holds it, and on macOS so does the person who attached a disk
+/// image. Asking the drive means Burnout asks for a password when it needs
+/// one and not every time.
+///
+/// The probe opens for a write and writes nothing. Only a refusal about
+/// permission counts as no: a drive that answers `busy` is one this process
+/// may write once the volumes are unmounted, and a password would not help.
 #[cfg(unix)]
-pub fn privileged() -> bool {
+pub fn can_write(node: &str) -> bool {
     // SAFETY: geteuid reads one number out of the process and touches
     // nothing.
-    unsafe { libc::geteuid() == 0 }
+    if unsafe { libc::geteuid() == 0 } {
+        return true;
+    }
+    match std::fs::OpenOptions::new().write(true).open(node) {
+        Ok(_) => true,
+        Err(e) => e.kind() != std::io::ErrorKind::PermissionDenied,
+    }
 }
 
-/// Whether this process can already write a raw device.
+/// Whether this process can already write one drive.
 ///
-/// Windows answers this by opening the drive. A token can say elevated while
-/// the device still refuses, so the open is the only honest answer and it
-/// happens where the drive is opened.
+/// Windows answers by opening the drive, in the same way. A token can say
+/// elevated while the device still refuses, so the open is the only honest
+/// answer.
 #[cfg(not(unix))]
-pub fn privileged() -> bool {
-    false
+pub fn can_write(node: &str) -> bool {
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = std::ffi::OsStr::new(node)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    crate::platform::windows::host::can_open_for_write(&wide)
 }
 
 /// Start this process again through `sudo`, and never come back.

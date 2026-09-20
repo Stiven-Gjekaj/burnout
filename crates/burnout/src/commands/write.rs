@@ -53,7 +53,7 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
     check_fits(image_bytes, chosen.size_bytes)?;
 
     let state = State {
-        privileged: elevate::privileged(),
+        privileged: elevate::can_write(&chosen.node),
         already_elevated: elevated,
         no_elevate: args.no_elevate,
         interactive: std::io::stdin().is_terminal(),

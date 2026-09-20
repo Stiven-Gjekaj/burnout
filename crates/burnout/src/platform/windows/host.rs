@@ -633,3 +633,12 @@ impl BlockTarget for WindowsDisk {
 
 const FSCTL_LOCK_VOLUME: u32 = 0x0009_0018;
 const FSCTL_DISMOUNT_VOLUME: u32 = 0x0009_0020;
+
+/// Whether this process may open one device for a write.
+///
+/// The handle is closed at once and nothing is written. This is how the
+/// command line finds out that it needs Administrator, and a token that says
+/// elevated is not the same answer: the device is the one that decides.
+pub fn can_open_for_write(path: &[u16]) -> bool {
+    !matches!(open_for_write(path), Err(Error::NeedsPrivilege { .. }))
+}
