@@ -12,7 +12,8 @@ Do not start a phase until the phase it depends on passes its exit test.
 The sizes are relative: S is a day or two, M is a week, L is longer, and XL is
 the one that needs a plan of its own.
 
-Nothing here is built.
+P0 and P1 are done. `burnout list` runs on all three hosts.
+Nothing writes a drive yet, so nothing can erase one yet.
 
 ---
 
@@ -50,7 +51,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | | Phase | Size | Release |
 | --- | --- | --- | --- |
 | P0 | Prove the layout | S | **done** |
-| P1 | The skeleton and the device layer | L | |
+| P1 | The skeleton and the device layer | L | **done** |
 | P2 | Raw mode | M | **v0.1** |
 | P3 | The partition table and FAT32 | M | |
 | P4 | The exFAT writer | XL | **v0.2** |
@@ -101,7 +102,11 @@ Better to learn it in an afternoon than in month three.
 
 ## P1. The skeleton and the device layer
 
-**Size L. Depends on nothing.**
+**Size L. Done.**
+
+`burnout list` names every drive on Windows, on macOS and on Linux, gives the
+size to the byte, and marks the drive that the running system starts from. It
+needs no privilege. `burnout-core` carries no dependency at all.
 
 The five operations that the operating system owns, and nothing above them.
 

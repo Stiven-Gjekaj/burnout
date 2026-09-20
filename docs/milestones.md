@@ -4,7 +4,8 @@
 
 # Milestones
 
-Nothing is built yet.
+`burnout list` is built, on all three hosts. Nothing writes a drive yet.
+[The roadmap](roadmap.md) says which phase is done and what comes next.
 This file holds the decisions that shape the work, and the reason behind each
 one.
 It also holds the options that lost, because the reason a choice lost is the

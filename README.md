@@ -12,8 +12,8 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 ![Linux](https://img.shields.io/badge/linux-facc15?style=for-the-badge&logo=linux&logoColor=0c0706)
 [![MIT licence](https://img.shields.io/badge/mit_licence-fde68a?style=for-the-badge&logoColor=0c0706)](LICENSE)
 
-![Planning](https://img.shields.io/badge/status-planning-dc2626?style=flat-square&labelColor=0c0706)
-![No code yet](https://img.shields.io/badge/code-none_yet-78350f?style=flat-square&labelColor=0c0706)
+![Phase](https://img.shields.io/badge/phase-P1_done-f97316?style=flat-square&labelColor=0c0706)
+![No release](https://img.shields.io/badge/release-none_yet-78350f?style=flat-square&labelColor=0c0706)
 
 <p align="center">
   <a href="#overview"><b>Overview</b></a> |
@@ -29,11 +29,13 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 ---
 
 > [!NOTE]
-> **Nothing is built yet.** This repository holds the rules, the licence and the
-> plan, and no code. The toolchain is Rust. There is no release, so there is
-> nothing to install.
-> [docs/milestones.md](docs/milestones.md) holds every decision, the reason
-> behind it, and the options that lost.
+> **`burnout list` is built. Nothing writes a drive yet.**
+> The list runs on Windows, on macOS and on Linux, it needs no privilege, and
+> it marks the drive that the running system starts from. There is no release,
+> so build it from the source.
+> [docs/roadmap.md](docs/roadmap.md) says what comes next, and
+> [docs/milestones.md](docs/milestones.md) holds every decision and the reason
+> behind it.
 
 ---
 
