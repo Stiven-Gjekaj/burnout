@@ -149,4 +149,55 @@ So UEFI firmware starts a FAT32 partition 1 on an MBR drive, which is the
 first half of the layout.
 The Windows boot manager then loads `boot.wim`.
 
-**This result is not in yet.**
+### Where it stopped
+
+**Question 2 is not answered, and the emulator is the reason.**
+
+With `max` and the q35 machine, Windows PE loads `boot.wim` and starts the
+kernel. It then stops. The instruction pointer oscillates between two
+addresses 22 bytes apart, in one address space, with no disk read and no
+repaint:
+
+    RIP=fffff800a81449b2  <-> fffff800a814499c   (2 distinct values in 10 samples)
+    RIP=fffff804dff449b2  <-> fffff804dff4499c   (a later boot, 2 in 8 samples)
+
+The base address moves between boots because the kernel is relocated, and the
+low digits do not, so both boots stop at **the same instruction in the same
+function**. That is a deterministic hang and not a slow one.
+
+Neither knob helped:
+
+| Change | Result |
+| --- | --- |
+| 2 processors to 1 | The same two addresses. Not a multiprocessor start. |
+| q35 to i440FX | Worse. 12,800 bytes read, and RIP stays in firmware. |
+
+The layout is not the cause.
+The firmware starts partition 1, the boot manager reads `boot.wim` once and
+whole, and the kernel runs.
+What fails is emulating a current Windows kernel on this host, and that is a
+property of the emulator.
+
+### What this spike did prove
+
+- Windows PE carries the exFAT driver and registers it exactly as it registers
+  NTFS. Question 1 is closed.
+- UEFI firmware starts a FAT32 partition 1 on an **MBR** disk presented as a
+  **USB** drive. The first half of the layout boots.
+- `install.wim` in a current image is 7.06 GiB, and the image is UDF.
+
+### How to finish it
+
+Two ways, and both answer the same question.
+
+1. **Real hardware.** Write this layout to a real USB drive and start a PC.
+   It is the definitive test, it is needed before trusting the design, and it
+   takes minutes rather than hours.
+2. **An ARM64 Windows 11 image.** The host is Apple silicon, so an ARM64 guest
+   runs native and needs no emulation. Setup decides where to find its image
+   in code that does not depend on the processor, so the answer carries over.
+   It needs a download that nobody has made yet.
+
+Until one of these runs, treat the `InstallFrom` path in `autounattend.xml` as
+required rather than as insurance, because that is the assumption that cannot
+be wrong.
