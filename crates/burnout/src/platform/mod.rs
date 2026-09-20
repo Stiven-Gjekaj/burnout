@@ -14,6 +14,7 @@ use burnout_core::{DriveList, Result};
 
 pub mod linux;
 pub mod macos;
+pub mod windows;
 
 /// The drive list of the host that this build runs on.
 ///
