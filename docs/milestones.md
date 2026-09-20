@@ -100,6 +100,51 @@ choice for the person.
 
 ---
 
+## macOS install media is a non-goal
+
+Linux and BSD ship a hybrid ISO, which is already a bootable disk image.
+macOS is a third category, and it fits neither mode.
+Burnout does not make a macOS installer, and it is not a thing to add later.
+
+**Apple ships no ISO.**
+You get `Install macOS <name>.app` from the App Store, or an
+`InstallAssistant.pkg`.
+Neither one is a disk image.
+
+**A `.dmg` file is usually not a raw image.**
+Apple compresses them, so a byte for byte copy gives a drive that starts
+nothing.
+An uncompressed read and write dmg is a real raw image, and raw mode writes one
+like any other.
+
+**The supported path is `createinstallmedia`.**
+It is a closed binary inside the `.app`, it runs on macOS only, and it needs
+root.
+A call to it breaks the rule at the top of this file, and it does not exist on
+Windows or on Linux, so the promise of one process on three hosts ends there.
+
+**The file system is HFS+ or APFS.**
+APFS has no complete public specification.
+That is a different order of work from the exFAT writer, and it is not work
+this project takes on.
+
+**Apple silicon adds boot rules of its own**, and no tool can make media for a
+Mac that is newer than the installer.
+
+### What the code does instead
+
+Detect the input and refuse with a sentence that helps.
+
+- An `.app` bundle, an `InstallAssistant.pkg`, or a compressed dmg: stop, say
+  that Burnout does not make macOS install media, and name
+  `createinstallmedia`.
+- An uncompressed raw dmg: treat it as any other raw image.
+
+A clear refusal costs one message.
+A drive that starts nothing costs an hour, and the person does not know why.
+
+---
+
 ## The layout that Windows mode writes
 
 One MBR partition table, and two partitions.
@@ -317,6 +362,7 @@ down what happened.
 | Windows mode, UEFI boot | Windows To Go |
 | The mode chosen from the image | A write to one partition |
 | `list` and `write` | A drive that holds many images |
+| Refusing a macOS installer clearly | macOS install media, ever |
 | The `autounattend.xml` options | A graphical interface |
 | Verification, named per mode | |
 | Elevation on all three hosts | |
@@ -329,6 +375,9 @@ The MBR layout above means it fits later with no change to anything.
 **Windows To Go waits.**
 It applies an image to a disk instead of copying an installer, so it is a
 third write mode and not an option on the second one.
+
+**macOS install media does not wait.**
+It is a non-goal, and the section above says why.
 
 ---
 
