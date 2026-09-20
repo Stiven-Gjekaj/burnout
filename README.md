@@ -121,13 +121,19 @@ exists at all.
 You do not tell it. It reads the first 512 bytes.
 
 ```mermaid
-flowchart TD
-    A[the image file] --> B{a boot signature and a<br/>partition table in the first 512 bytes?}
-    B -- yes --> C([Raw mode<br/>copy the bytes])
-    B -- no --> D{sources/install.wim or<br/>sources/install.esd inside?}
-    D -- yes --> E([Windows mode<br/>build the installer])
-    D -- no --> F([stop, and say what it found])
+flowchart LR
+    A[the image] --> B{hybrid boot<br/>table?}
+    B -- yes --> C([Raw mode])
+    B -- no --> D{install.wim<br/>inside?}
+    D -- yes --> E([Windows mode])
+    D -- no --> F([stop])
 ```
+
+A boot signature and a partition table in those 512 bytes mean a hybrid image,
+so Burnout copies the bytes.
+Without them, it looks inside for `sources/install.wim` or
+`sources/install.esd` and builds the installer.
+If it finds neither, it stops and says what it found.
 
 `--mode raw|windows` overrides the result.
 It exists for the day the guess is wrong, and a normal person never types it.
