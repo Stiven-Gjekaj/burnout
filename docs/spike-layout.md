@@ -202,9 +202,26 @@ the language, keyboard and product key screens, and reached the licence terms
 with the edition already chosen out of the image.
 The hardware refusal screen did not appear either.
 
-**So the layout survives.** It needs three things in the unattend file, not
-one: the search that pins the letter, the `InstallFrom` path that uses it, and
-the `LabConfig` keys.
+#### The page that still stops an unattended install
+
+A later run installed Windows from end to end with no hand on the keyboard,
+and it stopped once, on the product key page.
+
+`<UserData>` carried `AcceptEula`, a name and an organisation, and no key. A
+missing `ProductKey` element is not the same as an empty one: Setup asks. The
+page went away when the element was there and held nothing:
+
+    <UserData>
+      <ProductKey><Key></Key></ProductKey>
+      <AcceptEula>true</AcceptEula>
+    </UserData>
+
+An empty key is correct here, because the edition comes from the
+`/IMAGE/INDEX` value and the licence comes from the machine.
+
+**So the layout survives.** It needs four things in the unattend file, not
+one: the search that pins the letter, the `InstallFrom` path that uses it, the
+`LabConfig` keys, and the empty product key.
 
 ## The harness
 
