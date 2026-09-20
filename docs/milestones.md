@@ -207,11 +207,26 @@ want:
 - **Skip the Microsoft account.** A local account in `<UserAccounts>`.
   WinDiskWriterX lists this as a thing it does not do.
 - **Name the install source.** `<ImageInstall><OSImage><InstallFrom>` points
-  Setup at the image on partition 2.
+  Setup at the image on partition 2. **This one is not optional.**
 
-Keep the file small.
+**Burnout writes this file on every Windows drive, whether anybody asks for an
+option or not.**
+[The spike](spike-layout.md) measured why.
+Windows PE mounts the exFAT partition and reads it, and Setup still does not
+look there, because Setup looks beside `setup.exe`.
+With no `InstallFrom` path, Setup stops and says that a media driver is
+missing.
+So the file that carries the options is also the file that makes the layout
+work at all.
+
+Keep the rest of it small.
 Write only the entries that the person asks for, and leave the rest of Setup
 interactive.
+
+The path holds a drive letter that Windows PE assigns for itself, and a
+machine with another disk attached may number things differently.
+That is an open problem, and [the spike](spike-layout.md) names three ways
+out.
 
 Two options lost, and both for the same reason.
 
@@ -333,24 +348,17 @@ it did not run in scope, so the report must name the check it performed.
 
 ---
 
-## Validate these two things first
+## Both of these are now measured
 
-Neither is tested.
-Both carry the Windows path, and an afternoon answers both.
+[The spike](spike-layout.md) answered them on a running Windows 11 Setup.
 
-1. **Windows PE reads exFAT.**
-   Windows PE has held exFAT support since Windows 10, and nobody here has
-   run it.
-   If this fails, the fallback is FAT32 on both partitions and a WIM splitter
-   written in Rust.
-   That keeps the MIT licence, and it does not solve an oversized
-   `install.esd`.
-2. **Setup finds the install image across the partition boundary.**
-   Test with the `InstallFrom` path in `autounattend.xml`, and without it.
-   The answer says whether the path is a requirement or an insurance.
+1. **Windows PE reads exFAT.** It mounted the exFAT partition as `D:` and
+   walked its directory tree. The layout stands, and no file is split.
+2. **Setup does not find the image across the partition boundary.** The
+   `InstallFrom` path is a requirement, not an insurance.
 
-Build the layout by hand, start it on real firmware in UEFI mode, and write
-down what happened.
+The `LabConfig` keys were measured at the same time, and they work: the screen
+that refuses a machine with no TPM 2.0 never appears.
 
 ---
 
