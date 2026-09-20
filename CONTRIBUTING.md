@@ -10,11 +10,15 @@ Contributions of all kinds are welcome: bug reports, documentation fixes, new
 image formats, hardware reports, and arguments against a decision that is
 already made.
 
-Burnout is in the planning stage.
-The toolchain is Rust, and no code exists yet, so this guide names no build
-command.
-It names the rules that hold when the code arrives.
-The [README](README.md) says what the current state is.
+The toolchain is Rust, and it needs nothing else.
+
+    cargo fmt --all --check
+    cargo clippy --workspace --all-targets -- -D warnings
+    cargo test --workspace
+    cargo run -p burnout -- list
+
+Those four are the gate, and they run on Windows, on macOS and on Linux.
+The [README](README.md) says what is built so far.
 
 ## Ways to contribute
 
