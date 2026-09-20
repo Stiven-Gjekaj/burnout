@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::time::{Duration, Instant};
 
@@ -395,10 +396,26 @@ impl BlockTarget for MacosDisk {
 
     fn sync(&mut self) -> Result<()> {
         self.file.flush()?;
-        self.file.sync_all()?;
+        // `fsync` on the raw node answers ENOTTY, because the raw node has no
+        // buffer of the operating system to empty. The drive still has one of
+        // its own, and this is the call that empties that.
+        //
+        // SAFETY: the descriptor is open for the length of this call, and the
+        // control takes no argument.
+        let code = unsafe { libc::ioctl(self.file.as_raw_fd(), DKIOCSYNCHRONIZECACHE) };
+        if code != 0 {
+            return Err(Error::Io(io::Error::last_os_error()));
+        }
         Ok(())
     }
 }
+
+/// `DKIOCSYNCHRONIZECACHE`, which tells the drive to put its own cache on the
+/// medium.
+///
+/// `_IO('d', 22)` out of `<sys/disk.h>`, written out because `libc` does not
+/// carry it.
+const DKIOCSYNCHRONIZECACHE: libc::c_ulong = 0x2000_6416;
 
 /// `kDADiskUnmountOptionWhole`, which takes every volume of the disk.
 const UNMOUNT_WHOLE: u32 = 0x0000_0001;
