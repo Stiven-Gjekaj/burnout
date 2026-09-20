@@ -149,8 +149,11 @@ The work:
   flush returns. A byte count that reached the size of the source is not a
   finished write, because the operating system still holds a cache.
 - Verify: read the device back and compare a hash against the source.
-- The confirmation prompt, and the refusals: no system disk, no fixed disk
-  unless forced, and no target that the person did not name.
+- The confirmation prompt, and the refusals: no system disk ever, no fixed
+  disk unless forced, and no target that the person did not name.
+- `--force` for a fixed disk. The person types the model and the size of the
+  drive back, and not a letter and not the word yes. A prompt that takes one
+  keystroke is one that people learn to answer without reading.
 - Elevation. Restart through `sudo`, with the `BURNOUT_ELEVATED` guard against
   an endless loop. On Windows, print how to fix it and stop.
 - `--no-elevate`, and no elevation attempt when the input is not a terminal.
@@ -222,13 +225,16 @@ filesystem itself: a mount through the host is three different behaviours.
 A Windows ISO is UDF, not ISO 9660.
 ISO 9660 stores an extent length in 32 bits, so it cannot hold a file of 4 GiB
 or more, and a current `install.wim` is exactly that.
-So reading a Windows ISO needs a UDF reader, not only an ISO 9660 reader.
-See [the open questions](#open-questions) below.
+[The spike](spike-layout.md) measured both.
+So reading a Windows ISO needs a UDF reader, and Burnout writes one.
 
 The work:
 
 - ISO 9660, with Joliet and Rock Ridge, for a Linux ISO.
-- UDF, enough to walk the directory tree and read a file, for a Windows ISO.
+- **UDF, read only**: the anchor descriptor, the logical volume and partition
+  descriptors, the file set, file entries, directory descriptors, and plain
+  extents. No compression, no encryption, no write path. This is decided, and
+  the reason is below.
 - Detect the mode from the first 512 bytes and from what is inside.
 - Refuse a macOS installer by name, and say `createinstallmedia`.
 
@@ -273,7 +279,10 @@ The work that turns a program that works into one somebody else can use.
 - `--json` for the list and for progress, so a script can read it.
 - Resume nothing and promise nothing about a stopped write. Say that the drive
   is now unusable, because it is.
-- Signed release binaries for the three hosts.
+- **Build provenance on every release artifact**, through
+  `actions/attest-build-provenance`, plus a SHA256 for each one. No code
+  signing certificate.
+- The macOS and Windows download warning, and the way past it, in the README.
 - `install.esd` alongside `install.wim` everywhere.
 - The README stops saying that nothing is built.
 
