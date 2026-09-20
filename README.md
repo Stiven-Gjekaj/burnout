@@ -12,7 +12,7 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 ![Linux](https://img.shields.io/badge/linux-facc15?style=for-the-badge&logo=linux&logoColor=0c0706)
 [![MIT licence](https://img.shields.io/badge/mit_licence-fde68a?style=for-the-badge&logoColor=0c0706)](LICENSE)
 
-![Phase](https://img.shields.io/badge/phase-P1_done-f97316?style=flat-square&labelColor=0c0706)
+![Phase](https://img.shields.io/badge/phase-P2_done-f97316?style=flat-square&labelColor=0c0706)
 ![No release](https://img.shields.io/badge/release-none_yet-78350f?style=flat-square&labelColor=0c0706)
 
 <p align="center">
@@ -29,12 +29,13 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 ---
 
 > [!NOTE]
-> **`burnout list` is built. Nothing writes a drive yet.**
-> The list runs on Windows, on macOS and on Linux, it needs no privilege, and
-> it marks the drive that the running system starts from. There is no release,
-> so build it from the source. The no-privilege claim is measured on a
-> standard Windows account and on a 4096-byte-sector drive, and
-> [docs/roadmap.md](docs/roadmap.md) holds the numbers.
+> **Raw mode is built. Windows mode is not.**
+> `burnout list` and `burnout write` run on Windows, on macOS and on Linux.
+> `write` copies a hybrid image to a drive, flushes it, reads it back and
+> compares a hash. A Windows ISO needs Windows mode, which is phase P6.
+> There is no release, so build it from the source.
+> [docs/roadmap.md](docs/roadmap.md) holds the measurements behind both
+> claims.
 > [docs/roadmap.md](docs/roadmap.md) says what comes next, and
 > [docs/milestones.md](docs/milestones.md) holds every decision and the reason
 > behind it.
@@ -184,8 +185,8 @@ record the reason for each.
 ## The shape of the command
 
 > [!IMPORTANT]
-> None of this runs yet. This is the interface the plan commits to, and it is
-> here so that it can be argued with before it is built.
+> `list` and `write` run. The Windows options below do not, because Windows
+> mode is phase P6.
 
 A device path cannot be the same on three operating systems.
 `/dev/disk4`, `/dev/sdb` and `\\.\PhysicalDrive2` have nothing in common.
@@ -207,12 +208,45 @@ A drive is sold in powers of ten, so the rounded figure uses them too.
 
 ```bash
 burnout write ubuntu-24.04.iso 2
-burnout write Win11_24H2.iso 2 --skip-hardware-checks --local-account
 ```
 
-Those commands are identical on all three hosts.
+That command is identical on all three hosts.
+
 `list` runs with no privilege, so you see your drives before you give a
-password.
+password. `write` asks for one only when the drive itself refuses the write,
+and it asks through `sudo` and never reads a password itself. On Windows it
+says to open a shell as Administrator, because a second console window that
+closes at the end is worse than a clean refusal.
+
+It names the drive, the size to the byte and the serial, and waits.
+
+```
+This erases the drive. Nothing undoes it.
+
+    image   ubuntu-24.04.iso
+            2.1 GB (2,109,796,352 bytes)
+    drive   SanDisk Ultra
+            62.5 GB (62,521,344,000 bytes)
+            /dev/rdisk4 USB removable
+            serial 4C530001260305117454
+
+The image carries a boot table in its first sector.
+
+Type yes to go on:
+>
+```
+
+A drive that Burnout cannot prove is removable needs `--force`, and then the
+prompt asks for the model and the size of the drive rather than one word.
+Nothing allows a write to the drive that the system starts from.
+
+When it finishes it names the check that it ran:
+
+```
+Wrote 2.1 GB (2,109,796,352 bytes) to SanDisk Ultra.
+Checked 2.1 GB (2,109,796,352 bytes) of the drive against the image, byte for byte.
+SHA-256 162ba3c552a2d241c7c63ec26777af0255ee1b5a135adc0be986ceed999933ef
+```
 
 <details>
 <summary><b>What happens inside a Windows write</b></summary>
