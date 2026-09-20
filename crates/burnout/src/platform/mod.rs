@@ -11,3 +11,4 @@
 //! that can be wrong lives there.
 
 pub mod linux;
+pub mod macos;
