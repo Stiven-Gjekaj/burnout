@@ -6,6 +6,8 @@
 
 #![forbid(unsafe_code)]
 
+mod drive;
 mod error;
 
+pub use drive::{Bus, Connection, DriveId, DriveInfo};
 pub use error::{Error, Result};
