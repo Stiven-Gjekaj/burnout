@@ -399,8 +399,18 @@ It is a non-goal, and the section above says why.
 Rust.
 It gives one static binary for each host with no runtime, and the three device
 layers are small enough to write directly against `SetupAPI` and the IO
-control codes on Windows, IOKit and Disk Arbitration on macOS, and `libudev`
-and `sysfs` on Linux.
+control codes on Windows, IOKit and Disk Arbitration on macOS, and `sysfs` on
+Linux.
+
+`sysfs` and not `libudev`.
+`libudev` is a C library under the LGPL, so the binary then needs it at run
+time, and the sentence above about one static binary stops being true.
+`sysfs` is a set of text files that the kernel writes, so the Linux code reads
+them with the standard library alone, and the part of it that decides anything
+is a pure function that the tests run on all three hosts.
+If a stable name for a drive is ever needed, read the symlinks under
+`/dev/disk/by-id/`, which is still the standard library and still not
+`libudev`.
 
 - `clap` for the command line.
 - `indicatif` for progress.
