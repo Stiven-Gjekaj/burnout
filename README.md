@@ -138,6 +138,15 @@ If it finds neither, it stops and says what it found.
 `--mode raw|windows` overrides the result.
 It exists for the day the guess is wrong, and a normal person never types it.
 
+> [!NOTE]
+> **Burnout runs on macOS. It does not make macOS install media.**
+> Apple ships no ISO, and the supported path is `createinstallmedia`, which
+> exists on macOS only. Burnout detects an `.app` bundle, an
+> `InstallAssistant.pkg` or a compressed dmg and refuses with a sentence that
+> names the right tool, rather than writing a drive that starts nothing. This
+> is a non-goal and not a thing to come later.
+> [The milestones](docs/milestones.md) say why.
+
 ---
 
 ## The layout that Windows mode writes
