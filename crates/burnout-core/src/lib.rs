@@ -6,11 +6,15 @@
 
 #![forbid(unsafe_code)]
 
+mod alignment;
 mod drive;
 mod error;
 mod listing;
 mod target;
 
+pub use alignment::{
+    check_aligned, check_sector_size, is_aligned, round_up, sector_count, SECTOR_SIZES,
+};
 pub use drive::{Bus, Connection, DriveId, DriveInfo};
 pub use error::{Error, Result};
 pub use listing::{by_index, in_list_order, natural_cmp, DriveList};
