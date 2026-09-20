@@ -1,0 +1,13 @@
+[package]
+name = "burnout-core"
+description = "The part of Burnout that no operating system changes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# This crate takes no dependency. Everything in it works on any target that
+# reads, writes and seeks, so a test gives it a file.
+[dependencies]
