@@ -283,27 +283,75 @@ question.
 
 ---
 
-## Open questions
+## The decisions that were open
 
-These need an answer before the phase that depends on them starts.
+All three are settled. The reasons are here so that a later reader can reopen
+one with an argument rather than a preference.
 
-**The UDF reader is new scope.** P5 grew when it turned out that a Windows ISO
-holds `install.wim` in UDF, because ISO 9660 cannot hold a file of 4 GiB or
-more. Three ways out, and the choice belongs to a human:
+### A fixed disk can be a target, and it costs two steps
 
-1. **Write a UDF reader.** Read only, and only enough to walk a tree and read
-   a file. It keeps the rule intact. It is most of a phase.
-2. **Take a crate.** Check the licence and how much of UDF it covers before
-   counting on it.
-3. **Accept a folder instead of an ISO** for version 1, and let the person
-   mount the ISO themselves. It is honest, it costs almost nothing, and it
-   makes the tool worse in the one place that matters.
+Every drive in a desktop computer reports as fixed, so a refusal by that test
+alone stops somebody writing an internal disk on purpose.
+An easy yes stops nobody writing the wrong one by accident.
 
-**What `--force` may do.** P2 needs a decision on whether a fixed disk can
-ever be a target, and what a person has to type to get there.
+So `--force` allows a fixed disk, **and the person types the model and the
+size of the drive back before the write starts**.
+Not a letter, and not the word yes.
+A prompt that takes one keystroke is a prompt that people learn to answer
+without reading.
 
-**Whether version 1 signs its releases**, which decides whether P7 needs a
-certificate and the money for one.
+**The system disk is refused under every flag.** There is no escape for it,
+and that is what [SECURITY.md](../SECURITY.md) already promises.
+
+### Burnout reads UDF itself
+
+A Windows ISO keeps `install.wim` in UDF, because ISO 9660 holds an extent
+length in 32 bits and cannot address a file of 4 GiB or more.
+[The spike](spike-layout.md) measured both facts.
+
+Burnout gets a read-only UDF reader, scoped to what a Windows ISO uses: the
+anchor descriptor, the logical volume and partition descriptors, the file set,
+file entries, directory descriptors, and plain extents.
+No compression, no encryption, and no write path.
+
+Three reasons. It keeps the rule that Burnout never delegates to the host, so
+one ISO reads the same way on three operating systems. ECMA-167 and the UDF
+specification are public, so this is documented work. And it runs against a
+file, so every test of it obeys the rule that no test opens a device.
+
+Read the licence and the coverage of any crate before counting on it, but do
+not plan around one.
+
+**The fallback stays on the shelf:** take an extracted folder instead of an
+ISO. It is honest and nearly free, and it makes the tool worse at the one
+thing it exists to do.
+
+### Version 1 buys no certificate
+
+A code signing certificate matters for a binary that somebody **downloads**,
+not one that a package manager installs.
+
+- macOS applies Gatekeeper to a file that carries `com.apple.quarantine`,
+  which a browser sets. Homebrew fetches with curl and does not set it.
+  `cargo install` compiles on the machine, so there is nothing to quarantine.
+- Windows SmartScreen keys off the Mark of the Web, which a browser sets.
+- Linux never expected it. A distribution signs with its own key.
+
+Apple silicon does need every binary to carry a signature, and an ad hoc one
+counts. The Rust linker applies that already.
+
+So the path that a certificate would help is one person downloading a built
+binary from a release page in a browser. That is real, and it is not worth
+several hundred a year for a project with no users yet.
+
+**Instead, every release carries build provenance.**
+`actions/attest-build-provenance` signs each artifact through Sigstore, and
+anybody can check it with `gh attestation verify`.
+A certificate proves that somebody paid a fee.
+An attestation proves that this binary came from this commit through this
+workflow, which is the stronger claim for a tool that asks for root.
+Publish a SHA256 for each artifact as well, and document the warning and the
+way past it for anybody who downloads one directly.
 
 ---
 
