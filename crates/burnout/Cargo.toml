@@ -11,6 +11,14 @@ authors.workspace = true
 [dependencies]
 burnout-core = { path = "../burnout-core" }
 
+# The bindings of one host never reach the other two. Each one is raw, so the
+# shim that uses it stays thin and the decisions stay in a pure module that
+# every host compiles.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+io-kit-sys = "0.4"
+
 [[bin]]
 name = "burnout"
 path = "src/main.rs"
