@@ -9,7 +9,7 @@
 
 use std::collections::BTreeSet;
 
-use burnout_core::{Bus, Connection, Error, Result};
+use burnout_core::{Bus, Connection, DriveId, DriveInfo, Error, Result};
 
 use super::source::{attribute, SysfsSource};
 
@@ -349,6 +349,49 @@ pub fn system_disks(fs: &dyn SysfsSource, mountinfo: &str, swaps: &str) -> BTree
     out
 }
 
+/// Build one drive from what `sysfs` says about it.
+pub fn drive(fs: &dyn SysfsSource, name: &str, system: &BTreeSet<String>) -> Option<DriveInfo> {
+    if !is_listable(fs, name) {
+        return None;
+    }
+    let size = size_bytes(&attribute(fs, &format!("{BLOCK}/{name}/size"))?).ok()?;
+    let (vendor, model, serial) = identity(fs, name);
+    let (bus, connection) = bus(fs, name);
+
+    let mut info = DriveInfo::new(
+        DriveId::new(name),
+        format!("/dev/{name}"),
+        display_name(vendor.as_deref(), model.as_deref(), name),
+    );
+    info.vendor = vendor;
+    info.model = model;
+    info.serial = serial;
+    info.size_bytes = size;
+    info.logical_sector_size = logical_sector_size(fs, name);
+    info.physical_sector_size = physical_sector_size(fs, name);
+    info.bus = bus;
+    info.connection = connection;
+    info.removable_media = removable_media(fs, name);
+    info.system = system.contains(name);
+    Some(info)
+}
+
+/// Every drive that this host reports.
+///
+/// One drive that the kernel describes badly does not fail the whole list.
+/// A list that stops at an empty card reader is a list that nobody can use.
+pub fn list_drives(fs: &dyn SysfsSource, mountinfo: &str, swaps: &str) -> Result<Vec<DriveInfo>> {
+    let names = fs.read_dir(BLOCK).map_err(|e| Error::Host {
+        source: BLOCK.to_string(),
+        detail: e.to_string(),
+    })?;
+    let system = system_disks(fs, mountinfo, swaps);
+    Ok(names
+        .iter()
+        .filter_map(|name| drive(fs, name, &system))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::source::fake::MapSysfs;
@@ -400,6 +443,72 @@ mod tests {
             bus_from_device_path("../devices/platform/something/block/xyz0"),
             (Bus::Unknown, Connection::Unknown)
         );
+    }
+
+    /// A whole machine: one SATA system disk and one USB stick.
+    fn machine() -> MapSysfs {
+        let sata = "../../devices/pci0000:00/0000:00:17.0/ata3/host2/target2:0:0/2:0:0:0/block/sda";
+        let usb = "../../devices/pci0000:00/0000:00:14.0/usb2/2-1/2-1:1.0/host6/target6:0:0/6:0:0:0/block/sdb";
+        with_sata_disk(MapSysfs::new())
+            .dir("/sys/block", &["sda", "sdb", "loop0", "sr0"])
+            .link("/sys/block/sda", sata)
+            .file("/sys/block/sda/size", "1953525168")
+            .file("/sys/block/sda/removable", "0")
+            .file("/sys/block/sda/queue/logical_block_size", "512")
+            .file("/sys/block/sda/device/vendor", "ATA     ")
+            .file("/sys/block/sda/device/model", "Samsung SSD 870 ")
+            .link("/sys/block/sdb", usb)
+            .file("/sys/block/sdb/size", "62521344")
+            .file("/sys/block/sdb/removable", "1")
+            .file("/sys/block/sdb/queue/logical_block_size", "512")
+            .file("/sys/block/sdb/device/vendor", "SanDisk ")
+            .file("/sys/block/sdb/device/model", "Ultra           ")
+            .file("/sys/block/loop0/size", "204800")
+            .file("/sys/block/sr0/size", "2097151")
+    }
+
+    #[test]
+    fn a_machine_lists_its_drives_and_nothing_else() {
+        let drives = list_drives(&machine(), ROOT_ON_SDA2, "").unwrap();
+        let names: Vec<&str> = drives.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(names, ["sda", "sdb"], "loop0 and sr0 are not drives");
+    }
+
+    #[test]
+    fn the_system_drive_is_marked_and_the_usb_stick_is_not() {
+        let drives = list_drives(&machine(), ROOT_ON_SDA2, "").unwrap();
+        let sda = drives.iter().find(|d| d.id.as_str() == "sda").unwrap();
+        let sdb = drives.iter().find(|d| d.id.as_str() == "sdb").unwrap();
+        assert!(sda.system);
+        assert!(!sdb.system);
+    }
+
+    #[test]
+    fn a_drive_carries_the_size_in_bytes_and_not_in_sectors() {
+        let drives = list_drives(&machine(), ROOT_ON_SDA2, "").unwrap();
+        let sda = drives.iter().find(|d| d.id.as_str() == "sda").unwrap();
+        assert_eq!(sda.size_bytes, 1_000_204_886_016);
+        assert_eq!(sda.node, "/dev/sda");
+    }
+
+    #[test]
+    fn the_usb_stick_reads_as_removable_and_the_system_disk_does_not() {
+        let drives = list_drives(&machine(), ROOT_ON_SDA2, "").unwrap();
+        let sda = drives.iter().find(|d| d.id.as_str() == "sda").unwrap();
+        let sdb = drives.iter().find(|d| d.id.as_str() == "sdb").unwrap();
+        assert!(sdb.removable());
+        assert!(!sda.removable());
+        assert_eq!(sdb.bus, Bus::Usb);
+        assert_eq!(sda.bus, Bus::Sata);
+        assert_eq!(sdb.name, "SanDisk Ultra");
+    }
+
+    #[test]
+    fn a_host_with_no_block_directory_is_an_error_and_not_an_empty_list() {
+        // An empty list would say that the machine has no drive, which is a
+        // different thing from not being able to look.
+        let fs = MapSysfs::new();
+        assert!(list_drives(&fs, "", "").is_err());
     }
 
     // Lines captured by hand from a running machine.
