@@ -151,6 +151,35 @@ they are not.
 hosts, gives the size to the byte, and marks the system disk. It runs with no
 privilege. CI is green on all three.
 
+**Two claims that CI cannot answer.** Both are closed by hand.
+
+*No privilege on Windows.* The GitHub runner signs in as an Administrator, so
+a pass there says nothing. A clean Windows 11 ARM64 install in a virtual
+machine carries a standard account, which is not in Administrators, holds the
+Medium integrity level `S-1-16-8192`, and gets `Access is denied` from
+`net session`. That account ran the list:
+
+    1  QEMU NVMe Ctrl  25.8 GB (25,769,803,776 bytes)  NVMe  no   (system disk)
+    2  QEMU HARDDISK   12.9 GB (12,884,901,888 bytes)  USB   yes
+
+The two image files behind those drives are 25,769,803,776 and
+12,884,901,888 bytes on the host, so both sizes are correct to the byte, the
+bus is right for each, and the disk the machine started from carries the mark.
+
+The run also found a fault that no host here could show: the binary linked the
+Microsoft C runtime and stopped before it ran one line. The build now links
+that runtime in.
+
+*A 4Kn drive.* No drive here reports a 4096-byte sector, so `scsi_debug` made
+one on Fedora ARM64:
+
+    modprobe scsi_debug sector_size=4096 dev_size_mb=64
+
+`/sys/block/sdb/size` read 131072 and `queue/logical_block_size` read 4096.
+The list reported 67,108,864 bytes, which is 131072 x 512. The trap below
+gives 536,870,912, which is eight times too large. The user id was 1000, so
+this also shows the list needs no privilege on Linux.
+
 ---
 
 ## P2. Raw mode
