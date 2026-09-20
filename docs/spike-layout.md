@@ -108,6 +108,36 @@ QEMU accepts a VNC head next to the SPICE display that UTM itself uses, so a
 small client asks for one raw frame and writes a PNG.
 That reads the screen with no access to the desktop of the person running it.
 
+### The trap in the harness
+
+The first run sat on the firmware screen and never moved.
+The signal that said so was not the screen, which can sit still for a good
+reason.
+It was the read counter: **42.5 GB read from a 12 GB disk in twelve minutes**,
+which is the disk over three times, so the machine was reading in a loop and
+not making progress.
+
+The cause is the emulated processor.
+UTM offered `qemu64`, and QEMU reports this for it:
+
+| Model | sse4.1 | sse4.2 | popcnt |
+| --- | --- | --- | --- |
+| `qemu64` | no | no | no |
+| `max` | yes | yes | yes |
+
+Windows 11 24H2 and later refuse a processor with no SSE4.2 and no POPCNT.
+The refusal arrives before anything can print, so it looks like a hang.
+
+With `max`, the same drive read **626 MB and stopped**, which is `boot.wim`
+read once into a RAM disk.
+That is the shape of a healthy start.
+The guest then ran with `RIP` inside `fffff800...`, which is kernel space, so
+Windows PE was executing.
+
+**Use `max`, and never `qemu64`, to test a Windows 11 image.**
+Watch the read counter rather than the screen, because a screen that does not
+change means nothing on its own.
+
 ### What is confirmed so far
 
 The firmware starts the drive:
