@@ -61,6 +61,11 @@ pub(crate) mod fake {
             self.files.insert(path.to_string(), contents.to_string());
             self
         }
+
+        pub(crate) fn link(mut self, path: &str, target: &str) -> Self {
+            self.links.insert(path.to_string(), target.to_string());
+            self
+        }
     }
 
     impl SysfsSource for MapSysfs {
