@@ -78,6 +78,12 @@ pub enum Error {
         expected: String,
         /// The digest of what the drive holds.
         got: String,
+        /// Where the two first differ, when the check knows.
+        ///
+        /// A difference at the first byte and a difference near the end are
+        /// different faults, and a person who has to choose a new drive is
+        /// helped by knowing which one happened.
+        at_byte: Option<u64>,
     },
     /// The operation needs more privilege than this process holds.
     NeedsPrivilege {
@@ -144,11 +150,19 @@ impl fmt::Display for Error {
             Error::NotConfirmed => {
                 write!(f, "the drive was not confirmed, so nothing was written")
             }
-            Error::VerifyFailed { expected, got } => {
+            Error::VerifyFailed {
+                expected,
+                got,
+                at_byte,
+            } => {
                 write!(
                     f,
                     "the drive holds {got} and the image holds {expected}, so the write did not arrive"
-                )
+                )?;
+                match at_byte {
+                    Some(at) => write!(f, ". The first byte that differs is at {at}"),
+                    None => Ok(()),
+                }
             }
             Error::NeedsPrivilege { remedy } => {
                 write!(f, "this needs more privilege than it has. {remedy}")
@@ -232,10 +246,22 @@ mod tests {
         let e = Error::VerifyFailed {
             expected: "aa".to_string(),
             got: "bb".to_string(),
+            at_byte: Some(4096),
         };
         let text = e.to_string();
         assert!(text.contains("aa"));
         assert!(text.contains("bb"));
+        assert!(text.ends_with("at 4096"));
+    }
+
+    #[test]
+    fn a_failed_verification_says_nothing_about_an_offset_it_does_not_know() {
+        let e = Error::VerifyFailed {
+            expected: "aa".to_string(),
+            got: "bb".to_string(),
+            at_byte: None,
+        };
+        assert!(!e.to_string().contains("differs"));
     }
 
     #[test]

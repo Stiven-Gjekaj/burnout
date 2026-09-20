@@ -16,6 +16,7 @@ mod progress;
 mod safety;
 mod sha256;
 mod target;
+mod write;
 
 pub use alignment::{
     check_aligned, check_sector_size, is_aligned, round_up, sector_count, SECTOR_SIZES,
@@ -31,3 +32,4 @@ pub use safety::{
 };
 pub use sha256::{sha256, Digest, Sha256};
 pub use target::{BlockTarget, DriveAccess};
+pub use write::{verify_image, write_image, Verification, WriteReport};
