@@ -10,6 +10,8 @@ There is no release to install yet, so most help today is about the plan.
 ## Understand the project
 
 - [README.md](README.md) says what the project is and what state it is in.
+- [docs/roadmap.md](docs/roadmap.md) holds the order that the work happens
+  in, and the test that ends each phase.
 - [docs/milestones.md](docs/milestones.md) holds the work that is not built
   yet, and the reason behind each decision that shapes it.
 - [AGENTS.md](AGENTS.md) sets the rules for anybody who changes this

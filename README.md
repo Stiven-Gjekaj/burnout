@@ -263,6 +263,7 @@ A Windows installation needs a licence from Microsoft.
 
 | Document | What it holds |
 | :-- | :-- |
+| [docs/roadmap.md](docs/roadmap.md) | The order the work happens in, and the exit test for each phase |
 | [docs/milestones.md](docs/milestones.md) | Every decision, the reason for it, and the options that lost |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to take part, and the rule that no test opens a real device |
 | [AGENTS.md](AGENTS.md) | The rules for anybody who changes this repository, human or agent |
