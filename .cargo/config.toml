@@ -1,0 +1,9 @@
+# The Microsoft C runtime is a separate install. A fresh Windows does not hold
+# it, so a binary that links it at run time stops with "VCRUNTIME140.dll was
+# not found" on the first machine that never ran a developer tool. This was
+# measured on a clean Windows 11 ARM64 install.
+#
+# Burnout ships one binary for each host and no runtime beside it, so link the
+# C runtime into the binary.
+[target.'cfg(target_env = "msvc")']
+rustflags = ["-C", "target-feature=+crt-static"]
