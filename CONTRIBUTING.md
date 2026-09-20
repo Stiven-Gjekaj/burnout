@@ -74,8 +74,12 @@ flush returns.
 ## What the code must never do
 
 - Write to a device that the person did not select and confirm.
-- Write to the disk that the running system starts from.
-- Treat a fixed disk as a removable one.
+- Write to the disk that the running system starts from. **No flag allows
+  this.**
+- Treat a fixed disk as a removable one. `--force` allows a fixed disk as a
+  target, and only after the person types the model and the size of the drive
+  back. A prompt that takes one keystroke is one that people learn to answer
+  without reading.
 - Report a verification pass that it did not run.
 - Hide the target behind a default. The person names the target every time.
 
