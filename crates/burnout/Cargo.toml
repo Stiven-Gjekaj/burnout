@@ -20,6 +20,17 @@ core-foundation = "0.10"
 core-foundation-sys = "0.8"
 io-kit-sys = "0.4"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Ioctl",
+    "Win32_System_IO",
+    "Win32_System_SystemInformation",
+] }
+
 [[bin]]
 name = "burnout"
 path = "src/main.rs"

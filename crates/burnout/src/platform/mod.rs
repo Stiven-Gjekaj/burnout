@@ -29,7 +29,11 @@ pub fn drive_list() -> Result<Box<dyn DriveList>> {
     {
         Ok(Box::new(macos::host::MacosDrives))
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        Ok(Box::new(windows::host::WindowsDrives))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         Err(burnout_core::Error::Unsupported {
             target: std::env::consts::OS,
