@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 765 348" width="765" height="348" role="img" aria-label="Burnout">
+  <title>Burnout</title>
+  <defs>
+    <linearGradient id="fire" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDE047"/>
+      <stop offset="0.38" stop-color="#FB923C"/>
+      <stop offset="0.74" stop-color="#EF4444"/>
+      <stop offset="1" stop-color="#C2185B"/>
+    </linearGradient>
+    <linearGradient id="fireText" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FEF08A"/>
+      <stop offset="0.42" stop-color="#FB923C"/>
+      <stop offset="1" stop-color="#E11D48"/>
+    </linearGradient>
+    <linearGradient id="lick" gradientUnits="userSpaceOnUse" x1="0" y1="170" x2="0" y2="46">
+      <stop offset="0" stop-color="#FDE047"/>
+      <stop offset="0.34" stop-color="#FBBF24"/>
+      <stop offset="0.66" stop-color="#F97316"/>
+      <stop offset="1" stop-color="#EF4444"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="60" y="158" width="645" height="164" rx="46" fill="none" stroke="url(#fire)" stroke-width="11"/>
+
+  <rect x="20" y="198" width="34" height="22" rx="8" fill="none" stroke="url(#fire)" stroke-width="10"/>
+  <rect x="20" y="260" width="34" height="22" rx="8" fill="none" stroke="url(#fire)" stroke-width="10"/>
+  <rect x="711" y="198" width="34" height="22" rx="8" fill="none" stroke="url(#fire)" stroke-width="10"/>
+  <rect x="711" y="260" width="34" height="22" rx="8" fill="none" stroke="url(#fire)" stroke-width="10"/>
+
+  <g fill="url(#lick)">
+    <rect x="94" y="155" width="577" height="17" rx="11"/>
+        <path d="M107.0 170.0 C97.7 149.8 123.3 128.6 143.0 114.0 C161.6 129.7 174.3 149.8 165.0 170.0 Z"/>
+    <path d="M168.0 170.0 C159.7 134.7 170.3 97.5 188.0 72.0 C204.6 99.4 228.3 134.7 220.0 170.0 Z"/>
+    <path d="M219.0 170.0 C209.1 155.6 237.9 140.4 259.0 130.0 C278.8 141.2 290.9 155.6 281.0 170.0 Z"/>
+    <path d="M282.0 170.0 C273.0 127.5 301.0 82.7 320.0 52.0 C337.9 85.0 347.0 127.5 338.0 170.0 Z"/>
+    <path d="M341.0 170.0 C332.4 147.7 342.6 124.1 361.0 108.0 C378.3 125.4 403.6 147.7 395.0 170.0 Z"/>
+    <path d="M396.0 170.0 C386.4 136.2 413.6 100.4 434.0 76.0 C453.2 102.3 465.6 136.2 456.0 170.0 Z"/>
+    <path d="M457.0 170.0 C449.0 153.4 460.0 136.0 477.0 124.0 C493.0 136.9 515.0 153.4 507.0 170.0 Z"/>
+    <path d="M509.0 170.0 C499.7 141.2 525.3 110.8 545.0 90.0 C563.6 112.4 576.3 141.2 567.0 170.0 Z"/>
+    <path d="M570.0 170.0 C561.7 150.6 572.3 130.0 590.0 116.0 C606.6 131.1 630.3 150.6 622.0 170.0 Z"/>
+    <path d="M624.0 170.0 C615.0 144.1 639.0 116.7 658.0 98.0 C675.9 118.2 689.0 144.1 680.0 170.0 Z"/>
+  </g>
+
+
+  <g fill="url(#fireText)" fill-rule="evenodd">
+        <path transform="translate(124 190)" d="M0 0 L38 0 C52 0 63 6 63 18 C63 30 55 36 47 38 C57 40 65 48 65 62 C65 78 53 100 38 100 L0 100 ZM20 18 L36 18 C43 18 46 22 46 27 C46 33 43 37 36 37 L20 37 ZM20 60 L37 60 C44 60 48 65 48 71 C48 77 44 82 37 82 L20 82 Z"/>
+    <path transform="translate(200 190)" d="M0 0 L20 0 L20 62 C20 74 25 82 31 82 C37 82 42 74 42 62 L42 0 L62 0 L62 62 C62 84 49 100 31 100 C13 100 0 84 0 62 Z"/>
+    <path transform="translate(275 190)" d="M0 0 L38 0 C53 0 63 9 63 25 C63 38 56 47 46 51 L66 100 L43 100 L28 56 L20 56 L20 100 L0 100 ZM20 18 L36 18 C43 18 47 21 47 26 C47 32 43 36 36 36 L20 36 Z"/>
+    <path transform="translate(352 190)" d="M0 0 L22 0 L44 58 L44 0 L64 0 L64 100 L42 100 L20 42 L20 100 L0 100 Z"/>
+    <path transform="translate(429 190)" d="M33 0 C52 0 66 21 66 50 C66 79 52 100 33 100 C14 100 0 79 0 50 C0 21 14 0 33 0 ZM33 20 C24 20 20 34 20 50 C20 66 24 80 33 80 C42 80 46 66 46 50 C46 34 42 20 33 20 Z"/>
+    <path transform="translate(508 190)" d="M0 0 L20 0 L20 62 C20 74 25 82 31 82 C37 82 42 74 42 62 L42 0 L62 0 L62 62 C62 84 49 100 31 100 C13 100 0 84 0 62 Z"/>
+    <path transform="translate(583 190)" d="M0 0 L58 0 L58 20 L39 20 L39 100 L19 100 L19 20 L0 20 Z"/>
+  </g>
+
+  <g fill="#F97316">
+        <circle cx="164" cy="40" r="5" opacity="0.90"/>
+    <circle cx="324.5" cy="20" r="4" opacity="0.80"/>
+    <circle cx="470.5" cy="30" r="6" opacity="0.70"/>
+    <circle cx="569" cy="16" r="4" opacity="0.60"/>
+    <circle cx="653" cy="62" r="5" opacity="0.50"/>
+    <circle cx="112" cy="74" r="4" opacity="0.40"/>
+    <circle cx="400.5" cy="58" r="3" opacity="0.30"/>
+    <circle cx="495" cy="48" r="4" opacity="0.20"/>
+  </g>
+</svg>
