@@ -5,7 +5,7 @@
       <stop offset="0" stop-color="#17141A"/>
       <stop offset="1" stop-color="#08070A"/>
     </linearGradient>
-    <radialGradient id="heat" cx="0.5" cy="0.6" r="0.52">
+    <radialGradient id="heat" cx="0.5" cy="0.5" r="0.5">
       <stop offset="0" stop-color="#F97316" stop-opacity="0.34"/>
       <stop offset="0.55" stop-color="#EA580C" stop-opacity="0.1"/>
       <stop offset="1" stop-color="#EA580C" stop-opacity="0"/>
@@ -19,9 +19,15 @@
       <stop offset="0" stop-color="#FDE047"/>
       <stop offset="1" stop-color="#FFFBEB"/>
     </linearGradient>
-    <linearGradient id="steel" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#E2E8F0"/>
-      <stop offset="1" stop-color="#64748B"/>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#F1F5F9"/>
+      <stop offset="0.38" stop-color="#CBD5E1"/>
+      <stop offset="1" stop-color="#5A6675"/>
+    </linearGradient>
+    <linearGradient id="shell" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#475569"/>
+      <stop offset="0.4" stop-color="#334155"/>
+      <stop offset="1" stop-color="#1B2432"/>
     </linearGradient>
   </defs>
 
@@ -29,12 +35,14 @@
   <rect width="256" height="256" rx="56" fill="url(#heat)"/>
   <rect x="1" y="1" width="254" height="254" rx="55" fill="none" stroke="#2A2118" stroke-width="2"/>
 
-  <path fill="url(#flame)" d="M128 34C142 66 164 86 170 112C177 140 168 166 152 178L104 178C88 166 79 140 86 112C90 96 100 86 108 72C111 92 121 98 126 92C132 84 126 56 128 34Z"/>
-  <path fill="url(#core)" d="M128 96C136 112 149 124 149 142C149 161 140 174 128 178C116 174 107 161 107 142C107 126 120 114 128 96Z"/>
+  <path fill="url(#flame)" d="M128 30C142 62 163 82 169 108C176 136 166 160 150 170L106 170C90 160 80 136 87 108C91 92 100 82 108 68C111 88 121 94 126 88C132 80 126 50 128 30Z"/>
+  <path fill="url(#core)" d="M128 92C136 108 148 120 148 138C148 157 139 168 128 170C117 168 108 157 108 138C108 122 120 110 128 92Z"/>
 
-  <rect x="91" y="168" width="74" height="50" rx="6" fill="url(#steel)"/>
-  <rect x="99" y="176" width="58" height="34" rx="3" fill="#0B0A0D" opacity="0.85"/>
-  <rect x="99" y="196" width="58" height="14" rx="2" fill="#94A3B8"/>
-  <rect x="107" y="200" width="14" height="6" rx="1.5" fill="#FBBF24"/>
-  <rect x="135" y="200" width="14" height="6" rx="1.5" fill="#FBBF24"/>
+  <rect x="102" y="156" width="52" height="40" rx="3" fill="url(#steel)"/>
+  <rect x="110" y="167" width="11" height="6" rx="1.5" fill="#0B0A0D" opacity="0.4"/>
+  <rect x="135" y="167" width="11" height="6" rx="1.5" fill="#0B0A0D" opacity="0.4"/>
+
+  <rect x="92" y="189" width="72" height="42" rx="7" fill="url(#shell)"/>
+  <rect x="92" y="189" width="72" height="3" rx="1.5" fill="#94A3B8" opacity="0.5"/>
+  <rect x="104" y="206" width="48" height="5" rx="2.5" fill="#0B0A0D" opacity="0.4"/>
 </svg>
