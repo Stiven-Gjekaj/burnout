@@ -15,8 +15,9 @@ use clap::Parser;
 /// Run what the person asked for, and give back the code to exit with.
 pub fn run() -> i32 {
     let cli = cli::Cli::parse();
-    let outcome = match cli.command {
+    let outcome = match &cli.command {
         cli::Command::List => commands::list::run(),
+        cli::Command::Write(args) => commands::write::run(args, cli.elevated),
     };
     match outcome {
         Ok(code) => code,

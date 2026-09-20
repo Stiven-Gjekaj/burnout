@@ -85,6 +85,13 @@ pub enum Error {
         /// helped by knowing which one happened.
         at_byte: Option<u64>,
     },
+    /// The image file cannot be read, or holds nothing to write.
+    Image {
+        /// The path, as the person gave it.
+        path: String,
+        /// What is wrong with it.
+        detail: String,
+    },
     /// The operation needs more privilege than this process holds.
     NeedsPrivilege {
         /// What a person types to get it.
@@ -163,6 +170,9 @@ impl fmt::Display for Error {
                     Some(at) => write!(f, ". The first byte that differs is at {at}"),
                     None => Ok(()),
                 }
+            }
+            Error::Image { path, detail } => {
+                write!(f, "cannot read {path}: {detail}")
             }
             Error::NeedsPrivilege { remedy } => {
                 write!(f, "this needs more privilege than it has. {remedy}")
@@ -273,6 +283,18 @@ mod tests {
         let text = e.to_string();
         assert!(text.contains("8000000000"));
         assert!(text.contains("4000000000"));
+    }
+
+    #[test]
+    fn an_image_message_names_the_path_that_the_person_gave() {
+        let e = Error::Image {
+            path: "/tmp/ubuntu.iso".to_string(),
+            detail: "No such file or directory".to_string(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "cannot read /tmp/ubuntu.iso: No such file or directory"
+        );
     }
 
     #[test]

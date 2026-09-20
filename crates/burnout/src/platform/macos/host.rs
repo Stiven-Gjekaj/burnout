@@ -297,7 +297,7 @@ fn unmount_whole(bsd_name: &str) -> Result<()> {
             answered: false,
             status: 0,
         };
-        DADiskUnmountVolume(
+        DADiskUnmount(
             disk,
             UNMOUNT_WHOLE,
             answered,
@@ -317,13 +317,13 @@ fn unmount_whole(bsd_name: &str) -> Result<()> {
 
         if !outcome.answered {
             return Err(Error::Host {
-                source: "DADiskUnmountVolume".to_string(),
+                source: "DADiskUnmount".to_string(),
                 detail: format!("{bsd_name} did not answer in thirty seconds"),
             });
         }
         if outcome.status != 0 {
             return Err(Error::Host {
-                source: "DADiskUnmountVolume".to_string(),
+                source: "DADiskUnmount".to_string(),
                 detail: format!("{bsd_name} refused with status {:#010x}", outcome.status),
             });
         }
@@ -429,7 +429,7 @@ extern "C" {
         session: DASessionRef,
         name: *const c_char,
     ) -> DADiskRef;
-    fn DADiskUnmountVolume(
+    fn DADiskUnmount(
         disk: DADiskRef,
         options: u32,
         callback: DADiskUnmountCallback,
