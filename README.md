@@ -1,23 +1,19 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/Stiven-Gjekaj/burnout/main/assets/wordmark.svg" alt="Burnout" width="420">
+![Burnout](assets/wordmark.svg)
 
-**Writes a bootable USB drive from the command line**
+### Writes a bootable USB drive from the command line
 
 _Two commands. The same two on Windows, on macOS, and on Linux._
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Rust-000000?style=for-the-badge&logo=rust&logoColor=white" alt="Rust"/>
-  <img src="https://img.shields.io/badge/Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Windows"/>
-  <img src="https://img.shields.io/badge/macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="macOS"/>
-  <img src="https://img.shields.io/badge/Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Linux"/>
-</p>
+![Rust](https://img.shields.io/badge/rust-dc2626?style=for-the-badge&logo=rust&logoColor=0c0706)
+![Windows](https://img.shields.io/badge/windows-f97316?style=for-the-badge&logo=windows&logoColor=0c0706)
+![macOS](https://img.shields.io/badge/macos-fbbf24?style=for-the-badge&logo=apple&logoColor=0c0706)
+![Linux](https://img.shields.io/badge/linux-facc15?style=for-the-badge&logo=linux&logoColor=0c0706)
+[![MIT licence](https://img.shields.io/badge/mit_licence-fde68a?style=for-the-badge&logoColor=0c0706)](LICENSE)
 
-<p align="center">
-  <img src="https://img.shields.io/badge/status-planning-F97316?style=flat-square" alt="Planning stage"/>
-  <img src="https://img.shields.io/badge/code-none_yet-64748B?style=flat-square" alt="No code yet"/>
-  <img src="https://img.shields.io/badge/license-MIT-22C55E?style=flat-square" alt="MIT License"/>
-</p>
+![Planning](https://img.shields.io/badge/status-planning-dc2626?style=flat-square&labelColor=0c0706)
+![No code yet](https://img.shields.io/badge/code-none_yet-78350f?style=flat-square&labelColor=0c0706)
 
 <p align="center">
   <a href="#overview"><b>Overview</b></a> |
