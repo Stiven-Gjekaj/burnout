@@ -40,6 +40,50 @@ pub enum Error {
         /// The sector size in bytes.
         sector_size: u32,
     },
+    /// The image does not fit on the drive.
+    TooSmall {
+        /// The size of the image in bytes.
+        image_bytes: u64,
+        /// The size of the drive in bytes.
+        drive_bytes: u64,
+    },
+    /// The drive is the one that the running system starts from.
+    ///
+    /// No option allows this. It is the one refusal that nothing overrides.
+    SystemDisk {
+        /// The drive, as the list names it.
+        name: String,
+    },
+    /// The drive is not one that Burnout can prove is removable.
+    NotRemovable {
+        /// The drive, as the list names it.
+        name: String,
+    },
+    /// The drive at that number is not the drive that the person saw.
+    ///
+    /// A number is a position in the list and not a name of a drive. Pull one
+    /// drive out between the list and the write, and every later number moves
+    /// to a different drive.
+    DriveChanged {
+        /// What the person asked for.
+        wanted: String,
+        /// What is there now.
+        found: String,
+    },
+    /// The person did not confirm the drive.
+    NotConfirmed,
+    /// The drive holds something other than the image that went onto it.
+    VerifyFailed {
+        /// The digest of the source.
+        expected: String,
+        /// The digest of what the drive holds.
+        got: String,
+    },
+    /// The operation needs more privilege than this process holds.
+    NeedsPrivilege {
+        /// What a person types to get it.
+        remedy: String,
+    },
 }
 
 impl fmt::Display for Error {
@@ -69,6 +113,45 @@ impl fmt::Display for Error {
                     f,
                     "a length of {length} bytes does not divide by a sector of {sector_size} bytes"
                 )
+            }
+            Error::TooSmall {
+                image_bytes,
+                drive_bytes,
+            } => {
+                write!(
+                    f,
+                    "the image holds {image_bytes} bytes and the drive holds {drive_bytes}"
+                )
+            }
+            Error::SystemDisk { name } => {
+                write!(
+                    f,
+                    "{name} is the drive that this system starts from, and no option allows a write to it"
+                )
+            }
+            Error::NotRemovable { name } => {
+                write!(
+                    f,
+                    "Burnout cannot prove that {name} is removable. Use --force to write to it anyway"
+                )
+            }
+            Error::DriveChanged { wanted, found } => {
+                write!(
+                    f,
+                    "that number named {wanted} and it now names {found}. Run burnout list again"
+                )
+            }
+            Error::NotConfirmed => {
+                write!(f, "the drive was not confirmed, so nothing was written")
+            }
+            Error::VerifyFailed { expected, got } => {
+                write!(
+                    f,
+                    "the drive holds {got} and the image holds {expected}, so the write did not arrive"
+                )
+            }
+            Error::NeedsPrivilege { remedy } => {
+                write!(f, "this needs more privilege than it has. {remedy}")
             }
         }
     }
@@ -113,6 +196,57 @@ mod tests {
         };
         assert!(e.to_string().contains("1000"));
         assert!(e.to_string().contains("512"));
+    }
+
+    #[test]
+    fn the_system_disk_message_says_that_no_option_allows_it() {
+        // A message that only says no invites the reader to look for the
+        // flag that turns it off. There is none.
+        let e = Error::SystemDisk {
+            name: "disk0".to_string(),
+        };
+        assert!(e.to_string().contains("no option"));
+    }
+
+    #[test]
+    fn a_fixed_drive_message_names_the_option_that_allows_it() {
+        let e = Error::NotRemovable {
+            name: "disk0".to_string(),
+        };
+        assert!(e.to_string().contains("--force"));
+    }
+
+    #[test]
+    fn a_changed_drive_message_names_both_drives() {
+        let e = Error::DriveChanged {
+            wanted: "Samsung T7".to_string(),
+            found: "SanDisk Ultra".to_string(),
+        };
+        let text = e.to_string();
+        assert!(text.contains("Samsung T7"));
+        assert!(text.contains("SanDisk Ultra"));
+    }
+
+    #[test]
+    fn a_failed_verification_message_gives_both_digests() {
+        let e = Error::VerifyFailed {
+            expected: "aa".to_string(),
+            got: "bb".to_string(),
+        };
+        let text = e.to_string();
+        assert!(text.contains("aa"));
+        assert!(text.contains("bb"));
+    }
+
+    #[test]
+    fn a_size_message_gives_both_sizes() {
+        let e = Error::TooSmall {
+            image_bytes: 8_000_000_000,
+            drive_bytes: 4_000_000_000,
+        };
+        let text = e.to_string();
+        assert!(text.contains("8000000000"));
+        assert!(text.contains("4000000000"));
     }
 
     #[test]
