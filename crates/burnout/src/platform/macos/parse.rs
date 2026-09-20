@@ -97,13 +97,30 @@ fn is_whole(snapshot: &RegistrySnapshot, index: usize) -> bool {
     node.class.ends_with("Media") && node.get("Whole").and_then(Value::as_bool) == Some(true)
 }
 
+/// Whether a node is a drive that somebody can write an image to.
+///
+/// A synthesised APFS container is whole, and it is not a drive. It arrives
+/// as `AppleAPFSMedia`, it carries the name and the bus of the drive under
+/// it, and listing it shows one physical drive four times over. Only a plain
+/// `IOMedia` is a real device.
+///
+/// The walk that marks the system drive still counts the containers, because
+/// it climbs through them to reach the drive underneath.
+fn is_physical_whole(snapshot: &RegistrySnapshot, index: usize) -> bool {
+    let node = match snapshot.nodes.get(index) {
+        Some(n) => n,
+        None => return false,
+    };
+    node.class == "IOMedia" && is_whole(snapshot, index)
+}
+
 /// Build one drive from one whole media node.
 pub fn drive_from_media(
     snapshot: &RegistrySnapshot,
     index: usize,
     system: &BTreeSet<String>,
 ) -> Option<DriveInfo> {
-    if !is_whole(snapshot, index) {
+    if !is_physical_whole(snapshot, index) {
         return None;
     }
     let name = snapshot.get(index, "BSD Name").and_then(Value::as_text)?;
@@ -284,6 +301,25 @@ mod tests {
             nodes: vec![controller, disk0, scheme, disk0s2, container, disk3, volume],
             media: vec![1, 3, 5, 6],
         }
+    }
+
+    #[test]
+    fn a_synthesised_apfs_container_is_not_listed_as_a_drive() {
+        // The container carries the name and the bus of the drive under it,
+        // so listing it shows one physical drive twice, under the same name
+        // and a different size.
+        let t = apple_silicon();
+        let drives = list_drives(&t, Some((1 << 24) | 14)).unwrap();
+        let names: Vec<&str> = drives.iter().map(|d| d.id.as_str()).collect();
+        assert_eq!(names, ["disk0"], "disk3 is a container and not a drive");
+    }
+
+    #[test]
+    fn the_container_is_still_marked_although_it_is_not_listed() {
+        // The walk that finds the system drive climbs through the container,
+        // so the container has to count there even though nobody writes it.
+        let t = apple_silicon();
+        assert!(system_disks(&t, Some((1 << 24) | 14)).contains("disk3"));
     }
 
     #[test]
