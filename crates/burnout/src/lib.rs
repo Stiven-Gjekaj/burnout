@@ -3,4 +3,24 @@
 //! The binary holds almost nothing. The work lives here so that a test can
 //! reach it, because a test cannot reach into a binary crate.
 
+pub mod cli;
+pub mod commands;
+pub mod format;
 pub mod platform;
+
+use clap::Parser;
+
+/// Run what the person asked for, and give back the code to exit with.
+pub fn run() -> i32 {
+    let cli = cli::Cli::parse();
+    let outcome = match cli.command {
+        cli::Command::List => commands::list::run(),
+    };
+    match outcome {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("burnout: {e}");
+            1
+        }
+    }
+}

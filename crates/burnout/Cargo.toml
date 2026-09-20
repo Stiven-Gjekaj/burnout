@@ -10,6 +10,7 @@ authors.workspace = true
 
 [dependencies]
 burnout-core = { path = "../burnout-core" }
+clap = { version = "4", features = ["derive"] }
 
 # The bindings of one host never reach the other two. Each one is raw, so the
 # shim that uses it stays thin and the decisions stay in a pure module that

@@ -1,3 +1,3 @@
 fn main() {
-    println!("burnout");
+    std::process::exit(burnout::run());
 }
