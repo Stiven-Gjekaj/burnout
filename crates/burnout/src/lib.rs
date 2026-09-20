@@ -5,6 +5,7 @@
 
 pub mod cli;
 pub mod commands;
+pub mod elevate;
 pub mod format;
 pub mod platform;
 
