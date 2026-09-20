@@ -1,0 +1,17 @@
+# Operating system files.
+.DS_Store
+Thumbs.db
+
+# Editor and tool directories.
+.idea/
+.vscode/
+.claude/
+
+# Build output. The names for the chosen toolchain come later.
+/build/
+/dist/
+/target/
+
+# Test images. A test makes these, and none of them belongs in the repository.
+*.img
+*.iso
