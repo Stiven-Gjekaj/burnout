@@ -47,6 +47,14 @@ The operating system layer holds five operations only:
 - Flush.
 - Close.
 
+Two traits carry them, and not one.
+One trait lists the drives, because that needs no drive and no handle.
+One trait unmounts and opens one drive.
+The handle that the open returns reads, writes, seeks and flushes, and the
+drop of it closes the device.
+A flush is an explicit call that can fail, because a drop reports no error and
+a write is not complete before the flush returns.
+
 Everything above that layer is one body of code.
 
 ---

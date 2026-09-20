@@ -110,7 +110,15 @@ The work:
 - A Cargo workspace. `burnout-core` holds everything that is not
   host-specific, and takes any target that reads, writes and seeks, so a test
   gives it a file. `burnout` is the command line on top.
-- `Device`, one trait: list, unmount the volumes, open, flush, close.
+- The device layer, in two traits and one handle. `DriveList` lists the
+  drives and needs no drive and no handle. `DriveAccess` unmounts the volumes
+  of one drive and opens it. The open handle reads, writes, seeks and flushes.
+  Close is the drop of the handle.
+  One trait cannot hold all five, because `flush` belongs to an open handle
+  and `list` belongs to the host. One trait would make the write path of P2
+  take the host as well as the target, and
+  [CONTRIBUTING.md](../CONTRIBUTING.md) says the write path takes a source, a
+  target handle and a progress callback, and nothing else.
 - Linux: read `/sys/block` for the size, the model, the vendor and the
   removable flag. Unmount through the `umount2` system call.
   `umount` is a program, and this file says below that a tool of the host is
