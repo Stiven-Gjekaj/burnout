@@ -14,7 +14,47 @@ use burnout_core::{DriveList, Result};
 
 pub mod linux;
 pub mod macos;
+pub mod unsupported;
 pub mod windows;
+
+/// The type that opens a drive on the host that this build runs on.
+///
+/// This is a type and not a trait object. [`burnout_core::DriveAccess`] names
+/// the handle that `open` gives back, and that handle is a different type on
+/// each host, so a boxed trait would have to name it. One host is compiled at
+/// a time, so the concrete type is known and nothing needs boxing.
+#[cfg(target_os = "linux")]
+pub type HostAccess = linux::host::LinuxAccess;
+#[cfg(target_os = "macos")]
+pub type HostAccess = macos::host::MacosAccess;
+#[cfg(windows)]
+pub type HostAccess = windows::host::WindowsAccess;
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub type HostAccess = unsupported::NoAccess;
+
+/// The way to open a drive on the host that this build runs on.
+///
+/// A host that Burnout does not support gives an error and not a panic.
+pub fn drive_access() -> Result<HostAccess> {
+    #[cfg(target_os = "linux")]
+    {
+        Ok(linux::host::LinuxAccess)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        Ok(macos::host::MacosAccess)
+    }
+    #[cfg(windows)]
+    {
+        Ok(windows::host::WindowsAccess)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        Err(burnout_core::Error::Unsupported {
+            target: std::env::consts::OS,
+        })
+    }
+}
 
 /// The drive list of the host that this build runs on.
 ///
