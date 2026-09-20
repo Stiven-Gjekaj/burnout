@@ -58,6 +58,29 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
 
-      # The step that runs `burnout list` on each host arrives with the list
-      # command itself. No test opens a device, so that step is the only
-      # place that proves the device layer of a host works at all.
+      # No test opens a device, so this step is the only place that proves
+      # the device layer of a host runs at all. It reads the list of drives
+      # and writes nothing.
+      #
+      # It also proves that the list needs no privilege on Linux and on
+      # macOS, where the runner is an ordinary user. It proves nothing of the
+      # kind on Windows, where the runner is an Administrator, so that claim
+      # is checked by hand on a standard account.
+      - name: list the drives
+        run: cargo run -p burnout -- list
+
+  # A shim that belongs to one host is compiled only on that host, so a break
+  # in it waits for that job. `cargo check` does not link, so this catches the
+  # break from Linux in about a minute.
+  other-targets:
+    name: check the other hosts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc, aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo check -p burnout --target x86_64-pc-windows-msvc
+      - run: cargo check -p burnout --target aarch64-apple-darwin
