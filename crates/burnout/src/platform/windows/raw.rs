@@ -22,3 +22,14 @@ pub struct RawDisk {
     /// `SPDRP_REMOVAL_POLICY`.
     pub removal_policy: Option<u32>,
 }
+
+/// One volume, as the host answered about it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RawVolume {
+    /// The name that `FindFirstVolumeW` gave, with its trailing backslash.
+    pub guid_path: String,
+    /// The answer to `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS`.
+    ///
+    /// A card reader with no card gives none, and that is not a failure.
+    pub extents: Option<Vec<u8>>,
+}
