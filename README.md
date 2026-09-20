@@ -192,11 +192,14 @@ burnout list
 ```
 
 ```
-  #  DRIVE                         SIZE      BUS     REMOVABLE
-  1  Samsung SSD 980 PRO           1.0 TB    NVMe    no   (system disk)
-  2  SanDisk Ultra                 32.0 GB   USB     yes
-  3  Generic MassStorage           7.4 GB    USB     yes
+#  DRIVE                   SIZE                              BUS     REMOVABLE
+1  APPLE SSD AP0512Z       500.3 GB (500,277,792,768 bytes)  Fabric  no   (system disk)
+2  Samsung PSSD T7 Shield  1.0 TB (1,000,204,886,016 bytes)  USB     yes
 ```
+
+The size comes twice. The rounded figure is what a person recognises from the
+box, and the exact count is the number that the code can prove.
+A drive is sold in powers of ten, so the rounded figure uses them too.
 
 ```bash
 burnout write ubuntu-24.04.iso 2
