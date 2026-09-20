@@ -9,6 +9,7 @@
 mod alignment;
 mod drive;
 mod error;
+mod file_target;
 mod listing;
 mod target;
 
@@ -17,5 +18,6 @@ pub use alignment::{
 };
 pub use drive::{Bus, Connection, DriveId, DriveInfo};
 pub use error::{Error, Result};
+pub use file_target::FileTarget;
 pub use listing::{by_index, in_list_order, natural_cmp, DriveList};
 pub use target::{BlockTarget, DriveAccess};
