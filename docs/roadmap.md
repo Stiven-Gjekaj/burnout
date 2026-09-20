@@ -184,7 +184,7 @@ this also shows the list needs no privilege on Linux.
 
 ## P2. Raw mode
 
-**Size M. Depends on P1. Ships as v0.1.**
+**Size M. Depends on P1. Done. Ships as v0.1.**
 
 The first thing a person can use.
 
@@ -207,6 +207,48 @@ The work:
 **The exit test.** A drive written on each of the three hosts starts Ubuntu on
 real hardware. The hash of the device matches the hash of the ISO. Every test
 in the suite runs against a file, and none opens a device.
+
+**It passes in virtual machines, and the real drive is still to come.**
+
+A 2,689,781,760 byte Fedora ARM64 image went onto a drive from each host, and
+each of the three drives then started Fedora in a machine that had that drive
+and nothing else. No install medium, no second disk.
+
+| Host | The drive it wrote | What it printed |
+| --- | --- | --- |
+| macOS 26 | a 4 GB image attached with `hdiutil` | `162ba3c5...999933ef` |
+| Fedora 44 ARM64 | a 3 GB virtual USB disk | `162ba3c5...999933ef` |
+| Windows 11 ARM64 | a 3 GB virtual USB disk | `162ba3c5...999933ef` |
+
+One digest from three hosts, and it is the digest that `shasum -a 256` gives
+for the file on the host.
+
+The Linux run also shows the restart, in the title of its window:
+
+    sudo -- /tmp/b write /dev/sr0 2 --elevated
+
+Two dashes before the path, the arguments carried across, and the guard added
+on the end.
+
+**What a virtual drive does not prove.** A QEMU USB disk is not a USB stick.
+It has no controller of its own, it never reports a sector size other than
+512, and it does not fail in the middle of a write. The other half of this
+exit test needs a stick that can be erased, and it is still open.
+
+**Two faults that only a real run could find.**
+
+- `fsync` on `/dev/rdiskN` answers `ENOTTY`, because the raw node holds no
+  buffer of the operating system. The drive holds one of its own, so the flush
+  is `DKIOCSYNCHRONIZECACHE`. Before the fix the bytes reached the medium and
+  the command reported a failure.
+- The Windows binary linked the Microsoft C runtime, so it stopped on a clean
+  install before it ran one line. The build now links that runtime in.
+
+**Three measurements.** In a release build on an Apple M-series machine, a
+2.7 GB write and its 2.7 GB read back take 22 seconds together, which is about
+245 MB/s. The same work in a debug build takes 295 seconds, so measure the
+build that ships. The hash is not the part that waits: a USB 3 stick writes at
+30 to 150 MB/s.
 
 ---
 
