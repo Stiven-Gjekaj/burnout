@@ -22,7 +22,8 @@ The [README](README.md) says what the current state is.
 - Add support for an image format, a file system, or a boot mode.
 - Improve the device list, so that it names a drive the way its owner does.
 - Improve the documentation.
-- Argue that something in the plan is wrong, with the reason.
+- Take on something from [docs/milestones.md](docs/milestones.md), or argue
+  that it is wrong, with the reason.
 
 Before you start significant work, open an issue to agree on the approach.
 This costs you one message and can save you a rewritten pull request.

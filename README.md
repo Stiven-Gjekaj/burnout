@@ -29,6 +29,9 @@ The toolchain is Rust.
 Do not install this.
 There is no release.
 
+[docs/milestones.md](docs/milestones.md) holds every decision that shapes the
+work, the reason behind each one, and the options that lost.
+
 ---
 
 ## The goal
@@ -77,6 +80,8 @@ Burnout downloads no operating system, and it gives you no licence for one.
 
 ## Contributing
 
+- [docs/milestones.md](docs/milestones.md) holds the work that is not built
+  yet, and the reason behind each decision that shapes it.
 - [CONTRIBUTING.md](CONTRIBUTING.md) says how to take part, and holds the rule
   that no test writes to a real device.
 - [AGENTS.md](AGENTS.md) sets the rules for anybody who changes this
