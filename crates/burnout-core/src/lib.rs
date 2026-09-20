@@ -5,3 +5,7 @@
 //! reason the tests of this project touch no device.
 
 #![forbid(unsafe_code)]
+
+mod error;
+
+pub use error::{Error, Result};
