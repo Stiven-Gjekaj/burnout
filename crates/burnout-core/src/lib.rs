@@ -18,6 +18,7 @@ mod safety;
 mod sha256;
 mod strict_target;
 mod target;
+mod window;
 mod write;
 
 pub use alignment::{
@@ -36,4 +37,5 @@ pub use safety::{
 pub use sha256::{sha256, Digest, Sha256};
 pub use strict_target::StrictTarget;
 pub use target::{BlockTarget, DriveAccess};
+pub use window::Window;
 pub use write::{verify_image, write_image, Verification, WriteReport};
