@@ -313,6 +313,89 @@ fn partition_to_disk(fs: &dyn SysfsSource, name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
+/// Every drive that carries the backing file of a mounted loop device.
+///
+/// A live USB is why this exists. Fedora, Ubuntu and Arch start the same way:
+/// the medium holds one large file, a loop device presents that file as a
+/// block device, and the root of the running system is an overlay on top of
+/// it. Nothing in that chain names the drive, so the rules below mark nothing
+/// and Burnout offers to erase the drive it is running from.
+///
+/// The kernel names the file in `loop/backing_file`, and it names it as the
+/// loop was set up. In an initramfs that is a path relative to a mount point
+/// that no longer exists under that name, so the file is looked for under
+/// every mount point.
+///
+/// **A drive is marked only when one mount holds that file.** The kernel says
+/// what the file was called and not which file was opened, and two mounts can
+/// hold the same name: a Fedora live USB and a Fedora disc both carry
+/// `LiveOS/squashfs.img`, measured on exactly that machine. A mark is a
+/// refusal that no option overrides, so a guess between two drives would take
+/// one away from its owner for good. When it is not certain this marks
+/// nothing, the list says the system disk is unknown, and the write command
+/// answers that with the stronger prompt.
+pub fn loop_backed_disks(fs: &dyn SysfsSource, mountinfo: &str) -> BTreeSet<String> {
+    let mounts = mountinfo_sources(mountinfo);
+    let mut out = BTreeSet::new();
+    for mount in &mounts {
+        let Some(name) = mount.source.strip_prefix("/dev/") else {
+            continue;
+        };
+        if !name.starts_with("loop") {
+            continue;
+        }
+        let Some(backing) = attribute(fs, &format!("{BLOCK}/{name}/loop/backing_file")) else {
+            continue;
+        };
+        let (directory, file) = match backing.rsplit_once('/') {
+            Some((directory, file)) => (directory, file),
+            None => ("", backing.as_str()),
+        };
+        if file.is_empty() {
+            continue;
+        }
+
+        let mut holders = BTreeSet::new();
+        for candidate in &mounts {
+            if candidate.source.starts_with("/dev/loop") {
+                // A loop device does not carry its own backing file.
+                continue;
+            }
+            let base = candidate.mount_point.trim_end_matches('/');
+            let tail = directory.trim_start_matches('/');
+            let at = if tail.is_empty() {
+                format!("{base}/")
+            } else {
+                format!("{base}/{tail}")
+            };
+            let Ok(names) = fs.read_dir(&at) else {
+                continue;
+            };
+            if !names.iter().any(|n| n == file) {
+                continue;
+            }
+            let disk = if candidate.major == 0 {
+                candidate
+                    .source
+                    .strip_prefix("/dev/")
+                    .map(|n| n.to_string())
+            } else {
+                disk_for_dev(fs, candidate.major, candidate.minor)
+            };
+            if let Some(disk) = disk {
+                let disk = partition_to_disk(fs, &disk);
+                holders.extend(base_disks(fs, &disk));
+            }
+        }
+        // One holder is an answer. Two are a guess, and a mark is a refusal
+        // that no option overrides.
+        if holders.len() == 1 {
+            out.extend(holders);
+        }
+    }
+    out
+}
+
 /// Every drive that the running system needs.
 ///
 /// This is deliberately a superset: the root, the boot directory, the EFI
@@ -345,6 +428,10 @@ pub fn system_disks(fs: &dyn SysfsSource, mountinfo: &str, swaps: &str) -> BTree
             out.extend(base_disks(fs, &name));
         }
     }
+
+    // A live USB reaches its root through a loop device, and the rules above
+    // see none of that.
+    out.extend(loop_backed_disks(fs, mountinfo));
 
     out
 }
@@ -613,6 +700,104 @@ mod tests {
             mount_points_for_disk(&fs, text, "sdb"),
             ["/mnt/secret".to_string()]
         );
+    }
+
+    /// A Fedora live USB, captured by hand from a running one. The root is an
+    /// overlay with no device of its own, the medium is sdb1, and the only
+    /// link between them is the loop device in the middle.
+    const LIVE_USB: &str = "\
+81 1 0:37 / / rw,relatime shared:1 - overlay LiveOS_rootfs rw,lowerdir=/run/rootfsbase,upperdir=/run/overlayfs
+53 51 8:17 / /run/initramfs/live ro,relatime shared:17 - iso9660 /dev/sdb1 ro,nojoliet
+54 51 7:0 / /run/rootfsbase ro,relatime shared:18 - erofs /dev/loop0 ro,seclabel
+1116 51 8:1 / /run/media/liveuser/XFER rw,nosuid,nodev shared:1042 - vfat /dev/sda1 rw";
+
+    fn live_machine() -> MapSysfs {
+        let tree = "../../devices/pci0000:00/0000:00:14.0/usb2/2-1/2-1:1.0/host6/target6:0:0/6:0:0:0/block/sdb";
+        MapSysfs::new()
+            // The kernel names the file as the loop was set up, which was
+            // inside the initramfs, so the path is relative to a mount point
+            // that no longer carries that name.
+            .file("/sys/block/loop0/loop/backing_file", "/LiveOS/squashfs.img")
+            .dir("/run/initramfs/live/LiveOS", &["squashfs.img", "osmin.img"])
+            .link("/sys/dev/block/8:17", &format!("{tree}/sdb1"))
+            .file("/sys/dev/block/8:17/partition", "1")
+            .link("/sys/class/block/sdb1", &format!("{tree}/sdb1"))
+            .file("/sys/class/block/sdb1/partition", "1")
+    }
+
+    #[test]
+    fn the_drive_that_a_live_system_started_from_is_a_system_disk() {
+        // Without this, Burnout offers to erase the USB stick it is running
+        // from. Nothing in the mount table names that stick: the root is an
+        // overlay with no device, and the medium is reached through a loop.
+        let found = system_disks(&live_machine(), LIVE_USB, "");
+        assert!(
+            found.contains("sdb"),
+            "the live medium is marked: {found:?}"
+        );
+        assert!(!found.contains("sda"), "the other stick is not: {found:?}");
+    }
+
+    #[test]
+    fn a_loop_whose_file_is_missing_marks_nothing_and_does_not_fail() {
+        // The file can be deleted after the loop is set up. That is not a
+        // reason to stop, and it is not a reason to mark a drive at random.
+        let fs = MapSysfs::new().file("/sys/block/loop0/loop/backing_file", "/gone/image.img");
+        assert!(loop_backed_disks(&fs, LIVE_USB).is_empty());
+    }
+
+    #[test]
+    fn a_loop_with_no_backing_file_at_all_marks_nothing() {
+        assert!(loop_backed_disks(&MapSysfs::new(), LIVE_USB).is_empty());
+    }
+
+    #[test]
+    fn a_disc_that_holds_the_same_name_does_not_hide_the_live_usb() {
+        // Measured on the machine this fix came from: the stick and the disc
+        // both carry LiveOS/squashfs.img, and the kernel says only what the
+        // file was called. A disc is not a drive that Burnout writes, so it
+        // adds no candidate and the stick is still the one.
+        let fs = live_machine()
+            .dir(
+                "/run/media/liveuser/Fedora-WS-Live-44/LiveOS",
+                &["squashfs.img"],
+            )
+            .link("/sys/dev/block/11:0", "../../devices/x/block/sr0");
+        let text = "\
+81 1 0:37 / / rw,relatime shared:1 - overlay LiveOS_rootfs rw,lowerdir=/run/rootfsbase
+53 51 8:17 / /run/initramfs/live ro,relatime shared:17 - iso9660 /dev/sdb1 ro
+54 51 7:0 / /run/rootfsbase ro,relatime shared:18 - erofs /dev/loop0 ro
+1143 51 11:0 / /run/media/liveuser/Fedora-WS-Live-44 ro,nosuid shared:1068 - iso9660 /dev/sr0 ro";
+        assert!(loop_backed_disks(&fs, text).contains("sdb"));
+    }
+
+    #[test]
+    fn two_drives_that_hold_the_same_name_mark_neither() {
+        // Two sticks of the same live image. Only one of them backs the loop
+        // and the kernel does not say which. A mark is a refusal that no
+        // option overrides, so a guess would take a drive away from its owner
+        // for good. The list then says the system disk is unknown, and the
+        // write command answers that with the stronger prompt.
+        let other = "../../devices/pci0000:00/0000:00:14.0/usb2/2-2/block/sdc";
+        let fs = live_machine()
+            .dir("/run/media/liveuser/COPY/LiveOS", &["squashfs.img"])
+            .link("/sys/dev/block/8:33", &format!("{other}/sdc1"))
+            .file("/sys/dev/block/8:33/partition", "1")
+            .link("/sys/class/block/sdc1", &format!("{other}/sdc1"))
+            .file("/sys/class/block/sdc1/partition", "1");
+        let text = "\
+81 1 0:37 / / rw,relatime shared:1 - overlay LiveOS_rootfs rw,lowerdir=/run/rootfsbase
+53 51 8:17 / /run/initramfs/live ro,relatime shared:17 - iso9660 /dev/sdb1 ro
+54 51 7:0 / /run/rootfsbase ro,relatime shared:18 - erofs /dev/loop0 ro
+99 51 8:33 / /run/media/liveuser/COPY rw,nosuid shared:99 - vfat /dev/sdc1 rw";
+        let found = loop_backed_disks(&fs, text);
+        assert!(found.is_empty(), "a guess between two drives: {found:?}");
+    }
+
+    #[test]
+    fn a_machine_with_no_loop_device_is_unchanged() {
+        let fs = with_sata_disk(MapSysfs::new());
+        assert!(loop_backed_disks(&fs, ROOT_ON_SDA2).is_empty());
     }
 
     const ROOT_ON_SDA2: &str =

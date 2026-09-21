@@ -48,7 +48,11 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
     let boot_table = first_sector_has_boot_table(&mut image)?;
 
     let force = if args.force { Force::Yes } else { Force::No };
-    let chosen = find_target(args)?;
+    let (drives, chosen) = find_target(args)?;
+    // A host that cannot name its own system disk cannot refuse it either.
+    // A live USB does this: the root is an overlay, the medium is reached
+    // through a loop device, and nothing in between names the drive.
+    let system_disk_known = drives.iter().any(|d| d.system);
     check_target(&chosen, force)?;
     check_fits(image_bytes, chosen.size_bytes)?;
 
@@ -69,14 +73,21 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
         }
     }
 
-    if !confirm(&chosen, force, image_bytes, args, boot_table)? {
+    if !confirm(
+        &chosen,
+        force,
+        image_bytes,
+        args,
+        boot_table,
+        system_disk_known,
+    )? {
         return Err(Error::NotConfirmed);
     }
 
     // The confirmation takes a person's time, and a drive can leave in it.
     // A number is a position in a list, so the drive at that number now may
     // not be the drive that was named a moment ago.
-    let again = find_target(args)?;
+    let (_, again) = find_target(args)?;
     check_same_drive(&chosen, &again)?;
     check_target(&again, force)?;
 
@@ -139,16 +150,18 @@ fn first_sector_has_boot_table(image: &mut File) -> Result<bool> {
 /// A path is allowed for a script, and it still has to name a drive that the
 /// list reports. Without that, every refusal in this file would have nothing
 /// to run against.
-fn find_target(args: &WriteArgs) -> Result<DriveInfo> {
+fn find_target(args: &WriteArgs) -> Result<(Vec<DriveInfo>, DriveInfo)> {
     let drives = in_list_order(platform::drive_list()?.drives()?);
 
     if let Some(path) = &args.device {
-        return drives
-            .into_iter()
+        let found = drives
+            .iter()
             .find(|d| d.node == *path || d.id.as_str() == path)
+            .cloned()
             .ok_or_else(|| Error::NoSuchDrive {
                 wanted: path.clone(),
-            });
+            })?;
+        return Ok((drives, found));
     }
 
     // clap asks for one of these, so this is the case where a later change
@@ -158,25 +171,34 @@ fn find_target(args: &WriteArgs) -> Result<DriveInfo> {
             wanted: "nothing. Give the number that burnout list printed".to_string(),
         });
     };
-    burnout_core::by_index(&drives, index)
+    let found = burnout_core::by_index(&drives, index)
         .cloned()
         .ok_or_else(|| Error::NoSuchDrive {
             wanted: index.to_string(),
-        })
+        })?;
+    Ok((drives, found))
 }
 
 /// Show the target and wait for the person to agree to it.
 ///
+/// Two prompts, and the harder one is not only for `--force`.
+///
 /// A drive that Burnout cannot prove is removable asks for the model and the
 /// size of the drive, which a person can only produce by looking at the drive
-/// in front of them. An ordinary drive asks for the whole word `yes`, because
-/// the person already named it by number.
+/// in front of them. So does every drive on a host where Burnout could not
+/// find the system disk, because there the refusal that protects that disk
+/// did not run, and the drive in front of the person may be the one their
+/// computer is running from. A live USB is exactly that case.
+///
+/// An ordinary drive on a host that named its system disk asks for the whole
+/// word `yes`, because the person already named the drive by number.
 fn confirm(
     drive: &DriveInfo,
     force: Force,
     image_bytes: u64,
     args: &WriteArgs,
     boot_table: bool,
+    system_disk_known: bool,
 ) -> Result<bool> {
     println!("This erases the drive. Nothing undoes it.");
     println!();
@@ -211,6 +233,12 @@ fn confirm(
     let wanted = if force == Force::Yes {
         println!("This drive is not one that Burnout can prove is removable.");
         println!("Type the model and the size of the drive to go on:");
+        println!("    {}", force_phrase(drive));
+        None
+    } else if !system_disk_known {
+        println!("Burnout cannot tell which drive this system starts from, so it");
+        println!("cannot refuse that drive. Read the drive above, and type its");
+        println!("model and its size to go on:");
         println!("    {}", force_phrase(drive));
         None
     } else {
