@@ -97,6 +97,15 @@ pub enum Error {
         /// What a person types to get it.
         remedy: String,
     },
+    /// A partition is too small for the file system that has to go on it.
+    PartitionTooSmall {
+        /// The file system, such as FAT32.
+        file_system: &'static str,
+        /// The size of the partition in bytes.
+        partition_bytes: u64,
+        /// The smallest partition that the file system fits, in bytes.
+        needed_bytes: u64,
+    },
 }
 
 impl fmt::Display for Error {
@@ -177,6 +186,16 @@ impl fmt::Display for Error {
             Error::NeedsPrivilege { remedy } => {
                 write!(f, "this needs more privilege than it has. {remedy}")
             }
+            Error::PartitionTooSmall {
+                file_system,
+                partition_bytes,
+                needed_bytes,
+            } => {
+                write!(
+                    f,
+                    "{file_system} needs a partition of {needed_bytes} bytes or more, and this one holds {partition_bytes}"
+                )
+            }
         }
     }
 }
@@ -249,6 +268,19 @@ mod tests {
         let text = e.to_string();
         assert!(text.contains("Samsung T7"));
         assert!(text.contains("SanDisk Ultra"));
+    }
+
+    #[test]
+    fn a_partition_message_gives_the_size_it_has_and_the_size_it_needs() {
+        let e = Error::PartitionTooSmall {
+            file_system: "FAT32",
+            partition_bytes: 1_048_576,
+            needed_bytes: 34_077_184,
+        };
+        let text = e.to_string();
+        assert!(text.contains("FAT32"));
+        assert!(text.contains("1048576"));
+        assert!(text.contains("34077184"));
     }
 
     #[test]
