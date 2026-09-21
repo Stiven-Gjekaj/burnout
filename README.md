@@ -306,6 +306,7 @@ A Windows installation needs a licence from Microsoft.
 | :-- | :-- |
 | [docs/roadmap.md](docs/roadmap.md) | The order the work happens in, and the exit test for each phase |
 | [docs/milestones.md](docs/milestones.md) | Every decision, the reason for it, and the options that lost |
+| [docs/releasing.md](docs/releasing.md) | How a release is cut, and how to check a download |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to take part, and the rule that no test opens a real device |
 | [AGENTS.md](AGENTS.md) | The rules for anybody who changes this repository, human or agent |
 | [SECURITY.md](SECURITY.md) | The threat model, and how to report a vulnerability privately |
