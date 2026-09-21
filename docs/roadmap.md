@@ -186,6 +186,13 @@ this also shows the list needs no privilege on Linux.
 
 **Size M. Depends on P1. Done. Ships as v0.1.**
 
+**v0.1 needs the release workflow, so that work moves here from P7.**
+The decision below puts build provenance on every release artifact, and P7
+scheduled the workflow that makes it. A release at v0.1 cannot satisfy both,
+and a first release without provenance would break the promise on the first
+day it applies. The workflow builds each host, publishes a SHA256 for each
+binary, attests each one, and opens a draft release that a person publishes.
+
 The first thing a person can use.
 
 The work:
@@ -398,9 +405,8 @@ The work that turns a program that works into one somebody else can use.
 - `--json` for the list and for progress, so a script can read it.
 - Resume nothing and promise nothing about a stopped write. Say that the drive
   is now unusable, because it is.
-- **Build provenance on every release artifact**, through
-  `actions/attest-build-provenance`, plus a SHA256 for each one. No code
-  signing certificate.
+- Build provenance is in place from v0.1, because it moved to P2. This phase
+  checks that it still holds for every artifact and every host.
 - The macOS and Windows download warning, and the way past it, in the README.
 - `install.esd` alongside `install.wim` everywhere.
 - The README stops saying that nothing is built.
