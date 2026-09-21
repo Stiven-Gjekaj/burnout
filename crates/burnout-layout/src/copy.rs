@@ -277,6 +277,37 @@ mod tests {
     }
 
     #[test]
+    fn every_entry_carries_a_date_that_is_a_date() {
+        let mut d = Drive::formatted(512);
+        copy_to_fat32(d.partition(), &windows_like()).unwrap();
+        let epoch = fatfs::Date {
+            year: 1980,
+            month: 1,
+            day: 1,
+        };
+        with_volume(d.partition(), |fs| {
+            let mut dirs = vec![fs.root_dir()];
+            let mut seen = 0;
+            while let Some(dir) = dirs.pop() {
+                for entry in dir.iter() {
+                    let entry = entry?;
+                    assert_eq!(entry.created().date, epoch, "{}", entry.file_name());
+                    assert_eq!(entry.modified().date, epoch, "{}", entry.file_name());
+                    assert_eq!(entry.accessed(), epoch, "{}", entry.file_name());
+                    seen += 1;
+                    let name = entry.file_name();
+                    if entry.is_dir() && name != "." && name != ".." {
+                        dirs.push(entry.to_dir());
+                    }
+                }
+            }
+            assert!(seen > 13, "the walk saw {seen} entries");
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
     fn the_same_tree_makes_the_same_volume() {
         // Every timestamp is the FAT epoch and the order of the tree is
         // fixed, so two copies agree to the byte.

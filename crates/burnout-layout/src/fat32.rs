@@ -105,6 +105,38 @@ pub fn format_fat32<T: BlockTarget>(mut volume: T, options: &Fat32Options) -> Re
 /// A mounted FAT32 volume, as `fatfs` holds it.
 pub(crate) type Volume<'a, T> = FileSystem<&'a mut SectorIo<T>>;
 
+/// The date and time of every new entry: the first second that FAT holds.
+///
+/// Without `chrono`, `fatfs` writes a date of zero. That is not a date,
+/// because FAT counts the month and the day from one, and macOS shows it as
+/// 1970. One fixed time also keeps one tree one volume, to the byte.
+#[derive(Debug)]
+struct FatEpoch;
+
+impl fatfs::TimeProvider for FatEpoch {
+    fn get_current_date(&self) -> fatfs::Date {
+        fatfs::Date {
+            year: 1980,
+            month: 1,
+            day: 1,
+        }
+    }
+
+    fn get_current_date_time(&self) -> fatfs::DateTime {
+        fatfs::DateTime {
+            date: self.get_current_date(),
+            time: fatfs::Time {
+                hour: 0,
+                min: 0,
+                sec: 0,
+                millis: 0,
+            },
+        }
+    }
+}
+
+static FAT_EPOCH: FatEpoch = FatEpoch;
+
 /// Mount `volume`, give it to `work`, and unmount it whatever `work` returns.
 ///
 /// A volume that is not FAT32 is refused before `work` runs.
@@ -113,7 +145,8 @@ pub(crate) fn with_volume<T: BlockTarget, R>(
     work: impl FnOnce(&Volume<'_, T>) -> Result<R>,
 ) -> Result<R> {
     over_sectors(volume, |io| {
-        let fs = FileSystem::new(&mut *io, FsOptions::new())?;
+        let options = FsOptions::new().time_provider(&FAT_EPOCH);
+        let fs = FileSystem::new(&mut *io, options)?;
         if fs.fat_type() != FatType::Fat32 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
