@@ -16,6 +16,7 @@ mod memory_target;
 mod progress;
 mod safety;
 mod sha256;
+mod strict_target;
 mod target;
 mod write;
 
@@ -33,5 +34,6 @@ pub use safety::{
     check_fits, check_same_drive, check_target, describe, force_phrase, phrase_matches, Force,
 };
 pub use sha256::{sha256, Digest, Sha256};
+pub use strict_target::StrictTarget;
 pub use target::{BlockTarget, DriveAccess};
 pub use write::{verify_image, write_image, Verification, WriteReport};
