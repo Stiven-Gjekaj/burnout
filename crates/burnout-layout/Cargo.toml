@@ -1,0 +1,12 @@
+[package]
+name = "burnout-layout"
+description = "The partition table and the file systems of a Windows installer drive."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+burnout-core = { path = "../burnout-core" }
