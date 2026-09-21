@@ -443,8 +443,10 @@ If a stable name for a drive is ever needed, read the symlinks under
 
 - `clap` for the command line.
 - `indicatif` for progress.
-- `fatfs` for FAT32. It is MIT, and it works over anything that seeks, so it
-  works over a test file as well as a device.
+- `fatfs` for FAT32. It is MIT, and it works over anything that seeks. A
+  device takes it only through a sector adapter, and Burnout repairs two
+  faults in the directories that its release 0.3.6 writes. The roadmap gives
+  both, under P3.
 - `blake3` for the hashes.
 - An exFAT writer, which this project writes. The format is documented, and it
   is a few thousand lines. It is far less work than NTFS, and less work than a

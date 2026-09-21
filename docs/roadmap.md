@@ -309,12 +309,64 @@ The work:
   partial sector, changes it and writes it back, and passes whole sectors
   straight through. It lives in `burnout-core`, which keeps no dependency.
 - Write a directory tree into it.
+- Repair two faults in the directories that `fatfs` 0.3.6 writes. The next
+  part of this section gives them.
 - The layout lives in a new crate, `burnout-layout`, which is the only crate
   that depends on `fatfs`. P4 puts the exFAT writer beside it.
 
 **The exit test.** A drive partitioned and filled by Burnout mounts on
 Windows, on macOS and on Linux, and every file reads back with the hash it
 went in with. The same code, run against an image file, passes in CI.
+
+**It passes on macOS and on Linux. Windows waits for the first run of CI.**
+
+The example `layout_image` writes the table, formats partition 1, copies a
+sample tree of 207 files onto it and checks each file through a new mount.
+The tree holds files at several depths, a file of no bytes, long names, the
+name `Überprüfung.txt`, an empty directory, and a directory of 200 files that
+fills more than one cluster. Each host then mounts the image with its own
+mechanism, checks it with its own tool, and reads each file back through its
+own FAT driver.
+
+| Host | How it mounts the image | Its check tool | Files that match |
+| --- | --- | --- | --- |
+| macOS 26 | `hdiutil`, `mount -t msdos` | `fsck_msdos -n`, exit 0 | 207 of 207 |
+| Fedora 44 ARM64, 512-byte sectors | `losetup` | `fsck.fat -n`, no fault | 207 of 207 |
+| Fedora 44 ARM64, 4096-byte sectors | `losetup --sector-size 4096` | `fsck.fat -n`, no fault | 207 of 207 |
+| Windows | a VHD and `Mount-DiskImage` | `chkdsk` | not run yet |
+
+Fedora ran in a virtual machine. The Windows machine asks for an
+administrator password before it mounts a VHD, and this work does not type
+one. The runner of CI is an administrator, so the `layout` job gives the
+Windows answer on its first run. The `same-image` job then compares the image
+that each of the three hosts built. On macOS, two runs from two new trees gave
+the same image digest.
+
+**Four faults that no test of this crate found, and the host tools did.**
+
+- `fatfs` 0.3.6 writes a long-name entry before `.` and before `..` in each
+  new directory, and gives `..` the cluster of the root, where FAT32 asks for
+  0. `fsck_msdos -n` exits 206 and names every directory. The source of
+  `fatfs` fixes both, and no release carries the fix: 0.3.6, of January 2023,
+  is the last. A git or a patched dependency would stop `cargo install` from
+  crates.io, so Burnout reads the volume after `fatfs` unmounts it and writes
+  the two entries again. A test fails on the day a release of `fatfs` stops
+  writing the old shape, and the repair can go then.
+- `fatfs` without `chrono` writes a date of zero, which is not a date, and
+  macOS shows each entry as 1970. Every entry now carries 1980-01-01 at
+  midnight, the first second that FAT holds. One fixed time also keeps one
+  tree one image.
+- Linux could not find `Überprüfung.txt` until the mount had the `utf8`
+  option. Without it, the kernel gives each name in its default character set.
+  The volume was right, and macOS read the name.
+- A test that changed one byte on the drive found the change in another file.
+  The generator of the test bytes repeated a run of one file inside another,
+  and the test searched for the run. The bytes now come from a generator
+  that gives each file a stream of its own.
+
+**What this does not prove.** Every write went to an image file. A raw device
+is proven only through `StrictTarget`, which refuses what a device refuses.
+P6 writes the layout to a device, and that is where the device half closes.
 
 ---
 
