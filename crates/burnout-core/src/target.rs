@@ -68,3 +68,49 @@ pub trait DriveAccess {
     /// error.
     fn open(&self, id: &DriveId) -> Result<Self::Target>;
 }
+
+/// A borrowed target is a target.
+///
+/// The layout of a Windows drive puts one file system inside a window onto
+/// the drive, and then checks it through a second mount. Both need the drive
+/// for a while and then give it back, and a borrow is how a caller keeps it.
+impl<T: BlockTarget + ?Sized> BlockTarget for &mut T {
+    fn logical_sector_size(&self) -> u32 {
+        (**self).logical_sector_size()
+    }
+
+    fn length(&self) -> u64 {
+        (**self).length()
+    }
+
+    fn sync(&mut self) -> Result<()> {
+        (**self).sync()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MemoryTarget;
+    use std::io::{Read, Seek, SeekFrom};
+
+    fn takes_a_target<T: BlockTarget>(mut target: T) -> (u32, u64) {
+        target.seek(SeekFrom::Start(512)).unwrap();
+        target.write_all(&[7; 512]).unwrap();
+        target.sync().unwrap();
+        (target.logical_sector_size(), target.length())
+    }
+
+    #[test]
+    fn a_borrowed_target_writes_into_the_target_it_borrows() {
+        let mut owned = MemoryTarget::new(4096, 512).unwrap();
+        assert_eq!(takes_a_target(&mut owned), (512, 4096));
+
+        // The borrow ended and the owner still holds what went through it.
+        assert_eq!(owned.sync_count(), 1);
+        let mut back = [0u8; 512];
+        owned.seek(SeekFrom::Start(512)).unwrap();
+        owned.read_exact(&mut back).unwrap();
+        assert_eq!(back, [7; 512]);
+    }
+}
