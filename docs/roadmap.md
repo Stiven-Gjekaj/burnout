@@ -292,7 +292,7 @@ build that ships. The hash is not the part that waits: a USB 3 stick writes at
 
 ## P3. The partition table and FAT32
 
-**Size M. Depends on P2.**
+**Size M. Depends on P2. Done.**
 
 The first half of the Windows layout.
 
@@ -318,7 +318,7 @@ The work:
 Windows, on macOS and on Linux, and every file reads back with the hash it
 went in with. The same code, run against an image file, passes in CI.
 
-**It passes on macOS and on Linux. Windows waits for the first run of CI.**
+**It passes on the three hosts, and CI runs it on each push.**
 
 The example `layout_image` writes the table, formats partition 1, copies a
 sample tree of 207 files onto it and checks each file through a new mount.
@@ -333,14 +333,18 @@ own FAT driver.
 | macOS 26 | `hdiutil`, `mount -t msdos` | `fsck_msdos -n`, exit 0 | 207 of 207 |
 | Fedora 44 ARM64, 512-byte sectors | `losetup` | `fsck.fat -n`, no fault | 207 of 207 |
 | Fedora 44 ARM64, 4096-byte sectors | `losetup --sector-size 4096` | `fsck.fat -n`, no fault | 207 of 207 |
-| Windows | a VHD and `Mount-DiskImage` | `chkdsk` | not run yet |
+| Windows Server 2025, in CI | a VHD, `Mount-DiskImage -Access ReadOnly` | `chkdsk`, "found no problems" | 207 of 207 |
 
-Fedora ran in a virtual machine. The Windows machine asks for an
+The `layout` job of CI runs the same checks on `ubuntu-latest`,
+`macos-latest` and `windows-latest`, and its first run passed on each. Fedora
+also ran them in a virtual machine here. The Windows machine here asks for an
 administrator password before it mounts a VHD, and this work does not type
-one. The runner of CI is an administrator, so the `layout` job gives the
-Windows answer on its first run. The `same-image` job then compares the image
-that each of the three hosts built. On macOS, two runs from two new trees gave
-the same image digest.
+one, so the Windows answer is the runner of CI, which is an administrator.
+
+The `same-image` job compares the image that each host built. The first run
+got one digest from three hosts, `8da7a714...daadcf0ae`, and it is the digest
+of the image built on macOS here. The same tree gives the same bytes on each
+host, which is the promise of this project in its smallest form.
 
 **Four faults that no test of this crate found, and the host tools did.**
 
