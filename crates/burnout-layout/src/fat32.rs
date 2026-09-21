@@ -244,58 +244,9 @@ fn clusters(sectors: u64, sector_size: u32, per_cluster: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use burnout_core::{MemoryTarget, StrictTarget, Window};
+    use crate::testing::{Drive, MIB, SERIAL};
 
-    const MIB: u64 = 1024 * 1024;
     const GIB: u64 = 1024 * MIB;
-    const SERIAL: u32 = 0xB0B0_CAFE;
-
-    /// A drive with one partition at 1 MiB and a mebibyte to spare after it.
-    struct Drive {
-        strict: StrictTarget<MemoryTarget>,
-        length: u64,
-    }
-
-    impl Drive {
-        fn new(sector: u32, length: u64) -> Self {
-            let drive = MemoryTarget::new(length + 2 * MIB, sector).unwrap();
-            Drive {
-                strict: StrictTarget::new(drive),
-                length,
-            }
-        }
-
-        /// A partition that FAT32 fits at this sector size.
-        fn usual(sector: u32) -> Self {
-            Drive::new(sector, if sector == 512 { 40 * MIB } else { 272 * MIB })
-        }
-
-        fn sector(&self) -> u32 {
-            self.strict.logical_sector_size()
-        }
-
-        fn partition(&mut self) -> Window<&mut StrictTarget<MemoryTarget>> {
-            Window::new(&mut self.strict, MIB, self.length).unwrap()
-        }
-
-        fn format(&mut self) -> Result<()> {
-            let first_sector = (MIB / self.sector() as u64) as u32;
-            let options = Fat32Options {
-                label: "Burnout",
-                serial: SERIAL,
-                first_sector,
-            };
-            format_fat32(self.partition(), &options)
-        }
-
-        fn bytes(&self) -> &[u8] {
-            self.strict.inner().contents()
-        }
-
-        fn partition_bytes(&self) -> &[u8] {
-            &self.bytes()[MIB as usize..(MIB + self.length) as usize]
-        }
-    }
 
     fn u32_at(bytes: &[u8], at: usize) -> u32 {
         u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())

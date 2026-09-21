@@ -48,6 +48,11 @@ impl TreePath {
         self.0.split('/')
     }
 
+    /// The last name, which is the name of the entry itself.
+    pub fn name(&self) -> &str {
+        self.0.rsplit('/').next().unwrap_or(&self.0)
+    }
+
     /// The directory that holds this, or `None` at the top of the tree.
     pub fn parent(&self) -> Option<TreePath> {
         self.0
@@ -315,6 +320,16 @@ mod tests {
         for bad in ["", "/a", "a/", "a//b", ".", "..", "a/./b", "a/../b"] {
             assert!(TreePath::new(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_path_knows_its_name_and_the_directory_above_it() {
+        let path = TreePath::new("efi/boot/bootx64.efi").unwrap();
+        assert_eq!(path.name(), "bootx64.efi");
+        assert_eq!(path.parent().unwrap().as_str(), "efi/boot");
+        let top = TreePath::new("setup.exe").unwrap();
+        assert_eq!(top.name(), "setup.exe");
+        assert_eq!(top.parent(), None);
     }
 
     #[test]

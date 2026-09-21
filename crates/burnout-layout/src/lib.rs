@@ -13,11 +13,15 @@
 //!
 //! [The milestones]: https://github.com/Stiven-Gjekaj/burnout/blob/main/docs/milestones.md
 
+mod copy;
 mod fat32;
 mod mbr;
 mod plan;
+#[cfg(test)]
+mod testing;
 mod tree;
 
+pub use copy::{copy_to_fat32, CopiedFile, Manifest, MAX_FAT32_FILE_BYTES};
 pub use fat32::{format_fat32, Fat32Options};
 pub use mbr::{mbr_bytes, write_table, TYPE_EXFAT, TYPE_FAT32};
 pub use plan::{plan, Extent, Layout, ALIGN, MBR_SECTORS};

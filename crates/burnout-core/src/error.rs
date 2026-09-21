@@ -105,6 +105,24 @@ pub enum Error {
         /// What is wrong with it.
         detail: String,
     },
+    /// A file of the tree is larger than the file system can hold.
+    FileTooLarge {
+        /// The path inside the tree.
+        path: String,
+        /// The size of the file in bytes.
+        bytes: u64,
+        /// The file system, such as FAT32.
+        file_system: &'static str,
+        /// The largest file that the file system holds, in bytes.
+        limit: u64,
+    },
+    /// A directory or a file of the tree cannot go onto the volume.
+    CannotCopy {
+        /// The path inside the tree.
+        path: String,
+        /// What is wrong.
+        detail: String,
+    },
     /// A partition is too small for the file system that has to go on it.
     PartitionTooSmall {
         /// The file system, such as FAT32.
@@ -197,6 +215,20 @@ impl fmt::Display for Error {
             Error::Source { path, detail } => {
                 write!(f, "cannot use {path}: {detail}")
             }
+            Error::FileTooLarge {
+                path,
+                bytes,
+                file_system,
+                limit,
+            } => {
+                write!(
+                    f,
+                    "{path} holds {bytes} bytes, and {file_system} holds a file of {limit} bytes or fewer"
+                )
+            }
+            Error::CannotCopy { path, detail } => {
+                write!(f, "cannot copy {path} onto the volume: {detail}")
+            }
             Error::PartitionTooSmall {
                 file_system,
                 partition_bytes,
@@ -288,6 +320,20 @@ mod tests {
             detail: "permission denied".to_string(),
         };
         assert_eq!(e.to_string(), "cannot use efi/boot: permission denied");
+    }
+
+    #[test]
+    fn a_large_file_message_gives_its_size_and_the_limit() {
+        let e = Error::FileTooLarge {
+            path: "sources/install.wim".to_string(),
+            bytes: 5_000_000_000,
+            file_system: "FAT32",
+            limit: 4_294_967_295,
+        };
+        let text = e.to_string();
+        assert!(text.contains("sources/install.wim"));
+        assert!(text.contains("5000000000"));
+        assert!(text.contains("4294967295"));
     }
 
     #[test]
