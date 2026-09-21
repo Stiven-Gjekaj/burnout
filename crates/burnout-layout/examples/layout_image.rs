@@ -3,17 +3,19 @@
 //!
 //! ```text
 //! layout_image tree <dir>
-//! layout_image image <tree> <image> [--sector-size 512|4096] [--vhd]
+//! layout_image image <tree> <image> <manifest> [--sector-size 512|4096] [--vhd]
 //! ```
 //!
 //! `tree` writes a sample tree into a new directory. Its bytes come from a
 //! generator, so the tree is the same on each host.
 //!
 //! `image` writes the partition table, formats partition 1 as FAT32, copies
-//! the tree onto it, and checks each file through a new mount. It prints one
-//! line for each file in the form of `sha256sum`, so a host can check the
-//! files it reads with `sha256sum -c`. It prints the SHA-256 of the image to
-//! standard error, so two hosts can compare the images they made.
+//! the tree onto it, and checks each file through a new mount. It writes one
+//! line for each file into `<manifest>`, in the form of `sha256sum`, so a
+//! host can check the files it reads with `sha256sum -c`. The example writes
+//! the file itself, because a shell that takes the output can change the
+//! encoding of a name that is not ASCII. It prints the SHA-256 of the image,
+//! so two hosts can compare the images they made.
 //!
 //! `--vhd` adds the footer of a fixed VHD after the image. Windows then mounts
 //! the file with `Mount-DiskImage`. The footer is for this check only, and
@@ -41,16 +43,20 @@ const DISK_SIGNATURE: u32 = 0x4255_524E;
 const SERIAL: u32 = 0x0B0B_0B0B;
 
 const USAGE: &str = "usage: layout_image tree <dir>
-       layout_image image <tree> <image> [--sector-size 512|4096] [--vhd]";
+       layout_image image <tree> <image> <manifest> [--sector-size 512|4096] [--vhd]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("tree") if args.len() == 2 => make_tree(Path::new(&args[1])),
-        Some("image") if args.len() >= 3 => match options(&args[3..]) {
-            Some((sector, vhd)) => {
-                make_image(Path::new(&args[1]), Path::new(&args[2]), sector, vhd)
-            }
+        Some("image") if args.len() >= 4 => match options(&args[4..]) {
+            Some((sector, vhd)) => make_image(
+                Path::new(&args[1]),
+                Path::new(&args[2]),
+                Path::new(&args[3]),
+                sector,
+                vhd,
+            ),
             None => return usage(),
         },
         _ => return usage(),
@@ -130,7 +136,7 @@ fn generated(length: usize, seed: u64) -> Vec<u8> {
         .collect()
 }
 
-fn make_image(tree: &Path, image: &Path, sector: u32, vhd: bool) -> Outcome {
+fn make_image(tree: &Path, image: &Path, manifest: &Path, sector: u32, vhd: bool) -> Outcome {
     let source = DirSource::new(tree);
     let mut drive = FileTarget::create(image, DRIVE_BYTES, sector)?;
     let layout = plan(DRIVE_BYTES, sector, BOOT_BYTES)?;
@@ -142,14 +148,16 @@ fn make_image(tree: &Path, image: &Path, sector: u32, vhd: bool) -> Outcome {
         first_sector: layout.first_sector(layout.boot) as u32,
     };
     format_fat32(boot(&mut drive, &layout)?, &options)?;
-    let manifest = copy_to_fat32(boot(&mut drive, &layout)?, &source)?;
-    verify_fat32(boot(&mut drive, &layout)?, &manifest)?;
+    let copied = copy_to_fat32(boot(&mut drive, &layout)?, &source)?;
+    verify_fat32(boot(&mut drive, &layout)?, &copied)?;
     drive.sync()?;
 
-    for file in &manifest.files {
-        println!("{}  {}", file.digest, file.path);
+    let mut lines = String::new();
+    for file in &copied.files {
+        lines.push_str(&format!("{}  {}\n", file.digest, file.path));
     }
-    eprintln!("image: {}", digest_of(&mut drive)?);
+    fs::write(manifest, lines)?;
+    println!("{}", digest_of(&mut drive)?);
     drop(drive);
 
     if vhd {
