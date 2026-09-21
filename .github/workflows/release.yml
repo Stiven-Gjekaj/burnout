@@ -1,0 +1,167 @@
+# Builds the binaries of a release, and publishes them only from a tag.
+#
+# A run started by hand builds every host and computes every checksum, and it
+# publishes nothing. That is the way to test this file without a release.
+#
+# The job that publishes is the only job that holds a write token, and it runs
+# only for a tag. The attestation is made there too. On a public repository an
+# attestation goes into the public Sigstore log, so a test run makes none.
+#
+# Every action is pinned to the commit of a release, for the reason that
+# ci.yml gives.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    strategy:
+      # A release that lacks one host is not a release. Stop at the first
+      # failure rather than publish five binaries out of six.
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      # --locked builds the dependency versions that Cargo.lock names and
+      # refuses to change them. A release is the build that matters most, so
+      # it gets no freedom that the gate did not have.
+      #
+      # Linux builds against musl, so the binary carries its C library and
+      # runs on any distribution. The MSVC builds link the C runtime in, which
+      # .cargo/config.toml arranges.
+      - name: build
+        run: cargo build --release --locked -p burnout --target ${{ matrix.target }}
+
+      - name: collect
+        shell: bash
+        run: |
+          mkdir out
+          suffix=""
+          case "${{ matrix.target }}" in *windows*) suffix=".exe" ;; esac
+          cp "target/${{ matrix.target }}/release/burnout${suffix}" "out/burnout${suffix}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: burnout-${{ matrix.target }}
+          path: out/
+          if-no-files-found: error
+
+  checksums:
+    name: name the files and hash them
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # For `cargo metadata`, which reads the version the way Cargo does and
+      # not the way a pattern over the text would.
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: burnout-*
+          path: built/
+
+      # One machine hashes every file, so every checksum comes from the same
+      # tool and nobody has to trust six different ones.
+      - name: name and hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "burnout") | .version')
+          mkdir dist
+          for dir in built/burnout-*; do
+            target=${dir#built/burnout-}
+            for file in "$dir"/*; do
+              suffix=""
+              case "$file" in *.exe) suffix=".exe" ;; esac
+              cp "$file" "dist/burnout-${version}-${target}${suffix}"
+            done
+          done
+          cd dist
+          sha256sum burnout-* > SHA256SUMS
+          cat SHA256SUMS
+          echo "${version}" > ../VERSION
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: |
+            dist/
+            VERSION
+          if-no-files-found: error
+
+  release:
+    name: publish a draft release
+    needs: checksums
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: .
+
+      # A tag that disagrees with the version in Cargo.toml gives a binary
+      # whose --version names a release it does not belong to.
+      - name: check that the tag names the version
+        shell: bash
+        run: |
+          version=$(cat VERSION)
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "The tag is ${GITHUB_REF_NAME} and Cargo.toml says ${version}." >&2
+            exit 1
+          fi
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/burnout-*
+
+      # A draft, so that a person reads the assets before anybody else can
+      # download them. This tool erases drives.
+      - name: open the draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft \
+            --title "Burnout ${GITHUB_REF_NAME}" \
+            --generate-notes
