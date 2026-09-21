@@ -15,6 +15,7 @@ mod listing;
 mod memory_target;
 mod progress;
 mod safety;
+mod sector_io;
 mod sha256;
 mod strict_target;
 mod target;
@@ -34,6 +35,7 @@ pub use progress::{Progress, ProgressEvent, Silent, Stage};
 pub use safety::{
     check_fits, check_same_drive, check_target, describe, force_phrase, phrase_matches, Force,
 };
+pub use sector_io::SectorIo;
 pub use sha256::{sha256, Digest, Sha256};
 pub use strict_target::StrictTarget;
 pub use target::{BlockTarget, DriveAccess};
