@@ -123,6 +123,13 @@ pub enum Error {
         /// What is wrong.
         detail: String,
     },
+    /// A volume does not hold what went onto it.
+    VolumeDiffers {
+        /// The path inside the tree where the two differ.
+        path: String,
+        /// How they differ.
+        detail: String,
+    },
     /// A partition is too small for the file system that has to go on it.
     PartitionTooSmall {
         /// The file system, such as FAT32.
@@ -229,6 +236,9 @@ impl fmt::Display for Error {
             Error::CannotCopy { path, detail } => {
                 write!(f, "cannot copy {path} onto the volume: {detail}")
             }
+            Error::VolumeDiffers { path, detail } => {
+                write!(f, "the volume and the source differ at {path}: {detail}")
+            }
             Error::PartitionTooSmall {
                 file_system,
                 partition_bytes,
@@ -334,6 +344,18 @@ mod tests {
         assert!(text.contains("sources/install.wim"));
         assert!(text.contains("5000000000"));
         assert!(text.contains("4294967295"));
+    }
+
+    #[test]
+    fn a_volume_message_names_the_path_where_the_two_differ() {
+        let e = Error::VolumeDiffers {
+            path: "efi/boot/bootx64.efi".to_string(),
+            detail: "the volume holds 10 bytes and the source 12".to_string(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "the volume and the source differ at efi/boot/bootx64.efi: the volume holds 10 bytes and the source 12"
+        );
     }
 
     #[test]

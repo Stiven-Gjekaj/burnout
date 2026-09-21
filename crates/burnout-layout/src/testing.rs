@@ -2,7 +2,7 @@
 
 use burnout_core::{BlockTarget, MemoryTarget, Result, StrictTarget, Window};
 
-use crate::{format_fat32, Fat32Options};
+use crate::{format_fat32, Fat32Options, MemorySource};
 
 pub const MIB: u64 = 1024 * 1024;
 
@@ -64,4 +64,36 @@ impl Drive {
     pub fn partition_bytes(&self) -> &[u8] {
         &self.bytes()[MIB as usize..(MIB + self.length) as usize]
     }
+}
+
+/// Bytes from a generator, so a block in the wrong place cannot pass for
+/// the right one, and no run of one file turns up in another.
+pub fn pattern(length: usize, seed: u8) -> Vec<u8> {
+    let mut x = 0x9E37_79B9_7F4A_7C15u64 ^ seed as u64;
+    (0..length)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x >> 24) as u8
+        })
+        .collect()
+}
+
+/// A tree with a little of everything that a Windows image has: files at
+/// several depths, a file of no bytes, a long name and an empty directory.
+pub fn windows_like() -> MemorySource {
+    let mut tree = MemorySource::new();
+    tree.add_file("bootmgr", pattern(4000, 1)).unwrap();
+    tree.add_file("efi/boot/bootx64.efi", pattern(12_289, 2))
+        .unwrap();
+    tree.add_file("efi/microsoft/boot/BCD", pattern(3 * 4096, 3))
+        .unwrap();
+    tree.add_file("sources/boot.wim", pattern(3 * 1024 * 1024 + 7, 4))
+        .unwrap();
+    tree.add_file("autorun.inf", *b"").unwrap();
+    tree.add_file("A long name with spaces.txt", pattern(10, 5))
+        .unwrap();
+    tree.add_dir("support/logging").unwrap();
+    tree
 }

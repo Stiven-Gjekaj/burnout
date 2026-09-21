@@ -201,38 +201,9 @@ fn cannot_copy(path: &TreePath, e: io::Error) -> Error {
 mod tests {
     use super::*;
     use crate::fat32::with_volume;
-    use crate::testing::Drive;
+    use crate::testing::{windows_like, Drive};
     use crate::tree::MemorySource;
     use burnout_core::sha256;
-
-    /// Bytes that differ from one offset to the next, so a block in the
-    /// wrong place cannot pass for the right one.
-    fn pattern(length: usize, seed: u8) -> Vec<u8> {
-        (0..length)
-            .map(|i| {
-                (i as u8)
-                    .wrapping_mul(31)
-                    .wrapping_add(seed ^ (i >> 9) as u8)
-            })
-            .collect()
-    }
-
-    /// A tree with a little of everything that a Windows image has.
-    fn windows_like() -> MemorySource {
-        let mut tree = MemorySource::new();
-        tree.add_file("bootmgr", pattern(4000, 1)).unwrap();
-        tree.add_file("efi/boot/bootx64.efi", pattern(12_289, 2))
-            .unwrap();
-        tree.add_file("efi/microsoft/boot/BCD", pattern(3 * 4096, 3))
-            .unwrap();
-        tree.add_file("sources/boot.wim", pattern(3 * 1024 * 1024 + 7, 4))
-            .unwrap();
-        tree.add_file("autorun.inf", *b"").unwrap();
-        tree.add_file("A long name with spaces.txt", pattern(10, 5))
-            .unwrap();
-        tree.add_dir("support/logging").unwrap();
-        tree
-    }
 
     fn read_back<T: BlockTarget>(volume: T, path: &str) -> Vec<u8> {
         with_volume(volume, |fs| {
