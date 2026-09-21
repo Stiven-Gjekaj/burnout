@@ -14,6 +14,7 @@
 //! [The milestones]: https://github.com/Stiven-Gjekaj/burnout/blob/main/docs/milestones.md
 
 mod copy;
+mod dot_entries;
 mod fat32;
 mod mbr;
 mod plan;

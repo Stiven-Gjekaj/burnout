@@ -144,22 +144,30 @@ pub(crate) fn with_volume<T: BlockTarget, R>(
     volume: T,
     work: impl FnOnce(&Volume<'_, T>) -> Result<R>,
 ) -> Result<R> {
-    over_sectors(volume, |io| {
-        let options = FsOptions::new().time_provider(&FAT_EPOCH);
-        let fs = FileSystem::new(&mut *io, options)?;
-        if fs.fat_type() != FatType::Fat32 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("the volume is {:?} and not FAT32", fs.fat_type()),
-            )
-            .into());
-        }
-        let result = work(&fs);
-        let unmounted = fs.unmount();
-        let value = result?;
-        unmounted?;
-        Ok(value)
-    })
+    over_sectors(volume, |io| mounted(io, work))
+}
+
+/// The same, over a [`SectorIo`] that the caller keeps for more work after
+/// the unmount.
+pub(crate) fn mounted<T: BlockTarget, R>(
+    io: &mut SectorIo<T>,
+    work: impl FnOnce(&Volume<'_, T>) -> Result<R>,
+) -> Result<R> {
+    io.seek(SeekFrom::Start(0))?;
+    let options = FsOptions::new().time_provider(&FAT_EPOCH);
+    let fs = FileSystem::new(&mut *io, options)?;
+    if fs.fat_type() != FatType::Fat32 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("the volume is {:?} and not FAT32", fs.fat_type()),
+        )
+        .into());
+    }
+    let result = work(&fs);
+    let unmounted = fs.unmount();
+    let value = result?;
+    unmounted?;
+    Ok(value)
 }
 
 /// Give `work` a [`SectorIo`] over `volume`, and flush it whatever `work`
@@ -167,7 +175,7 @@ pub(crate) fn with_volume<T: BlockTarget, R>(
 ///
 /// A drop writes the cache back too, but it cannot report an error. An error
 /// from `work` comes first, because it is the cause.
-fn over_sectors<T: BlockTarget, R>(
+pub(crate) fn over_sectors<T: BlockTarget, R>(
     volume: T,
     work: impl FnOnce(&mut SectorIo<T>) -> Result<R>,
 ) -> Result<R> {

@@ -10,7 +10,8 @@ use std::io::{self, Read, Write};
 use burnout_core::{BlockTarget, Digest, Error, Result, Sha256};
 use fatfs::{Dir, ReadWriteSeek};
 
-use crate::fat32::with_volume;
+use crate::dot_entries::repair_dot_entries;
+use crate::fat32::{mounted, over_sectors, Volume};
 use crate::tree::{Entry, FileSource, TreePath};
 
 /// The largest file that FAT32 holds: 4 GiB less one byte.
@@ -66,40 +67,51 @@ where
         }
     }
 
-    with_volume(volume, |fs| {
-        let root = fs.root_dir();
-        let mut manifest = Manifest::default();
-        let mut chunk = vec![0u8; CHUNK_BYTES];
-        for entry in &entries {
-            let path = entry.path();
-            let parent = match path.parent() {
-                Some(parent) => Some(
-                    root.open_dir(parent.as_str())
-                        .map_err(|e| cannot_copy(path, e))?,
-                ),
-                None => None,
-            };
-            let dir = parent.as_ref().unwrap_or(&root);
-            refuse_second_name(dir, path)?;
-
-            match entry {
-                Entry::Dir(path) => {
-                    dir.create_dir(path.name())
-                        .map_err(|e| cannot_copy(path, e))?;
-                    manifest.dirs.push(path.clone());
-                }
-                Entry::File(path, bytes) => {
-                    let digest = copy_file(dir, source, path, *bytes, &mut chunk)?;
-                    manifest.files.push(CopiedFile {
-                        path: path.clone(),
-                        bytes: *bytes,
-                        digest,
-                    });
-                }
-            }
-        }
+    over_sectors(volume, |io| {
+        let manifest = mounted(io, |fs| copy_entries(fs, source, &entries))?;
+        repair_dot_entries(io)?;
         Ok(manifest)
     })
+}
+
+/// Copy the entries onto a mounted volume, in order.
+fn copy_entries<T, S>(fs: &Volume<'_, T>, source: &S, entries: &[Entry]) -> Result<Manifest>
+where
+    T: BlockTarget,
+    S: FileSource + ?Sized,
+{
+    let root = fs.root_dir();
+    let mut manifest = Manifest::default();
+    let mut chunk = vec![0u8; CHUNK_BYTES];
+    for entry in entries {
+        let path = entry.path();
+        let parent = match path.parent() {
+            Some(parent) => Some(
+                root.open_dir(parent.as_str())
+                    .map_err(|e| cannot_copy(path, e))?,
+            ),
+            None => None,
+        };
+        let dir = parent.as_ref().unwrap_or(&root);
+        refuse_second_name(dir, path)?;
+
+        match entry {
+            Entry::Dir(path) => {
+                dir.create_dir(path.name())
+                    .map_err(|e| cannot_copy(path, e))?;
+                manifest.dirs.push(path.clone());
+            }
+            Entry::File(path, bytes) => {
+                let digest = copy_file(dir, source, path, *bytes, &mut chunk)?;
+                manifest.files.push(CopiedFile {
+                    path: path.clone(),
+                    bytes: *bytes,
+                    digest,
+                });
+            }
+        }
+    }
+    Ok(manifest)
 }
 
 /// Refuse `path` when its directory already holds an entry that FAT32 does
