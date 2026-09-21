@@ -301,9 +301,16 @@ The work:
 - Write an MBR: the boot signature, one entry per partition, the right type
   bytes, and CHS fields that are wrong in the way every tool writes them wrong.
 - Format a FAT32 volume with the `fatfs` crate, which is MIT and works over
-  anything that seeks, so it works over a file in a test and over a device in
-  the product.
+  anything that reads, writes and seeks.
+- Put a sector adapter under it. `fatfs` writes a FAT32 entry as four bytes at
+  `cluster * 4`, and a directory entry as 32 bytes, and a raw device refuses
+  any write that its sector size does not divide. Measured in the 0.3.6
+  source, and the `fatfs` README says to wrap the storage. The adapter reads a
+  partial sector, changes it and writes it back, and passes whole sectors
+  straight through. It lives in `burnout-core`, which keeps no dependency.
 - Write a directory tree into it.
+- The layout lives in a new crate, `burnout-layout`, which is the only crate
+  that depends on `fatfs`. P4 puts the exFAT writer beside it.
 
 **The exit test.** A drive partitioned and filled by Burnout mounts on
 Windows, on macOS and on Linux, and every file reads back with the hash it
