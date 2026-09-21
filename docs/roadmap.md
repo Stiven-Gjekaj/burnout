@@ -230,9 +230,32 @@ The Linux run also shows the restart, in the title of its window:
 Two dashes before the path, the arguments carried across, and the guard added
 on the end.
 
-**What a virtual drive does not prove.** A QEMU USB disk is not a USB stick.
-It has no controller of its own, it never reports a sector size other than
-512, and it does not fail in the middle of a write. The other half of this
+**Three things the first run did not touch, now run.**
+
+*An unmount that had something to unmount.* The first run wrote to blank
+disks, so the unmount had nothing to do on any host. Each host now writes over
+a drive that the host itself had mounted.
+
+| Host | Before the write | After it |
+| --- | --- | --- |
+| macOS | `/Volumes/TESTVOL`, and `/dev/rdisk5` answered `Resource busy` | the volume is gone and the write verified |
+| Linux | `/dev/sda1` at `/run/media/liveuser/XFER` | the write verified |
+| Windows | `G:` labelled TESTOL, with a file on it | the write verified |
+
+*The write path at a 4096-byte sector.* `scsi_debug sector_size=4096` makes a
+drive that refuses a write the sector size does not divide. An image of
+5,000,003 bytes, which 4096 does not divide, went onto it whole and read back
+with the digest that `sha256sum` gives for the file. That is the padding
+proved against a device and not against a test double.
+
+*The options nobody had typed.* `--force` prints the model and the size, takes
+them back in any case and spacing, and refuses one wrong digit. A pipe with no
+terminal behind it refuses to ask for a password and says to use `sudo`. Half
+a yes is not a yes. Each refusal leaves the drive alone and exits 1.
+
+**What a virtual drive still does not prove.** A QEMU USB disk is not a USB
+stick. It has no controller of its own, it never fails in the middle of a
+write, and it arrives with no descriptors of its own. The other half of this
 exit test needs a stick that can be erased, and it is still open.
 
 **Two faults that only a real run could find.**
@@ -243,6 +266,14 @@ exit test needs a stick that can be erased, and it is still open.
   the command reported a failure.
 - The Windows binary linked the Microsoft C runtime, so it stopped on a clean
   install before it ran one line. The build now links that runtime in.
+- **Burnout offered to erase the live USB it was running from.** A live system
+  reaches its root through a loop device: the medium holds one large file, the
+  loop presents that file as a block device, and the root is an overlay on top
+  of it. Nothing in that chain names the drive, so the drive carried no mark
+  and no refusal. Found by booting a machine from a drive that Burnout had
+  written. It now follows every mounted loop device to the drive that carries
+  its backing file, and when it cannot name the system disk at all the
+  confirmation asks for the model and the size rather than one word.
 
 **Three measurements.** In a release build on an Apple M-series machine, a
 2.7 GB write and its 2.7 GB read back take 22 seconds together, which is about
