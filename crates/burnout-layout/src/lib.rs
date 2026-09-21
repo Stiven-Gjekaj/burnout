@@ -12,3 +12,7 @@
 //! `burnout-core` keeps no dependency at all.
 //!
 //! [The milestones]: https://github.com/Stiven-Gjekaj/burnout/blob/main/docs/milestones.md
+
+mod plan;
+
+pub use plan::{plan, Extent, Layout, ALIGN, MBR_SECTORS};
