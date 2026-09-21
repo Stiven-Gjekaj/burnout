@@ -97,6 +97,14 @@ pub enum Error {
         /// What a person types to get it.
         remedy: String,
     },
+    /// A tree of files to copy holds a path that cannot be read or used.
+    Source {
+        /// The path. A path of the host when the tree is a directory of the
+        /// host, and a path inside the tree otherwise.
+        path: String,
+        /// What is wrong with it.
+        detail: String,
+    },
     /// A partition is too small for the file system that has to go on it.
     PartitionTooSmall {
         /// The file system, such as FAT32.
@@ -186,6 +194,9 @@ impl fmt::Display for Error {
             Error::NeedsPrivilege { remedy } => {
                 write!(f, "this needs more privilege than it has. {remedy}")
             }
+            Error::Source { path, detail } => {
+                write!(f, "cannot use {path}: {detail}")
+            }
             Error::PartitionTooSmall {
                 file_system,
                 partition_bytes,
@@ -268,6 +279,15 @@ mod tests {
         let text = e.to_string();
         assert!(text.contains("Samsung T7"));
         assert!(text.contains("SanDisk Ultra"));
+    }
+
+    #[test]
+    fn a_source_message_names_the_path_and_the_fault() {
+        let e = Error::Source {
+            path: "efi/boot".to_string(),
+            detail: "permission denied".to_string(),
+        };
+        assert_eq!(e.to_string(), "cannot use efi/boot: permission denied");
     }
 
     #[test]

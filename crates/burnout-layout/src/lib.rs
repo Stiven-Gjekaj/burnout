@@ -16,7 +16,9 @@
 mod fat32;
 mod mbr;
 mod plan;
+mod tree;
 
 pub use fat32::{format_fat32, Fat32Options};
 pub use mbr::{mbr_bytes, write_table, TYPE_EXFAT, TYPE_FAT32};
 pub use plan::{plan, Extent, Layout, ALIGN, MBR_SECTORS};
+pub use tree::{DirSource, Entry, FileSource, MemorySource, TreePath};
