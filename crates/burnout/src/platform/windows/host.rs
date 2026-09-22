@@ -582,9 +582,9 @@ impl WindowsDisk {
     /// what else the drive needs. The mark from that step comes off here, so
     /// that a second write to the same drive can write.
     ///
-    /// Persist is zero. Microsoft documents only that a flag set to persist
-    /// lasts across a restart, and no run has shown what a restart does to
-    /// this one.
+    /// Persist is zero, so neither mark outlives the drive. Measured on the
+    /// real stick: a removal and a restart of Windows each leave the drive
+    /// online and writable again.
     fn go_offline(&mut self) -> std::io::Result<()> {
         self.set_attributes(
             DISK_ATTRIBUTE_OFFLINE,

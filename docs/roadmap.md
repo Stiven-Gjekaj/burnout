@@ -273,7 +273,7 @@ under "Not run yet" below has the other gaps.
 
 | Host | How it reached the stick | What it printed |
 | --- | --- | --- |
-| macOS 26 | `/dev/rdisk4`, 55 MB/s, read back at 128 MB/s | `162ba3c5...999933ef` |
+| macOS 26 | `/dev/rdisk5`, 55 MB/s, read back at 125 MB/s | `162ba3c5...999933ef` |
 | Fedora 44 ARM64, a VM | the stick passed through, `/dev/sdb`, 48 MB/s, read back at 88 MB/s | `162ba3c5...999933ef` |
 | Windows 11 ARM64, a VM | the stick passed through, `\\.\PhysicalDrive2`, 37 MB/s, read back at 87 MB/s | `162ba3c5...999933ef` |
 
@@ -344,23 +344,18 @@ The first write also zeroes the MBR and both GPT copies, and the first block
 of the image goes on last. So no stale backup stays at the end of the drive,
 and a write that stops leaves no table.
 
-Neither mark outlives the drive. Measured: the stick came out of the machine
+Neither mark outlives the drive or the machine. Measured: the stick came out
 and went back in, and Windows reported both flags gone and had changed the 12
-bytes again within 20 seconds. The media check of Fedora then fails on that
-drive.
+bytes again within 20 seconds. A restart of Windows clears both marks as well,
+measured with the stick still in the port. The media check of Fedora then
+fails on that drive.
 
 The first failure also showed a fault of the terminal: the error printed on the
 end of the progress line. The line now ends before an error prints.
 
-**Not run yet.** No run has proved these claims.
-
-- **The firmware of a physical PC.** A VM start stands for it.
-- **The macOS write with the first block last.** The macOS write to the real
-  stick came before that change. Linux and Windows have run it since. A new
-  run on macOS needs `sudo`, and so the password of the person.
-- **The two marks after a restart of Windows.** A removal clears both, and
-  that is measured. A restart is not: the machine asks for the password of an
-  account at its login screen, and nobody was there to type it.
+Each host above wrote the stick with the code as it stands, and each check
+passed. **One claim is still open: the firmware of a physical PC.** A VM start
+stands for it.
 
 **Two faults that only a real run could find.**
 
