@@ -428,7 +428,7 @@ impl DriveAccess for WindowsAccess {
             _locks: locks,
             sector_size: info.logical_sector_size,
             length: info.size_bytes,
-            cleared: false,
+            prepared: false,
         })
     }
 }
@@ -543,8 +543,8 @@ fn open_for_write(path: &[u16]) -> Result<Handle> {
 
 /// One open Windows disk, with the volumes of that disk locked.
 ///
-/// The first write takes the partition table off the drive before it writes.
-/// [`WindowsDisk::clear_table`] says why.
+/// The first write takes the drive offline and the partition table off it
+/// before it writes. [`WindowsDisk::go_offline`] says why.
 pub struct WindowsDisk {
     handle: Handle,
     /// The locks. They do nothing but exist, and the drive is writable for
@@ -552,33 +552,54 @@ pub struct WindowsDisk {
     _locks: Vec<Handle>,
     sector_size: u32,
     length: u64,
-    /// Whether the table is off the drive. A handle that only reads, as the
-    /// check after the write does, leaves the table where it is.
-    cleared: bool,
+    /// Whether the drive is offline and its table is gone. A handle that only
+    /// reads, as the check after the write does, does neither.
+    prepared: bool,
 }
 
 impl WindowsDisk {
-    /// Take the partition table off the drive, and make Windows read the
-    /// drive again.
+    /// Take the drive offline.
     ///
-    /// Windows applies the table that it read last to each write. A GPT
-    /// partition with the read-only attribute makes it refuse every write
-    /// that reaches that partition, with "Incorrect function", even when the
-    /// volume on it is locked and dismounted. Partition 1 of a Fedora image
-    /// has that attribute, so a stick that holds Fedora refuses the next
-    /// image. With no table, the drive is one run of sectors, and Windows
-    /// lets every write through.
+    /// Windows applies the partition table that it knows to the drive, and
+    /// that broke three writes of Fedora to the real stick:
     ///
-    /// The table sits outside every partition, so Windows lets these writes
-    /// through too. This is what Rufus does before it writes.
+    /// - It refuses each write into a GPT partition marked read-only, with
+    ///   "Incorrect function", even when the volume is locked and dismounted.
+    ///   Partition 1 of a Fedora image is one.
+    /// - It reads a new table soon after one lands, and then refuses the
+    ///   writes that follow in the same way.
+    /// - For a GPT that ends before the drive does, it moves the backup to
+    ///   the end of the drive and rewrites 12 bytes of the primary header, so
+    ///   the check after the write fails at byte 528.
+    ///
+    /// An offline drive has no partitions for Windows to apply. Measured on
+    /// the real stick: offline, a write into the old read-only partition went
+    /// through, and the new header held after the write, after the flush and
+    /// after the handle closed. Online again, Windows rewrote it within three
+    /// seconds. So the drive stays offline. Persist is zero, and Windows
+    /// documents a flag set that way as one that a restart clears.
+    fn go_offline(&mut self) -> std::io::Result<()> {
+        // SET_DISK_ATTRIBUTES: Version, Persist, three reserved bytes,
+        // Attributes, AttributesMask and sixteen reserved bytes.
+        let mut input = [0u8; 40];
+        input[0..4].copy_from_slice(&40u32.to_le_bytes());
+        input[8..16].copy_from_slice(&DISK_ATTRIBUTE_OFFLINE.to_le_bytes());
+        input[16..24].copy_from_slice(&DISK_ATTRIBUTE_OFFLINE.to_le_bytes());
+        if control(&self.handle, IOCTL_DISK_SET_DISK_ATTRIBUTES, &input, 0).is_none() {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Zero the MBR and both GPT copies.
+    ///
+    /// No stale backup GPT stays at the end of the drive. The first block of
+    /// the image goes on last, so a write that stops leaves no table at all.
     fn clear_table(&mut self) -> std::io::Result<()> {
         let at = self.stream_position()?;
         for (offset, length) in parse::table_areas(self.length, self.sector_size) {
             self.seek(SeekFrom::Start(offset))?;
             self.write_all_to_disk(&vec![0u8; length as usize])?;
-        }
-        if control(&self.handle, IOCTL_DISK_UPDATE_PROPERTIES, &[], 0).is_none() {
-            return Err(std::io::Error::last_os_error());
         }
         self.seek(SeekFrom::Start(at))?;
         Ok(())
@@ -636,14 +657,12 @@ impl Read for WindowsDisk {
 
 impl Write for WindowsDisk {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        if !self.cleared {
-            self.clear_table().map_err(|e| {
-                std::io::Error::new(
-                    e.kind(),
-                    format!("could not clear the old partition table: {e}"),
-                )
-            })?;
-            self.cleared = true;
+        if !self.prepared {
+            self.go_offline()
+                .map_err(|e| with_context(e, "could not take the drive offline"))?;
+            self.clear_table()
+                .map_err(|e| with_context(e, "could not clear the old partition table"))?;
+            self.prepared = true;
         }
         self.write_to_disk(buf)
     }
@@ -692,8 +711,13 @@ impl BlockTarget for WindowsDisk {
 
 const FSCTL_LOCK_VOLUME: u32 = 0x0009_0018;
 const FSCTL_DISMOUNT_VOLUME: u32 = 0x0009_0020;
-/// Makes Windows read the partition table of a disk again.
-const IOCTL_DISK_UPDATE_PROPERTIES: u32 = 0x0007_0140;
+const IOCTL_DISK_SET_DISK_ATTRIBUTES: u32 = 0x0007_C0F4;
+const DISK_ATTRIBUTE_OFFLINE: u64 = 0x1;
+
+/// Say which step an error of the host came from.
+fn with_context(error: std::io::Error, step: &str) -> std::io::Error {
+    std::io::Error::new(error.kind(), format!("{step}: {error}"))
+}
 
 /// Whether this process may open one device for a write.
 ///

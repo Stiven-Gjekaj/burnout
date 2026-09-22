@@ -128,6 +128,10 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
         size_column(proof.bytes)
     );
     println!("SHA-256 {}", proof.digest);
+    // The Windows layer took the drive offline for the write, and a person
+    // who looks for it in Explorer needs to know why it is not there.
+    #[cfg(windows)]
+    println!("The drive is offline now. This stops Windows from changing it.");
     Ok(0)
 }
 
