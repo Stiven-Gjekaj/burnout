@@ -9,5 +9,6 @@
 // The parts come before the writer that uses them.
 #![allow(dead_code)]
 
+mod geometry;
 mod sums;
 mod upcase;
