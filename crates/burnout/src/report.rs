@@ -1,8 +1,8 @@
 //! What a person sees while a drive is written.
 //!
 //! The line itself comes out of a pure function, so a test reads it on any
-//! host. The part that puts it on a terminal is three lines at the bottom and
-//! carries no rule.
+//! host. The part that puts it on a terminal carries one rule: a line that a
+//! failed step leaves open ends before the error prints.
 
 use std::io::{IsTerminal, Write};
 use std::time::{Duration, Instant};
@@ -114,7 +114,9 @@ pub struct Bar {
     starts: Starts,
     drawn: Instant,
     width: usize,
-    quiet: bool,
+    /// Where the line goes, or nothing when the error stream is not a
+    /// terminal.
+    screen: Option<Box<dyn Write>>,
 }
 
 impl Default for Bar {
@@ -125,37 +127,63 @@ impl Default for Bar {
 
 impl Bar {
     pub fn new() -> Self {
+        let err = std::io::stderr();
+        let screen: Option<Box<dyn Write>> = if err.is_terminal() {
+            Some(Box::new(err))
+        } else {
+            None
+        };
+        Self::on(screen)
+    }
+
+    fn on(screen: Option<Box<dyn Write>>) -> Self {
         let now = Instant::now();
         Bar {
             starts: Starts::default(),
             drawn: now - REDRAW,
             width: 0,
-            quiet: !std::io::stderr().is_terminal(),
+            screen,
         }
     }
 
     /// Put one line down, over the last one.
     fn draw(&mut self, line: &str) {
-        if self.quiet {
+        let Some(screen) = self.screen.as_mut() else {
             return;
-        }
+        };
         // Cover whatever the last line left behind, so a shorter line does
         // not end with the tail of a longer one.
         let padding = self.width.saturating_sub(line.chars().count());
-        let mut err = std::io::stderr();
-        let _ = write!(err, "\r{line}{:padding$}", "");
-        let _ = err.flush();
+        let _ = write!(screen, "\r{line}{:padding$}", "");
+        let _ = screen.flush();
         self.width = line.chars().count();
     }
 
-    /// End the line that is on the screen.
+    /// Draw the last form of a line, and end it.
     fn finish(&mut self, line: &str) {
-        if self.quiet {
+        self.draw(line);
+        self.end_line();
+    }
+
+    /// End the line that is on the screen, if a line is open.
+    fn end_line(&mut self) {
+        if self.width == 0 {
             return;
         }
-        self.draw(line);
-        let _ = writeln!(std::io::stderr());
+        if let Some(screen) = self.screen.as_mut() {
+            let _ = writeln!(screen);
+            let _ = screen.flush();
+        }
         self.width = 0;
+    }
+}
+
+impl Drop for Bar {
+    /// A step that fails does not finish its line. Without this, the error
+    /// prints on the end of it: `write 0% 0 B of 2.7 GBburnout: Incorrect
+    /// function.`
+    fn drop(&mut self) {
+        self.end_line();
     }
 }
 
@@ -192,6 +220,66 @@ impl Progress for Bar {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// A terminal that keeps what it gets.
+    #[derive(Clone, Default)]
+    struct Screen(Rc<RefCell<Vec<u8>>>);
+
+    impl Screen {
+        fn text(&self) -> String {
+            String::from_utf8(self.0.borrow().clone()).unwrap()
+        }
+    }
+
+    impl Write for Screen {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.borrow_mut().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_step_that_fails_ends_its_line_before_the_error_prints() {
+        let screen = Screen::default();
+        let mut bar = Bar::on(Some(Box::new(screen.clone())));
+        bar.report(ProgressEvent::Start {
+            stage: Stage::Write,
+            total_bytes: Some(2_700_000_000),
+        });
+        // The error goes up past the bar, and the bar goes with it.
+        drop(bar);
+        let text = screen.text();
+        assert!(text.starts_with("\rwrite"), "{text:?}");
+        assert!(text.ends_with('\n'), "{text:?}");
+    }
+
+    #[test]
+    fn a_finished_step_leaves_no_empty_line_behind() {
+        let screen = Screen::default();
+        let mut bar = Bar::on(Some(Box::new(screen.clone())));
+        bar.report(ProgressEvent::Start {
+            stage: Stage::Unmount,
+            total_bytes: None,
+        });
+        bar.report(ProgressEvent::Done {
+            stage: Stage::Unmount,
+            bytes_done: 0,
+        });
+        drop(bar);
+        assert_eq!(
+            screen.text().matches('\n').count(),
+            1,
+            "{:?}",
+            screen.text()
+        );
+    }
 
     #[test]
     fn a_line_with_a_total_carries_the_percentage() {
