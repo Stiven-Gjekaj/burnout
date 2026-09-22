@@ -428,6 +428,7 @@ impl DriveAccess for WindowsAccess {
             _locks: locks,
             sector_size: info.logical_sector_size,
             length: info.size_bytes,
+            cleared: false,
         })
     }
 }
@@ -541,6 +542,9 @@ fn open_for_write(path: &[u16]) -> Result<Handle> {
 }
 
 /// One open Windows disk, with the volumes of that disk locked.
+///
+/// The first write takes the partition table off the drive before it writes.
+/// [`WindowsDisk::clear_table`] says why.
 pub struct WindowsDisk {
     handle: Handle,
     /// The locks. They do nothing but exist, and the drive is writable for
@@ -548,6 +552,66 @@ pub struct WindowsDisk {
     _locks: Vec<Handle>,
     sector_size: u32,
     length: u64,
+    /// Whether the table is off the drive. A handle that only reads, as the
+    /// check after the write does, leaves the table where it is.
+    cleared: bool,
+}
+
+impl WindowsDisk {
+    /// Take the partition table off the drive, and make Windows read the
+    /// drive again.
+    ///
+    /// Windows applies the table that it read last to each write. A GPT
+    /// partition with the read-only attribute makes it refuse every write
+    /// that reaches that partition, with "Incorrect function", even when the
+    /// volume on it is locked and dismounted. Partition 1 of a Fedora image
+    /// has that attribute, so a stick that holds Fedora refuses the next
+    /// image. With no table, the drive is one run of sectors, and Windows
+    /// lets every write through.
+    ///
+    /// The table sits outside every partition, so Windows lets these writes
+    /// through too. This is what Rufus does before it writes.
+    fn clear_table(&mut self) -> std::io::Result<()> {
+        let at = self.stream_position()?;
+        for (offset, length) in parse::table_areas(self.length, self.sector_size) {
+            self.seek(SeekFrom::Start(offset))?;
+            self.write_all_to_disk(&vec![0u8; length as usize])?;
+        }
+        if control(&self.handle, IOCTL_DISK_UPDATE_PROPERTIES, &[], 0).is_none() {
+            return Err(std::io::Error::last_os_error());
+        }
+        self.seek(SeekFrom::Start(at))?;
+        Ok(())
+    }
+
+    /// Write the whole buffer at the position of the handle.
+    fn write_all_to_disk(&mut self, mut buf: &[u8]) -> std::io::Result<()> {
+        while !buf.is_empty() {
+            match self.write_to_disk(buf)? {
+                0 => return Err(std::io::ErrorKind::WriteZero.into()),
+                n => buf = &buf[n..],
+            }
+        }
+        Ok(())
+    }
+
+    fn write_to_disk(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut written: u32 = 0;
+        // SAFETY: the buffer is owned here and its length is given.
+        let ok = unsafe {
+            WriteFile(
+                self.handle.0,
+                buf.as_ptr(),
+                buf.len() as u32,
+                &mut written,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(written as usize)
+    }
 }
 
 impl Read for WindowsDisk {
@@ -572,21 +636,16 @@ impl Read for WindowsDisk {
 
 impl Write for WindowsDisk {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let mut written: u32 = 0;
-        // SAFETY: the buffer is owned here and its length is given.
-        let ok = unsafe {
-            WriteFile(
-                self.handle.0,
-                buf.as_ptr(),
-                buf.len() as u32,
-                &mut written,
-                std::ptr::null_mut(),
-            )
-        };
-        if ok == 0 {
-            return Err(std::io::Error::last_os_error());
+        if !self.cleared {
+            self.clear_table().map_err(|e| {
+                std::io::Error::new(
+                    e.kind(),
+                    format!("could not clear the old partition table: {e}"),
+                )
+            })?;
+            self.cleared = true;
         }
-        Ok(written as usize)
+        self.write_to_disk(buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -633,6 +692,8 @@ impl BlockTarget for WindowsDisk {
 
 const FSCTL_LOCK_VOLUME: u32 = 0x0009_0018;
 const FSCTL_DISMOUNT_VOLUME: u32 = 0x0009_0020;
+/// Makes Windows read the partition table of a disk again.
+const IOCTL_DISK_UPDATE_PROPERTIES: u32 = 0x0007_0140;
 
 /// Whether this process may open one device for a write.
 ///

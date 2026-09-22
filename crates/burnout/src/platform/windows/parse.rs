@@ -297,6 +297,32 @@ pub fn list_drives(disks: &[RawDisk], system: &BTreeSet<u32>) -> Vec<DriveInfo> 
         .collect()
 }
 
+/// The space that UEFI keeps for the GPT entry array, whatever the number of
+/// entries. No partition of a valid GPT starts inside it.
+const GPT_ENTRY_ARRAY_BYTES: u64 = 16 * 1024;
+
+/// Where a partition table can sit on a drive, as `(offset, length)` in bytes.
+///
+/// The first run holds the MBR, the GPT header and the GPT entries. The second
+/// run holds the backup entries and the backup header at the end of the drive.
+/// A valid GPT puts no partition in either run. So a write to them reaches no
+/// partition, and Windows lets it through while the old table still holds.
+///
+/// A drive too small for the two runs is one run. A sector of zero gives none.
+pub fn table_areas(length: u64, sector: u32) -> Vec<(u64, u64)> {
+    let sector = u64::from(sector);
+    if sector == 0 {
+        return Vec::new();
+    }
+    let entries = GPT_ENTRY_ARRAY_BYTES.div_ceil(sector) * sector;
+    let start = 2 * sector + entries;
+    let end = entries + sector;
+    if length <= start + end {
+        return vec![(0, length)];
+    }
+    vec![(0, start), (length - end, end)]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -642,5 +668,46 @@ mod tests {
     fn a_disk_with_no_name_falls_back_to_its_number() {
         let d = drive_from_raw(&raw(4, "", "", false, 0, 1024), &BTreeSet::new()).unwrap();
         assert_eq!(d.name, "PhysicalDrive4");
+    }
+
+    #[test]
+    fn at_512_bytes_the_table_is_34_sectors_at_the_start_and_33_at_the_end() {
+        // The size of the stick that Windows refused to write.
+        let length = 128_320_801_792;
+        assert_eq!(
+            table_areas(length, 512),
+            vec![(0, 34 * 512), (length - 33 * 512, 33 * 512)]
+        );
+    }
+
+    #[test]
+    fn no_run_reaches_a_partition_of_a_valid_gpt() {
+        let length = 1u64 << 30;
+        for sector in [512u64, 4096] {
+            // The usable space as UEFI defines it: after LBA 0, the header at
+            // LBA 1 and the entries, and before the backup entries and the
+            // backup header in the last LBA.
+            let last_lba = length / sector - 1;
+            let entry_sectors = GPT_ENTRY_ARRAY_BYTES / sector;
+            let first_usable = 2 + entry_sectors;
+            let last_usable = last_lba - 1 - entry_sectors;
+
+            let runs = table_areas(length, sector as u32);
+            assert_eq!(runs.len(), 2);
+            assert_eq!(runs[0], (0, first_usable * sector));
+            assert_eq!(runs[1].0, (last_usable + 1) * sector);
+            assert_eq!(runs[1].0 + runs[1].1, length);
+        }
+    }
+
+    #[test]
+    fn a_drive_too_small_for_both_runs_is_one_run() {
+        assert_eq!(table_areas(67 * 512, 512), vec![(0, 67 * 512)]);
+        assert_eq!(table_areas(68 * 512, 512).len(), 2);
+    }
+
+    #[test]
+    fn a_sector_of_zero_gives_no_run() {
+        assert!(table_areas(1 << 30, 0).is_empty());
     }
 }
