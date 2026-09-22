@@ -10,6 +10,7 @@
 #![allow(dead_code)]
 
 mod boot;
+mod entries;
 mod geometry;
 mod sums;
 mod upcase;
