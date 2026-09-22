@@ -19,6 +19,7 @@ mod fat32;
 mod manifest;
 mod mbr;
 mod plan;
+mod stream;
 #[cfg(test)]
 mod testing;
 mod tree;

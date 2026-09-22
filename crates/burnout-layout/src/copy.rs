@@ -1,21 +1,19 @@
 //! Copy a tree of files onto a FAT32 volume, and keep the digest of each
 //! file.
 
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 
-use burnout_core::{BlockTarget, Digest, Error, Result, Sha256};
+use burnout_core::{BlockTarget, Digest, Error, Result};
 use fatfs::{Dir, ReadWriteSeek};
 
 use crate::dot_entries::repair_dot_entries;
 use crate::fat32::{mounted, over_sectors, Volume};
 use crate::manifest::{CopiedFile, Manifest};
+use crate::stream::{stream_file, CHUNK_BYTES};
 use crate::tree::{Entry, FileSource, TreePath};
 
 /// The largest file that FAT32 holds: 4 GiB less one byte.
 pub const MAX_FAT32_FILE_BYTES: u64 = u32::MAX as u64;
-
-/// How much of a file one read takes.
-const CHUNK_BYTES: usize = 1024 * 1024;
 
 /// Copy every directory and every file of `source` onto the FAT32 volume
 /// that fills `volume`.
@@ -136,40 +134,11 @@ where
     let mut file = dir
         .create_file(path.name())
         .map_err(|e| cannot_copy(path, e))?;
-    let mut hash = Sha256::new();
-    let mut done: u64 = 0;
-    while done <= bytes {
-        let n = match reader.read(chunk) {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => {
-                return Err(Error::Source {
-                    path: path.to_string(),
-                    detail: e.to_string(),
-                })
-            }
-        };
-        done += n as u64;
-        if done <= bytes {
-            hash.update(&chunk[..n]);
-            file.write_all(&chunk[..n])
-                .map_err(|e| cannot_copy(path, e))?;
-        }
-    }
-    if done != bytes {
-        let gave = if done > bytes {
-            format!("more than {bytes}")
-        } else {
-            done.to_string()
-        };
-        return Err(Error::Source {
-            path: path.to_string(),
-            detail: format!("the tree gave its size as {bytes} bytes, and the file gave {gave}"),
-        });
-    }
+    let digest = stream_file(&mut *reader, path, bytes, chunk, |piece| {
+        file.write_all(piece)
+    })?;
     file.flush().map_err(|e| cannot_copy(path, e))?;
-    Ok(hash.finish())
+    Ok(digest)
 }
 
 fn cannot_copy(path: &TreePath, e: io::Error) -> Error {
@@ -186,6 +155,7 @@ mod tests {
     use crate::testing::{windows_like, Drive};
     use crate::tree::MemorySource;
     use burnout_core::sha256;
+    use std::io::Read;
 
     fn read_back<T: BlockTarget>(volume: T, path: &str) -> Vec<u8> {
         with_volume(volume, |fs| {
