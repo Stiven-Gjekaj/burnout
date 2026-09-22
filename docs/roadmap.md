@@ -263,7 +263,42 @@ a yes is not a yes. Each refusal leaves the drive alone and exits 1.
 **What a virtual drive still does not prove.** A QEMU USB disk is not a USB
 stick. It has no controller of its own, it never fails in the middle of a
 write, and it arrives with no descriptors of its own. The other half of this
-exit test needs a stick that can be erased, and it is still open.
+exit test needs a stick that can be erased.
+
+**The real stick, on one Mac.** A Samsung Flash Drive of 128.3 GB, with a
+USB 3 controller of its own. An Apple M5 cannot start a Linux stick, so UTM
+passed the stick itself through to a VM, and a VM start counts as the start on
+real hardware. That is the one thing this does not prove: the firmware of a
+physical PC.
+
+| Host | How it reached the stick | What it printed |
+| --- | --- | --- |
+| macOS 26 | `/dev/rdisk4`, 55 MB/s, read back at 128 MB/s | `162ba3c5...999933ef` |
+| Fedora 44 ARM64, a VM | the stick passed through, `/dev/sdb` | `162ba3c5...999933ef` |
+| Windows 11 ARM64, a VM | not run: it needs the administrator password | |
+
+The same digest as the ISO, from each host that ran. The stick that macOS
+wrote then started Fedora in a VM that had no disk of its own. The boot order
+of that VM named no disk, so its firmware stopped at the UEFI shell, and the
+shell started `\EFI\BOOT\BOOTAA64.EFI` from the stick. The media check of
+the initramfs, `checkisomd5`, then read the stick and passed, which is a
+check of the write that Burnout did not make.
+
+**Three faults that only the real stick found.**
+
+- **Linux refused the stick as the system disk.** The VM started from its
+  disc, and the stick in the port held the same image, which the desktop had
+  mounted. The live-USB rule found the image on one drive, because it did not
+  count the disc, and no option overrides that refusal. It now counts the disc,
+  so a stick and a disc that hold the same image mark neither, and the write
+  asks for the model and the size.
+- **The rate of a write divided the bytes by the flush alone.** Linux takes
+  the image into its page cache first, and the write and the flush both said
+  303.1 MB/s for a stick that reads back at 27.1 MB/s. Each step now keeps its
+  own clock, and the flush carries no rate. On macOS the same fault showed as
+  a write with no rate at all.
+- **`--device /dev/disk5` named no drive on macOS,** because Burnout writes
+  `/dev/rdisk5`. The name under `/dev` now counts.
 
 **Two faults that only a real run could find.**
 
