@@ -3,59 +3,72 @@
 //!
 //! ```text
 //! layout_image tree <dir>
-//! layout_image image <tree> <image> <manifest> [--sector-size 512|4096] [--vhd]
+//! layout_image image <tree> <image> <manifest> [--install-manifest <file>]
+//!     [--large-file <bytes>] [--sector-size 512|4096] [--vhd]
 //! ```
 //!
 //! `tree` writes a sample tree into a new directory. Its bytes come from a
 //! generator, so the tree is the same on each host.
 //!
-//! `image` writes the partition table, formats partition 1 as FAT32, copies
-//! the tree onto it, and checks each file through a new mount. It writes one
-//! line for each file into `<manifest>`, in the form of `sha256sum`, so a
-//! host can check the files it reads with `sha256sum -c`. The example writes
-//! the file itself, because a shell that takes the output can change the
-//! encoding of a name that is not ASCII. It prints the SHA-256 of the image,
-//! so two hosts can compare the images they made.
+//! `image` writes the partition table, formats partition 1 as FAT32 and
+//! copies the tree onto it, and writes partition 2 as exFAT with the tree on
+//! it. It checks each file of both through a new mount. It writes one line
+//! for each file of partition 1 into `<manifest>`, and one line for each file
+//! of partition 2 into the file after `--install-manifest`, in the form of
+//! `sha256sum`, so a host can check the files it reads with `sha256sum -c`.
+//! The example writes the files itself, because a shell that takes the output
+//! can change the encoding of a name that is not ASCII. It prints the SHA-256
+//! of the image, so two hosts can compare the images they made.
+//!
+//! `--large-file` adds `sources/install.wim` of that many bytes to partition
+//! 2, and makes the image larger by as much. Its bytes come from a generator
+//! too, so the host needs no file of that size.
 //!
 //! `--vhd` adds the footer of a fixed VHD after the image. Windows then mounts
 //! the file with `Mount-DiskImage`. The footer is for this check only, and
 //! the product never writes it.
 
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use burnout_core::{BlockTarget, FileTarget, Sha256, Window};
 use burnout_layout::{
-    copy_to_fat32, format_fat32, plan, verify_fat32, write_table, DirSource, Fat32Options, Layout,
+    copy_to_fat32, format_fat32, plan, verify_exfat, verify_fat32, write_exfat, write_table,
+    DirSource, Entry, ExfatOptions, Extent, Fat32Options, FileSource, Manifest, TreePath,
 };
 
 const MIB: u64 = 1024 * 1024;
 
-/// The size of the image. Partition 1 is large enough for FAT32 on a drive
-/// of 4096-byte sectors, which needs about 257 MiB.
+/// The size of the image with no large file. Partition 1 is large enough for
+/// FAT32 on a drive of 4096-byte sectors, which needs about 257 MiB, and
+/// partition 2 takes the rest.
 const DRIVE_BYTES: u64 = 512 * MIB;
 const BOOT_BYTES: u64 = 300 * MIB;
 
 /// Fixed numbers, so the same tree gives the same image on each host.
 const DISK_SIGNATURE: u32 = 0x4255_524E;
 const SERIAL: u32 = 0x0B0B_0B0B;
+const INSTALL_SERIAL: u32 = 0x0E0E_0E0E;
+
+/// Where the large file goes on partition 2, beside the rest of the tree.
+const LARGE_FILE: &str = "sources/install.wim";
 
 const USAGE: &str = "usage: layout_image tree <dir>
-       layout_image image <tree> <image> <manifest> [--sector-size 512|4096] [--vhd]";
+       layout_image image <tree> <image> <manifest> [--install-manifest <file>]
+           [--large-file <bytes>] [--sector-size 512|4096] [--vhd]";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
         Some("tree") if args.len() == 2 => make_tree(Path::new(&args[1])),
         Some("image") if args.len() >= 4 => match options(&args[4..]) {
-            Some((sector, vhd)) => make_image(
+            Some(options) => make_image(
                 Path::new(&args[1]),
                 Path::new(&args[2]),
                 Path::new(&args[3]),
-                sector,
-                vhd,
+                &options,
             ),
             None => return usage(),
         },
@@ -75,19 +88,32 @@ fn usage() -> ExitCode {
     ExitCode::from(2)
 }
 
-/// The sector size and whether to add a VHD footer.
-fn options(args: &[String]) -> Option<(u32, bool)> {
-    let mut sector = 512;
-    let mut vhd = false;
+/// What the flags after the three paths ask for.
+struct Options {
+    sector: u32,
+    vhd: bool,
+    install_manifest: Option<PathBuf>,
+    large_file: u64,
+}
+
+fn options(args: &[String]) -> Option<Options> {
+    let mut options = Options {
+        sector: 512,
+        vhd: false,
+        install_manifest: None,
+        large_file: 0,
+    };
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
-            "--sector-size" => sector = rest.next()?.parse().ok()?,
-            "--vhd" => vhd = true,
+            "--sector-size" => options.sector = rest.next()?.parse().ok()?,
+            "--vhd" => options.vhd = true,
+            "--install-manifest" => options.install_manifest = Some(rest.next()?.into()),
+            "--large-file" => options.large_file = rest.next()?.parse().ok()?,
             _ => return None,
         }
     }
-    Some((sector, vhd))
+    Some(options)
 }
 
 type Outcome = Result<(), Box<dyn std::error::Error>>;
@@ -136,47 +162,132 @@ fn generated(length: usize, seed: u64) -> Vec<u8> {
         .collect()
 }
 
-fn make_image(tree: &Path, image: &Path, manifest: &Path, sector: u32, vhd: bool) -> Outcome {
+fn make_image(tree: &Path, image: &Path, manifest: &Path, options: &Options) -> Outcome {
+    let sector = options.sector;
     let source = DirSource::new(tree);
-    let mut drive = FileTarget::create(image, DRIVE_BYTES, sector)?;
-    let layout = plan(DRIVE_BYTES, sector, BOOT_BYTES)?;
+    let drive_bytes = DRIVE_BYTES + options.large_file.div_ceil(MIB) * MIB;
+    let mut drive = FileTarget::create(image, drive_bytes, sector)?;
+    let layout = plan(drive_bytes, sector, BOOT_BYTES)?;
     write_table(&mut drive, &layout, DISK_SIGNATURE)?;
 
-    let options = Fat32Options {
+    let fat32 = Fat32Options {
         label: "Burnout",
         serial: SERIAL,
         first_sector: layout.first_sector(layout.boot) as u32,
     };
-    format_fat32(boot(&mut drive, &layout)?, &options)?;
-    let copied = copy_to_fat32(boot(&mut drive, &layout)?, &source)?;
-    verify_fat32(boot(&mut drive, &layout)?, &copied)?;
+    format_fat32(window(&mut drive, layout.boot)?, &fat32)?;
+    let boot_files = copy_to_fat32(window(&mut drive, layout.boot)?, &source)?;
+    verify_fat32(window(&mut drive, layout.boot)?, &boot_files)?;
+
+    let install_source = WithLargeFile {
+        tree: &source,
+        path: TreePath::new(LARGE_FILE)?,
+        bytes: options.large_file,
+    };
+    let exfat = ExfatOptions {
+        label: "Install",
+        serial: INSTALL_SERIAL,
+        first_sector: layout.first_sector(layout.install),
+    };
+    let install_files = write_exfat(window(&mut drive, layout.install)?, &install_source, &exfat)?;
+    verify_exfat(window(&mut drive, layout.install)?, &install_files)?;
     drive.sync()?;
 
-    let mut lines = String::new();
-    for file in &copied.files {
-        lines.push_str(&format!("{}  {}\n", file.digest, file.path));
+    write_manifest(manifest, &boot_files)?;
+    if let Some(path) = &options.install_manifest {
+        write_manifest(path, &install_files)?;
     }
-    fs::write(manifest, lines)?;
     println!("{}", digest_of(&mut drive)?);
     drop(drive);
 
-    if vhd {
+    if options.vhd {
         if sector != 512 {
             return Err("a VHD holds 512-byte sectors only".into());
         }
         let mut file = OpenOptions::new().append(true).open(image)?;
-        file.write_all(&vhd_footer(DRIVE_BYTES))?;
+        file.write_all(&vhd_footer(drive_bytes))?;
         file.sync_all()?;
     }
     Ok(())
 }
 
-/// Partition 1 of the drive.
-fn boot<'a>(
-    drive: &'a mut FileTarget,
-    layout: &Layout,
-) -> burnout_core::Result<Window<&'a mut FileTarget>> {
-    Window::new(drive, layout.boot.start, layout.boot.length)
+/// One line for each file, in the form of `sha256sum`.
+fn write_manifest(path: &Path, copied: &Manifest) -> Outcome {
+    let mut lines = String::new();
+    for file in &copied.files {
+        lines.push_str(&format!("{}  {}\n", file.digest, file.path));
+    }
+    fs::write(path, lines)?;
+    Ok(())
+}
+
+/// One partition of the drive.
+fn window(drive: &mut FileTarget, extent: Extent) -> burnout_core::Result<Window<&mut FileTarget>> {
+    Window::new(drive, extent.start, extent.length)
+}
+
+/// The tree, and a large file of generated bytes beside it, which no host
+/// directory has to hold.
+struct WithLargeFile<'a> {
+    tree: &'a DirSource,
+    path: TreePath,
+    bytes: u64,
+}
+
+impl FileSource for WithLargeFile<'_> {
+    fn entries(&self) -> burnout_core::Result<Vec<Entry>> {
+        let mut entries = self.tree.entries()?;
+        if self.bytes > 0 {
+            entries.push(Entry::File(self.path.clone(), self.bytes));
+            entries.sort_by(|a, b| a.path().cmp(b.path()));
+        }
+        Ok(entries)
+    }
+
+    fn open(&self, path: &TreePath) -> burnout_core::Result<Box<dyn Read + '_>> {
+        if self.bytes > 0 && *path == self.path {
+            return Ok(Box::new(Generator::new(self.bytes)));
+        }
+        self.tree.open(path)
+    }
+}
+
+/// Bytes from a generator, eight at a time, the same on each host.
+struct Generator {
+    x: u64,
+    word: [u8; 8],
+    used: usize,
+    left: u64,
+}
+
+impl Generator {
+    fn new(bytes: u64) -> Self {
+        Generator {
+            x: 0x9E37_79B9_7F4A_7C15,
+            word: [0; 8],
+            used: 8,
+            left: bytes,
+        }
+    }
+}
+
+impl Read for Generator {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = (buf.len() as u64).min(self.left) as usize;
+        for byte in &mut buf[..n] {
+            if self.used == 8 {
+                self.x ^= self.x << 13;
+                self.x ^= self.x >> 7;
+                self.x ^= self.x << 17;
+                self.word = self.x.wrapping_mul(0x2545_F491_4F6C_DD1D).to_le_bytes();
+                self.used = 0;
+            }
+            *byte = self.word[self.used];
+            self.used += 1;
+        }
+        self.left -= n as u64;
+        Ok(n)
+    }
 }
 
 /// The SHA-256 of the whole image.
