@@ -274,8 +274,8 @@ under "Not run yet" below has the other gaps.
 | Host | How it reached the stick | What it printed |
 | --- | --- | --- |
 | macOS 26 | `/dev/rdisk4`, 55 MB/s, read back at 128 MB/s | `162ba3c5...999933ef` |
-| Fedora 44 ARM64, a VM | the stick passed through, `/dev/sdb` | `162ba3c5...999933ef` |
-| Windows 11 ARM64, a VM | the stick passed through, `\\.\PhysicalDrive2`, 29 MB/s, read back at 54 MB/s | `162ba3c5...999933ef` |
+| Fedora 44 ARM64, a VM | the stick passed through, `/dev/sdb`, 48 MB/s, read back at 88 MB/s | `162ba3c5...999933ef` |
+| Windows 11 ARM64, a VM | the stick passed through, `\\.\PhysicalDrive2`, 37 MB/s, read back at 87 MB/s | `162ba3c5...999933ef` |
 
 The same digest as the ISO, from each of the three hosts. The stick that
 macOS wrote then started Fedora in a VM that had no disk of its own, and so did
@@ -301,8 +301,12 @@ passed each time. That is a check of the write that Burnout did not make.
 - **`--device /dev/disk5` named no drive on macOS,** because Burnout writes
   `/dev/rdisk5`. The name under `/dev` now counts.
 
-**Three faults that only Windows and the real stick found, and one step that
-fixes all three.**
+On Linux the stick answered for itself as well. After the write, the guest
+dropped its caches and read the first 2,689,781,760 bytes of `/dev/sdb` in
+22.1 seconds, and `sha256sum` gave the digest above. That read came off the
+drive and not out of a cache.
+
+**Four faults that only Windows and the real stick found.**
 
 - **Windows refused the first write with "Incorrect function".** Partition 1
   of the Fedora image has the GPT attribute read-only. Windows refuses each
@@ -318,20 +322,32 @@ fixes all three.**
   the write was whole. The same 12 bytes also fail the media check of Fedora.
   Its MD5, computed the way `checkisomd5` computes it, matches the image as
   published and not the image with those 12 bytes.
+- **An offline drive still changed after the check.** The check read the whole
+  image back and matched it, and a minute later those 12 bytes were the ones
+  of Windows again, with the drive offline the whole time.
 
-The step: the first write takes the drive offline. An offline drive has no
-partitions for Windows to apply. Offline, a write into
-the old read-only partition went through, and the new header held after the
-flush and after the handle closed. Online again, Windows rewrote it within
-three seconds. So the drive stays offline, and the write says so. A second
-write to the drive while it is offline passes too.
+The first three go when the first write takes the drive offline. An offline
+drive has no partitions for Windows to apply. Offline, a write into the old
+read-only partition went through, and the new header held after the write,
+after the flush and after the handle closed. Online again, Windows rewrote it
+within three seconds. A second write while the drive is offline passes too.
+
+The fourth needs more: a read-only drive refuses the write that Windows makes.
+The handle that wrote marks the drive read-only when it goes, which is after
+the last write and before the check, and the check only reads. The next write
+takes the mark off again. Measured: with the mark, the header held across the
+close of the handle, a drive query and thirty seconds, and again across a
+whole write, its check and the minute after it. The last line of a write says
+that the drive is offline and read-only.
 
 The first write also zeroes the MBR and both GPT copies, and the first block
 of the image goes on last. So no stale backup stays at the end of the drive,
 and a write that stops leaves no table.
 
-When the drive is online again, Windows changes the 12 bytes, and the media
-check of Fedora then fails on that drive.
+Neither mark outlives the drive. Measured: the stick came out of the machine
+and went back in, and Windows reported both flags gone and had changed the 12
+bytes again within 20 seconds. The media check of Fedora then fails on that
+drive.
 
 The first failure also showed a fault of the terminal: the error printed on the
 end of the progress line. The line now ends before an error prints.
@@ -339,18 +355,12 @@ end of the progress line. The line now ends before an error prints.
 **Not run yet.** No run has proved these claims.
 
 - **The firmware of a physical PC.** A VM start stands for it.
-- **The macOS and Linux writes with the first block last.** The two writes to
-  the real stick came before that change, and the change touches every host.
-  The tests run it against a memory target only. On macOS a new run needs
-  `sudo`, and so the password of the person.
-- **The offline flag after the drive leaves Windows.** Burnout does not
-  persist the flag. Microsoft documents only that a flag set to persist lasts
-  across a restart, and says nothing of a removal. No run has removed the stick
-  from Windows, or restarted Windows, and then read the flag or the GPT header.
-- **Two lines that a person reads.** The last line of a Windows write,
-  "The drive is offline now", got its words after the run on the stick. The
-  percentage and the time left while a step runs came after every run. A test
-  reads each line from a screen in memory, and no terminal has shown either.
+- **The macOS write with the first block last.** The macOS write to the real
+  stick came before that change. Linux and Windows have run it since. A new
+  run on macOS needs `sudo`, and so the password of the person.
+- **The two marks after a restart of Windows.** A removal clears both, and
+  that is measured. A restart is not: the machine asks for the password of an
+  account at its login screen, and nobody was there to type it.
 
 **Two faults that only a real run could find.**
 
