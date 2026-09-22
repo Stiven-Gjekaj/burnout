@@ -10,3 +10,4 @@
 #![allow(dead_code)]
 
 mod sums;
+mod upcase;
