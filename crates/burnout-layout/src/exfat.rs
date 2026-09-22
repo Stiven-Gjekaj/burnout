@@ -16,6 +16,8 @@ mod place;
 mod read;
 mod sums;
 mod upcase;
+mod verify;
 mod write;
 
+pub use verify::verify_exfat;
 pub use write::{write_exfat, ExfatOptions};
