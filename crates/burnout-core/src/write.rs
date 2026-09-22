@@ -67,38 +67,31 @@ where
     let image_bytes = length_of(source)?;
     check_fits(image_bytes, target.length())?;
 
-    let mut block = vec![0u8; block_bytes(sector)];
     let mut hash = Sha256::new();
     let mut done: u64 = 0;
     let mut written: u64 = 0;
 
     source.seek(SeekFrom::Start(0))?;
-    target.seek(SeekFrom::Start(0))?;
     progress.report(ProgressEvent::Start {
         stage: Stage::Write,
         total_bytes: Some(image_bytes),
     });
 
-    while done < image_bytes {
-        let want = ((image_bytes - done) as usize).min(block.len());
-        let got = fill(source, &mut block[..want])?;
-        if got == 0 {
-            // The file ended earlier than its own length said. Report what
-            // the code can prove rather than pad the difference with zero and
-            // call it a copy.
-            return Err(Error::Host {
-                source: "the image".to_string(),
-                detail: format!("it ended after {done} bytes and it reported {image_bytes}"),
-            });
-        }
-        hash.update(&block[..got]);
+    // The first block holds the partition table, so it goes on the drive
+    // last. A host acts on a table as soon as one lands: Windows reads it,
+    // and then refuses each write into a GPT partition marked read-only.
+    // Partition 1 of a Fedora image is one. With the table last, every other
+    // block is on the drive before a host can read the new table.
+    let mut first = vec![0u8; block_bytes(sector)];
+    let (first_got, first_out) = next_block(source, &mut first, 0, image_bytes, sector, &mut hash)?;
+    let mut read = first_got as u64;
+    target.seek(SeekFrom::Start(first_out as u64))?;
 
-        // A drive takes whole sectors. The last read is rarely one, so the
-        // tail of the block is zero and goes out with it.
-        let out = round_up(got as u64, sector) as usize;
-        block[got..out].fill(0);
+    let mut block = vec![0u8; first.len()];
+    while read < image_bytes {
+        let (got, out) = next_block(source, &mut block, read, image_bytes, sector, &mut hash)?;
         target.write_all(&block[..out])?;
-
+        read += got as u64;
         done += got as u64;
         written += out as u64;
         progress.report(ProgressEvent::Advance {
@@ -106,6 +99,15 @@ where
             bytes_done: done,
         });
     }
+
+    target.seek(SeekFrom::Start(0))?;
+    target.write_all(&first[..first_out])?;
+    done += first_got as u64;
+    written += first_out as u64;
+    progress.report(ProgressEvent::Advance {
+        stage: Stage::Write,
+        bytes_done: done,
+    });
 
     // The bytes are in a cache until this returns. A counter that reached the
     // size of the image is not a finished write, so the flush comes first and
@@ -218,6 +220,36 @@ where
         bytes: done,
         digest: expected,
     })
+}
+
+/// Read the next block of the image, add it to the hash, and pad it to whole
+/// sectors. Give back how many bytes came and how many go to the drive.
+fn next_block<S: Read>(
+    source: &mut S,
+    block: &mut [u8],
+    read: u64,
+    image_bytes: u64,
+    sector: u32,
+    hash: &mut Sha256,
+) -> Result<(usize, usize)> {
+    let want = ((image_bytes - read) as usize).min(block.len());
+    let got = fill(source, &mut block[..want])?;
+    if got == 0 && want > 0 {
+        // The file ended earlier than its own length said. Report what the
+        // code can prove rather than pad the difference with zero and call it
+        // a copy.
+        return Err(Error::Host {
+            source: "the image".to_string(),
+            detail: format!("it ended after {read} bytes and it reported {image_bytes}"),
+        });
+    }
+    hash.update(&block[..got]);
+
+    // A drive takes whole sectors. The last read is rarely one, so the tail
+    // of the block is zero and goes out with it.
+    let out = round_up(got as u64, sector) as usize;
+    block[got..out].fill(0);
+    Ok((got, out))
 }
 
 /// A block size that is a whole number of sectors.
@@ -432,6 +464,77 @@ mod tests {
         assert_eq!(report.image_bytes, bytes as u64);
         assert_eq!(&target.contents()[..bytes], source.get_ref().as_slice());
         assert_eq!(report.written_bytes % 4096, 0);
+    }
+
+    /// A target that keeps the offset and the length of each write.
+    struct Recorder {
+        inner: MemoryTarget,
+        writes: Vec<(u64, usize)>,
+    }
+
+    impl Read for Recorder {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.inner.read(buf)
+        }
+    }
+
+    impl Write for Recorder {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let at = self.inner.stream_position()?;
+            let took = self.inner.write(buf)?;
+            self.writes.push((at, took));
+            Ok(took)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.inner.flush()
+        }
+    }
+
+    impl Seek for Recorder {
+        fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+
+    impl BlockTarget for Recorder {
+        fn logical_sector_size(&self) -> u32 {
+            self.inner.logical_sector_size()
+        }
+
+        fn length(&self) -> u64 {
+            self.inner.length()
+        }
+
+        fn sync(&mut self) -> Result<()> {
+            self.inner.sync()
+        }
+    }
+
+    #[test]
+    fn the_first_block_goes_on_the_drive_last() {
+        // The first block holds the partition table. Windows reads a table
+        // that lands on the drive, and then refuses each write into a GPT
+        // partition marked read-only. Partition 1 of a Fedora image is one.
+        let bytes = 9 * 1024 * 1024 + 7;
+        let mut source = image(bytes);
+        let mut target = Recorder {
+            inner: MemoryTarget::new(16 * 1024 * 1024, 4096).unwrap(),
+            writes: Vec::new(),
+        };
+        let report = write_image(&mut source, &mut target, &mut Silent).unwrap();
+
+        let (last, before) = target.writes.split_last().unwrap();
+        assert_eq!(*last, (0, BLOCK_BYTES));
+        for (at, _) in before {
+            assert!(*at >= BLOCK_BYTES as u64, "a write at {at} came first");
+        }
+        assert_eq!(
+            &target.inner.contents()[..bytes],
+            source.get_ref().as_slice()
+        );
+        assert_eq!(report.digest, crate::sha256(source.get_ref()));
+        assert_eq!(target.inner.bytes_at_last_sync(), report.written_bytes);
     }
 
     #[test]
