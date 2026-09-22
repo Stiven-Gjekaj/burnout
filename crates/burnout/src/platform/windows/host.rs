@@ -576,11 +576,14 @@ impl WindowsDisk {
     /// the real stick: offline, a write into the old read-only partition went
     /// through, and the new header held after the write, after the flush and
     /// after the handle closed. Online again, Windows rewrote it within three
-    /// seconds. So the drive stays offline. Persist is zero, and Windows
-    /// documents a flag set that way as one that a restart clears.
+    /// seconds. So the drive stays offline. Persist is zero. Microsoft
+    /// documents only that a flag set to persist lasts across a restart, and
+    /// no run has shown what a restart or a removal does to this one.
     fn go_offline(&mut self) -> std::io::Result<()> {
         // SET_DISK_ATTRIBUTES: Version, Persist, three reserved bytes,
-        // Attributes, AttributesMask and sixteen reserved bytes.
+        // Attributes, AttributesMask and sixteen reserved bytes. Version is
+        // 40, the size of this structure. The page of Microsoft says the size
+        // of GET_DISK_ATTRIBUTES, which is 16, and the real stick took 40.
         let mut input = [0u8; 40];
         input[0..4].copy_from_slice(&40u32.to_le_bytes());
         input[8..16].copy_from_slice(&DISK_ATTRIBUTE_OFFLINE.to_le_bytes());

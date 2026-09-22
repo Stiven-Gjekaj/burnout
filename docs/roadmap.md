@@ -268,8 +268,8 @@ exit test needs a stick that can be erased.
 **The real stick, on one Mac.** A Samsung Flash Drive of 128.3 GB, with a
 USB 3 controller of its own. An Apple M5 cannot start a Linux stick, so UTM
 passed the stick itself through to a VM, and a VM start counts as the start on
-real hardware. That is the one thing this does not prove: the firmware of a
-physical PC.
+real hardware. That leaves the firmware of a physical PC unproved, and the list
+under "Not run yet" below has the other gaps.
 
 | Host | How it reached the stick | What it printed |
 | --- | --- | --- |
@@ -331,12 +331,26 @@ of the image goes on last. So no stale backup stays at the end of the drive,
 and a write that stops leaves no table.
 
 When the drive is online again, Windows changes the 12 bytes, and the media
-check of Fedora then fails on that drive. Burnout does not persist the offline
-flag. What Windows does when the drive comes back, or after a restart, was not
-tried.
+check of Fedora then fails on that drive.
 
 The first failure also showed a fault of the terminal: the error printed on the
 end of the progress line. The line now ends before an error prints.
+
+**Not run yet.** No run has proved these claims.
+
+- **The firmware of a physical PC.** A VM start stands for it.
+- **The macOS and Linux writes with the first block last.** The two writes to
+  the real stick came before that change, and the change touches every host.
+  The tests run it against a memory target only. On macOS a new run needs
+  `sudo`, and so the password of the person.
+- **The offline flag after the drive leaves Windows.** Burnout does not
+  persist the flag. Microsoft documents only that a flag set to persist lasts
+  across a restart, and says nothing of a removal. No run has removed the stick
+  from Windows, or restarted Windows, and then read the flag or the GPT header.
+- **Two lines that a person reads.** The last line of a Windows write,
+  "The drive is offline now", got its words after the run on the stick. The
+  percentage and the time left while a step runs came after every run. A test
+  reads each line from a screen in memory, and no terminal has shown either.
 
 **Two faults that only a real run could find.**
 
