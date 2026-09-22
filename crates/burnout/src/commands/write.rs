@@ -156,7 +156,7 @@ fn find_target(args: &WriteArgs) -> Result<(Vec<DriveInfo>, DriveInfo)> {
     if let Some(path) = &args.device {
         let found = drives
             .iter()
-            .find(|d| d.node == *path || d.id.as_str() == path)
+            .find(|d| names_drive(d, path))
             .cloned()
             .ok_or_else(|| Error::NoSuchDrive {
                 wanted: path.clone(),
@@ -177,6 +177,18 @@ fn find_target(args: &WriteArgs) -> Result<(Vec<DriveInfo>, DriveInfo)> {
             wanted: index.to_string(),
         })?;
     Ok((drives, found))
+}
+
+/// Whether a path from `--device` names this drive.
+///
+/// It names the drive by the node that Burnout writes, by the name of the
+/// drive, or by that name under `/dev`. The last one is for macOS, where every
+/// tool of the system prints `/dev/disk5` and Burnout writes `/dev/rdisk5`.
+/// Measured: `--device /dev/disk5` answered that no drive carries the name.
+fn names_drive(drive: &DriveInfo, path: &str) -> bool {
+    drive.node == path
+        || drive.id.as_str() == path
+        || path.strip_prefix("/dev/") == Some(drive.id.as_str())
 }
 
 /// Show the target and wait for the person to agree to it.
@@ -259,4 +271,29 @@ fn confirm(
         println!("Nothing was written to {}.", describe(drive));
     }
     Ok(agreed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use burnout_core::DriveId;
+
+    #[test]
+    fn a_macos_drive_answers_to_its_node_its_name_and_the_name_under_dev() {
+        let stick = DriveInfo::new(DriveId::new("disk5"), "/dev/rdisk5", "Flash Drive");
+        for path in ["/dev/rdisk5", "disk5", "/dev/disk5"] {
+            assert!(names_drive(&stick, path), "{path}");
+        }
+        for path in ["/dev/disk4", "/dev/rdisk", "disk", "/dev/disk5s1", "rdisk5"] {
+            assert!(!names_drive(&stick, path), "{path}");
+        }
+    }
+
+    #[test]
+    fn a_linux_drive_answers_to_its_node_and_its_name() {
+        let stick = DriveInfo::new(DriveId::new("sdb"), "/dev/sdb", "Flash Drive");
+        assert!(names_drive(&stick, "/dev/sdb"));
+        assert!(names_drive(&stick, "sdb"));
+        assert!(!names_drive(&stick, "/dev/sdb1"));
+    }
 }
