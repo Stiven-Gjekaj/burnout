@@ -14,6 +14,7 @@ pub struct MemoryTarget {
     sector_size: u32,
     length: u64,
     sync_count: u32,
+    written: u64,
     bytes_at_last_sync: u64,
 }
 
@@ -27,6 +28,7 @@ impl MemoryTarget {
             sector_size,
             length,
             sync_count: 0,
+            written: 0,
             bytes_at_last_sync: 0,
         })
     }
@@ -45,7 +47,7 @@ impl MemoryTarget {
         self.sync_count
     }
 
-    /// How many bytes the image held at the last flush.
+    /// How many bytes the caller had written at the last flush.
     ///
     /// A test compares this against the size of the source. If it is smaller,
     /// the code reported success while bytes were still in a cache.
@@ -54,8 +56,12 @@ impl MemoryTarget {
     }
 
     /// How many bytes the caller has written so far.
+    ///
+    /// This counts what each write took, and not the position. A caller that
+    /// seeks back and writes the start last ends at the start, and that
+    /// position says nothing about how much it wrote.
     pub fn bytes_written(&self) -> u64 {
-        self.bytes.position()
+        self.written
     }
 }
 
@@ -77,7 +83,9 @@ impl Write for MemoryTarget {
             ));
         }
         let take = buf.len().min(room as usize);
-        self.bytes.write(&buf[..take])
+        let took = self.bytes.write(&buf[..take])?;
+        self.written += took as u64;
+        Ok(took)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
@@ -103,7 +111,7 @@ impl BlockTarget for MemoryTarget {
     fn sync(&mut self) -> Result<()> {
         self.bytes.flush()?;
         self.sync_count += 1;
-        self.bytes_at_last_sync = self.bytes.position();
+        self.bytes_at_last_sync = self.written;
         Ok(())
     }
 }
@@ -153,6 +161,18 @@ mod tests {
         );
         t.sync().unwrap();
         assert_eq!(t.sync_count(), 2);
+        assert_eq!(t.bytes_at_last_sync(), 1024);
+    }
+
+    #[test]
+    fn a_write_that_goes_back_to_the_start_still_counts() {
+        let mut t = MemoryTarget::new(1024, 512).unwrap();
+        t.seek(SeekFrom::Start(512)).unwrap();
+        t.write_all(&[1u8; 512]).unwrap();
+        t.seek(SeekFrom::Start(0)).unwrap();
+        t.write_all(&[2u8; 512]).unwrap();
+        t.sync().unwrap();
+        assert_eq!(t.bytes_written(), 1024);
         assert_eq!(t.bytes_at_last_sync(), 1024);
     }
 
