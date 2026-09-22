@@ -53,7 +53,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P0 | Prove the layout | S | **done** |
 | P1 | The skeleton and the device layer | L | **done** |
 | P2 | Raw mode | M | **v0.1** |
-| P3 | The partition table and FAT32 | M | |
+| P3 | The partition table and FAT32 | M | **done** |
 | P4 | The exFAT writer | XL | **v0.2** |
 | P5 | Reading an ISO | L | |
 | P6 | Windows mode | L | **v0.3** |
