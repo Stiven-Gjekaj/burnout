@@ -489,6 +489,44 @@ The work:
 - Large files, which is the entire point, so a file over 4 GiB is the first
   test and not the last.
 
+**How the writer works.** These are the decisions, and the reason for each.
+
+- **One pass, with the whole tree.** Burnout knows every file before it
+  writes the first byte. So the writer plans the whole volume first, and then
+  writes it. Each file and each directory gets one run of clusters, and its
+  entry says so with the NoFatChain flag, as Windows does. The FAT holds a
+  chain only for the allocation bitmap, the up-case table and the root
+  directory, because the specification asks for a chain there.
+- **The clusters go in the order of the tree.** The bitmap takes cluster 2,
+  the up-case table comes next, and the root directory comes after them, as
+  the specification recommends. Every directory and every file follows in the
+  order of `TreePath`, so one tree gives one volume.
+- **The cluster size is the one that Windows picks.** It is 4 KiB up to
+  256 MiB, 32 KiB up to 32 GiB, and 128 KiB above that, and never less than
+  one sector. The FAT starts 1 MiB into the volume, and the clusters start on
+  the next whole mebibyte. That is the alignment of the partitions, for the
+  same reason.
+- **The boot regions go last.** The writer puts every other byte on the
+  volume first. A drive that stops half way then holds nothing that a host
+  mounts.
+- **The up-case table is the one that the specification recommends.** It is
+  2,918 entries in compressed form, and its checksum is E619D30Dh. The source
+  holds it as a table whose lines match Table 25 of the specification, and a
+  test checks the checksum.
+- **Every timestamp is 1980-01-01 at midnight, in local time,** as on
+  partition 1. One tree then gives one volume, to the byte.
+- **Each file and each directory fills whole clusters, and the rest of its
+  last cluster is zero.** Old data on a drive then cannot show through, and
+  the same tree gives the same bytes on a device too.
+- **The check reads the volume with a reader of its own.** It shares no code
+  and no cache with the writer. It checks the boot region, its checksum and
+  its copy, the checksum of each entry set and the hash of each name. It
+  checks that the bitmap marks each cluster that the volume uses and no other.
+  Then it reads each file and compares its digest with the one it went in
+  with. The host tools check the same volume in CI.
+- **The code lives in `burnout-layout`, beside FAT32.** It takes no
+  dependency.
+
 **The exit test.** A volume that Burnout formats mounts on Windows, on macOS
 and on Linux. A 6 GiB file written into it reads back with the same hash on
 all three. The host's own check tool reports no error.
