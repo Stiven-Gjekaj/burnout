@@ -15,3 +15,6 @@ mod geometry;
 mod place;
 mod sums;
 mod upcase;
+mod write;
+
+pub use write::{write_exfat, ExfatOptions};
