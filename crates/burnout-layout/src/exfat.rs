@@ -6,9 +6,6 @@
 //!
 //! [The roadmap]: https://github.com/Stiven-Gjekaj/burnout/blob/main/docs/roadmap.md
 
-// The parts come before the writer that uses them.
-#![allow(dead_code)]
-
 mod boot;
 mod entries;
 mod geometry;

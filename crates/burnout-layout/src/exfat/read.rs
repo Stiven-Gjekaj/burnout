@@ -61,8 +61,6 @@ pub(crate) struct Volume<T: BlockTarget> {
     heap_start: u64,
     count: u32,
     percent: u8,
-    serial: u32,
-    label: String,
     up: UpCase,
     bitmap: Vec<u8>,
     root: Vec<u8>,
@@ -101,7 +99,6 @@ impl<T: BlockTarget> Volume<T> {
         let heap_offset = u32_at(88) as u64;
         let count = u32_at(92);
         let root_cluster = u32_at(96);
-        let serial = u32_at(100);
         let revision = u16::from_le_bytes([boot[104], boot[105]]);
         let flags = u16::from_le_bytes([boot[106], boot[107]]);
         let (sector_shift, cluster_shift, fats, percent) =
@@ -158,8 +155,6 @@ impl<T: BlockTarget> Volume<T> {
             heap_start: heap_offset * sector,
             count,
             percent,
-            serial,
-            label: String::new(),
             up: UpCase::recommended(),
             bitmap: Vec::new(),
             root: Vec::new(),
@@ -185,22 +180,12 @@ impl<T: BlockTarget> Volume<T> {
         Ok(volume)
     }
 
-    /// The label of the volume, or an empty string when it has none.
-    pub(crate) fn label(&self) -> &str {
-        &self.label
-    }
-
-    /// The volume serial number.
-    pub(crate) fn serial(&self) -> u32 {
-        self.serial
-    }
-
     /// Read the entries of the root that describe the volume itself: the
     /// bitmap, the up-case table and the label.
     fn read_system_entries(&mut self, bitmap_bytes: u64) -> Result<()> {
         let mut bitmap = None;
         let mut upcase = None;
-        let mut label = None;
+        let mut seen_label = false;
         for entry in self.root.chunks_exact(ENTRY) {
             match entry[0] {
                 0x00 => break,
@@ -217,17 +202,16 @@ impl<T: BlockTarget> Volume<T> {
                 }
                 0x83 => {
                     let length = entry[1] as usize;
-                    if length > 11 || label.is_some() {
+                    if length > 11 || seen_label {
                         return Err(invalid("its label is not one label of 11 units or fewer"));
                     }
                     let units: Vec<u16> = entry[2..2 + 2 * length]
                         .chunks_exact(2)
                         .map(|p| u16::from_le_bytes([p[0], p[1]]))
                         .collect();
-                    label = Some(
-                        String::from_utf16(&units)
-                            .map_err(|_| invalid("its label is not valid UTF-16"))?,
-                    );
+                    String::from_utf16(&units)
+                        .map_err(|_| invalid("its label is not valid UTF-16"))?;
+                    seen_label = true;
                 }
                 _ => {}
             }
@@ -256,7 +240,6 @@ impl<T: BlockTarget> Volume<T> {
         }
         self.up = UpCase::from_bytes(&table)
             .ok_or_else(|| invalid("its up-case table is not a table"))?;
-        self.label = label.unwrap_or_default();
         Ok(())
     }
 
@@ -733,8 +716,6 @@ mod tests {
         for sector in [512, 4096] {
             let mut d = written(sector, &tree);
             let mut volume = Volume::open(d.partition()).unwrap();
-            assert_eq!(volume.label(), "Install");
-            assert_eq!(volume.serial(), 0x1234_ABCD);
             let nodes = volume.walk().unwrap();
             volume.check_allocation().unwrap();
 

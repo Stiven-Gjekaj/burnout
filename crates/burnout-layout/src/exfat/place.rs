@@ -14,8 +14,8 @@ use super::entries::{
     bitmap_entry, file_set, name_units, set_entries, upcase_entry, Kind, ENTRY_BYTES,
 };
 use super::geometry::{Geometry, FIRST_CLUSTER};
-use super::sums::{name_hash, table_checksum};
-use super::upcase::{recommended_bytes, UpCase};
+use super::sums::name_hash;
+use super::upcase::{recommended_bytes, UpCase, RECOMMENDED_CHECKSUM};
 use crate::tree::{Entry, TreePath};
 
 /// The largest directory of exFAT, in bytes of entries.
@@ -243,7 +243,7 @@ impl Placement {
             self.geometry.bitmap_bytes(),
         ));
         bytes.extend_from_slice(&upcase_entry(
-            table_checksum(&table),
+            RECOMMENDED_CHECKSUM,
             self.upcase.first,
             table.len() as u64,
         ));
