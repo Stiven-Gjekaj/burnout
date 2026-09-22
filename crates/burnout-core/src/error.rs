@@ -139,6 +139,15 @@ pub enum Error {
         /// The smallest partition that the file system fits, in bytes.
         needed_bytes: u64,
     },
+    /// The files of a tree do not fit on the volume that has to hold them.
+    VolumeFull {
+        /// The file system, such as exFAT.
+        file_system: &'static str,
+        /// What the tree takes on the volume, in whole clusters, in bytes.
+        needed_bytes: u64,
+        /// What the volume holds for files, in bytes.
+        free_bytes: u64,
+    },
 }
 
 impl fmt::Display for Error {
@@ -247,6 +256,16 @@ impl fmt::Display for Error {
                 write!(
                     f,
                     "{file_system} needs a partition of {needed_bytes} bytes or more, and this one holds {partition_bytes}"
+                )
+            }
+            Error::VolumeFull {
+                file_system,
+                needed_bytes,
+                free_bytes,
+            } => {
+                write!(
+                    f,
+                    "the files take {needed_bytes} bytes of the {file_system} volume, and it holds {free_bytes} bytes for files"
                 )
             }
         }
@@ -369,6 +388,19 @@ mod tests {
         assert!(text.contains("FAT32"));
         assert!(text.contains("1048576"));
         assert!(text.contains("34077184"));
+    }
+
+    #[test]
+    fn a_full_volume_message_gives_what_the_files_take_and_what_it_holds() {
+        let e = Error::VolumeFull {
+            file_system: "exFAT",
+            needed_bytes: 7_000_000_000,
+            free_bytes: 6_000_000_000,
+        };
+        assert_eq!(
+            e.to_string(),
+            "the files take 7000000000 bytes of the exFAT volume, and it holds 6000000000 bytes for files"
+        );
     }
 
     #[test]
