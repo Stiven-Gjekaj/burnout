@@ -81,26 +81,38 @@ fn duration(seconds: f64) -> String {
     }
 }
 
-/// When each step started.
+/// When each step started, and the total that it gave at the start.
 ///
 /// The write path reports the end of the write only after the flush returns,
 /// because a byte count is not a finished write. So the time of the write
 /// runs from its start, across the flush, to that report. One clock that each
 /// step restarts divides the write by the time of the flush alone.
+///
+/// Only the start of a step carries its total. A line drawn while the step
+/// runs takes the total from here, or it shows no percentage and no time left.
 #[derive(Debug, Default)]
-struct Starts(Vec<(Stage, Instant)>);
+struct Starts(Vec<(Stage, Instant, Option<u64>)>);
 
 impl Starts {
-    fn begin(&mut self, stage: Stage, now: Instant) {
-        self.0.retain(|(s, _)| *s != stage);
-        self.0.push((stage, now));
+    fn begin(&mut self, stage: Stage, now: Instant, total: Option<u64>) {
+        self.0.retain(|(s, _, _)| *s != stage);
+        self.0.push((stage, now, total));
     }
 
     fn elapsed(&self, stage: Stage, now: Instant) -> Duration {
         self.0
             .iter()
-            .find(|(s, _)| *s == stage)
-            .map_or(Duration::ZERO, |(_, at)| now.saturating_duration_since(*at))
+            .find(|(s, _, _)| *s == stage)
+            .map_or(Duration::ZERO, |(_, at, _)| {
+                now.saturating_duration_since(*at)
+            })
+    }
+
+    fn total(&self, stage: Stage) -> Option<u64> {
+        self.0
+            .iter()
+            .find(|(s, _, _)| *s == stage)
+            .and_then(|(_, _, total)| *total)
     }
 }
 
@@ -192,7 +204,7 @@ impl Progress for Bar {
         match event {
             ProgressEvent::Start { stage, total_bytes } => {
                 let now = Instant::now();
-                self.starts.begin(stage, now);
+                self.starts.begin(stage, now, total_bytes);
                 self.drawn = now - REDRAW;
                 let line = progress_line(stage, 0, total_bytes, Duration::ZERO);
                 self.draw(&line);
@@ -204,7 +216,8 @@ impl Progress for Bar {
                 }
                 self.drawn = now;
                 let elapsed = self.starts.elapsed(stage, now);
-                let line = progress_line(stage, bytes_done, None, elapsed);
+                let total = self.starts.total(stage);
+                let line = progress_line(stage, bytes_done, total, elapsed);
                 self.draw(&line);
             }
             ProgressEvent::Done { stage, bytes_done } => {
@@ -258,6 +271,24 @@ mod tests {
         let text = screen.text();
         assert!(text.starts_with("\rwrite"), "{text:?}");
         assert!(text.ends_with('\n'), "{text:?}");
+    }
+
+    #[test]
+    fn a_step_under_way_shows_how_much_of_it_is_done() {
+        let screen = Screen::default();
+        let mut bar = Bar::on(Some(Box::new(screen.clone())));
+        bar.report(ProgressEvent::Start {
+            stage: Stage::Write,
+            total_bytes: Some(2_000_000_000),
+        });
+        bar.report(ProgressEvent::Advance {
+            stage: Stage::Write,
+            bytes_done: 500_000_000,
+        });
+        let text = screen.text();
+        let last = text.rsplit('\r').next().unwrap();
+        assert!(last.contains("25%"), "{text:?}");
+        assert!(last.contains("of 2.0 GB"), "{text:?}");
     }
 
     #[test]
@@ -366,8 +397,8 @@ mod tests {
         // bytes over the whole time, and not over the flush that came last.
         let t0 = Instant::now();
         let mut starts = Starts::default();
-        starts.begin(Stage::Write, t0);
-        starts.begin(Stage::Flush, t0 + Duration::from_secs(120));
+        starts.begin(Stage::Write, t0, None);
+        starts.begin(Stage::Flush, t0 + Duration::from_secs(120), None);
         let end = t0 + Duration::from_secs(129);
         assert_eq!(starts.elapsed(Stage::Flush, end), Duration::from_secs(9));
         assert_eq!(starts.elapsed(Stage::Write, end), Duration::from_secs(129));
@@ -386,8 +417,8 @@ mod tests {
     fn a_step_that_starts_again_is_timed_from_its_new_start() {
         let t0 = Instant::now();
         let mut starts = Starts::default();
-        starts.begin(Stage::Verify, t0);
-        starts.begin(Stage::Verify, t0 + Duration::from_secs(5));
+        starts.begin(Stage::Verify, t0, None);
+        starts.begin(Stage::Verify, t0 + Duration::from_secs(5), None);
         let end = t0 + Duration::from_secs(7);
         assert_eq!(starts.elapsed(Stage::Verify, end), Duration::from_secs(2));
         assert_eq!(starts.elapsed(Stage::Unmount, end), Duration::ZERO);
