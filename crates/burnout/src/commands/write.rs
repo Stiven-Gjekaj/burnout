@@ -131,7 +131,7 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
     // The Windows layer took the drive offline for the write, and a person
     // who looks for it in Explorer needs to know why it is not there.
     #[cfg(windows)]
-    println!("The drive is offline now. This stops Windows from changing it.");
+    println!("Windows now holds the drive offline and read-only, so it changes nothing on it.");
     Ok(0)
 }
 

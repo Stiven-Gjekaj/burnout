@@ -558,7 +558,7 @@ pub struct WindowsDisk {
 }
 
 impl WindowsDisk {
-    /// Take the drive offline.
+    /// Take the drive offline, and take a read-only mark off it.
     ///
     /// Windows applies the partition table that it knows to the drive, and
     /// that broke three writes of Fedora to the real stick:
@@ -576,18 +576,33 @@ impl WindowsDisk {
     /// the real stick: offline, a write into the old read-only partition went
     /// through, and the new header held after the write, after the flush and
     /// after the handle closed. Online again, Windows rewrote it within three
-    /// seconds. So the drive stays offline. Persist is zero. Microsoft
-    /// documents only that a flag set to persist lasts across a restart, and
-    /// no run has shown what a restart or a removal does to this one.
+    /// seconds. So the drive stays offline for the write.
+    ///
+    /// Offline is not enough after the write, and [`WindowsDisk::drop`] says
+    /// what else the drive needs. The mark from that step comes off here, so
+    /// that a second write to the same drive can write.
+    ///
+    /// Persist is zero. Microsoft documents only that a flag set to persist
+    /// lasts across a restart, and no run has shown what a restart does to
+    /// this one.
     fn go_offline(&mut self) -> std::io::Result<()> {
+        self.set_attributes(
+            DISK_ATTRIBUTE_OFFLINE,
+            DISK_ATTRIBUTE_OFFLINE | DISK_ATTRIBUTE_READ_ONLY,
+        )
+    }
+
+    /// Set the attributes of the drive for as long as it stays in.
+    fn set_attributes(&self, attributes: u64, mask: u64) -> std::io::Result<()> {
         // SET_DISK_ATTRIBUTES: Version, Persist, three reserved bytes,
         // Attributes, AttributesMask and sixteen reserved bytes. Version is
         // 40, the size of this structure. The page of Microsoft says the size
         // of GET_DISK_ATTRIBUTES, which is 16, and the real stick took 40.
+        // Persist stays zero, so nothing here outlives the drive.
         let mut input = [0u8; 40];
         input[0..4].copy_from_slice(&40u32.to_le_bytes());
-        input[8..16].copy_from_slice(&DISK_ATTRIBUTE_OFFLINE.to_le_bytes());
-        input[16..24].copy_from_slice(&DISK_ATTRIBUTE_OFFLINE.to_le_bytes());
+        input[8..16].copy_from_slice(&attributes.to_le_bytes());
+        input[16..24].copy_from_slice(&mask.to_le_bytes());
         if control(&self.handle, IOCTL_DISK_SET_DISK_ATTRIBUTES, &input, 0).is_none() {
             return Err(std::io::Error::last_os_error());
         }
@@ -635,6 +650,30 @@ impl WindowsDisk {
             return Err(std::io::Error::last_os_error());
         }
         Ok(written as usize)
+    }
+}
+
+impl Drop for WindowsDisk {
+    /// Mark a drive that this handle wrote read-only.
+    ///
+    /// An offline drive holds what the write put on it while the write runs,
+    /// and not after it. Measured on the real stick: the check read the whole
+    /// image back and matched it, and a minute later Windows had moved the
+    /// backup of the GPT to the end of the drive again, with the drive still
+    /// offline. A read-only drive refuses that write. Measured in the same
+    /// way: the header held across the close of the handle, a drive query and
+    /// thirty seconds.
+    ///
+    /// The mark goes on after the last write of this handle and before the
+    /// check, which reads and does not write. [`WindowsDisk::go_offline`]
+    /// takes it off again for the next write.
+    ///
+    /// A failure here is not reported. It changes nothing that the check
+    /// proves, and a drop has nowhere to report to.
+    fn drop(&mut self) {
+        if self.prepared {
+            let _ = self.set_attributes(DISK_ATTRIBUTE_READ_ONLY, DISK_ATTRIBUTE_READ_ONLY);
+        }
     }
 }
 
@@ -716,6 +755,7 @@ const FSCTL_LOCK_VOLUME: u32 = 0x0009_0018;
 const FSCTL_DISMOUNT_VOLUME: u32 = 0x0009_0020;
 const IOCTL_DISK_SET_DISK_ATTRIBUTES: u32 = 0x0007_C0F4;
 const DISK_ATTRIBUTE_OFFLINE: u64 = 0x1;
+const DISK_ATTRIBUTE_READ_ONLY: u64 = 0x2;
 
 /// Say which step an error of the host came from.
 fn with_context(error: std::io::Error, step: &str) -> std::io::Error {
