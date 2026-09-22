@@ -35,6 +35,11 @@ pub fn stage_name(stage: Stage) -> &'static str {
 /// The rate and the time left come from what has happened and not from a
 /// guess about what will. Neither appears until there is enough to divide by,
 /// because a rate over no time is not a rate.
+///
+/// A flush carries no rate at all. It moves the bytes that the write handed
+/// to the host and that the host still holds, and the host does not say how
+/// many those are. Measured on Linux: 2.7 GB divided by a flush of 9 seconds
+/// gave 303 MB/s for a stick that reads back at 27 MB/s.
 pub fn progress_line(stage: Stage, done: u64, total: Option<u64>, elapsed: Duration) -> String {
     let mut line = format!("{:<8}", stage_name(stage));
 
@@ -51,7 +56,7 @@ pub fn progress_line(stage: Stage, done: u64, total: Option<u64>, elapsed: Durat
     }
 
     let seconds = elapsed.as_secs_f64();
-    if seconds >= 1.0 && done > 0 {
+    if stage != Stage::Flush && seconds >= 1.0 && done > 0 {
         let rate = done as f64 / seconds;
         line.push_str(&format!("   {}/s", human_size(rate as u64)));
         if let Some(total) = total {
@@ -76,6 +81,29 @@ fn duration(seconds: f64) -> String {
     }
 }
 
+/// When each step started.
+///
+/// The write path reports the end of the write only after the flush returns,
+/// because a byte count is not a finished write. So the time of the write
+/// runs from its start, across the flush, to that report. One clock that each
+/// step restarts divides the write by the time of the flush alone.
+#[derive(Debug, Default)]
+struct Starts(Vec<(Stage, Instant)>);
+
+impl Starts {
+    fn begin(&mut self, stage: Stage, now: Instant) {
+        self.0.retain(|(s, _)| *s != stage);
+        self.0.push((stage, now));
+    }
+
+    fn elapsed(&self, stage: Stage, now: Instant) -> Duration {
+        self.0
+            .iter()
+            .find(|(s, _)| *s == stage)
+            .map_or(Duration::ZERO, |(_, at)| now.saturating_duration_since(*at))
+    }
+}
+
 /// A progress line on the terminal.
 ///
 /// It draws on the error stream, so that the output of Burnout stays
@@ -83,7 +111,7 @@ fn duration(seconds: f64) -> String {
 /// is not a terminal, because a carriage return in a log file gives one line
 /// of nonsense per drive.
 pub struct Bar {
-    started: Instant,
+    starts: Starts,
     drawn: Instant,
     width: usize,
     quiet: bool,
@@ -99,7 +127,7 @@ impl Bar {
     pub fn new() -> Self {
         let now = Instant::now();
         Bar {
-            started: now,
+            starts: Starts::default(),
             drawn: now - REDRAW,
             width: 0,
             quiet: !std::io::stderr().is_terminal(),
@@ -135,8 +163,9 @@ impl Progress for Bar {
     fn report(&mut self, event: ProgressEvent) {
         match event {
             ProgressEvent::Start { stage, total_bytes } => {
-                self.started = Instant::now();
-                self.drawn = self.started - REDRAW;
+                let now = Instant::now();
+                self.starts.begin(stage, now);
+                self.drawn = now - REDRAW;
                 let line = progress_line(stage, 0, total_bytes, Duration::ZERO);
                 self.draw(&line);
             }
@@ -146,11 +175,12 @@ impl Progress for Bar {
                     return;
                 }
                 self.drawn = now;
-                let line = progress_line(stage, bytes_done, None, now - self.started);
+                let elapsed = self.starts.elapsed(stage, now);
+                let line = progress_line(stage, bytes_done, None, elapsed);
                 self.draw(&line);
             }
             ProgressEvent::Done { stage, bytes_done } => {
-                let elapsed = Instant::now() - self.started;
+                let elapsed = self.starts.elapsed(stage, Instant::now());
                 let line = progress_line(stage, bytes_done, Some(bytes_done), elapsed);
                 self.finish(&line);
             }
@@ -226,6 +256,53 @@ mod tests {
     fn a_count_past_the_total_does_not_print_more_than_all_of_it() {
         let line = progress_line(Stage::Write, 20, Some(10), Duration::ZERO);
         assert!(line.contains("100%"));
+    }
+
+    #[test]
+    fn a_flush_carries_no_rate() {
+        // Measured on Linux: all 2.7 GB over a flush of 9 seconds read as
+        // 303 MB/s, for a stick that reads back at 27 MB/s.
+        let line = progress_line(
+            Stage::Flush,
+            2_689_781_760,
+            Some(2_689_781_760),
+            Duration::from_secs(9),
+        );
+        assert!(line.contains("100%"));
+        assert!(!line.contains("/s"), "{line}");
+    }
+
+    #[test]
+    fn the_write_is_timed_from_its_own_start_across_the_flush() {
+        // The write ends only when the flush returns, so its rate is the
+        // bytes over the whole time, and not over the flush that came last.
+        let t0 = Instant::now();
+        let mut starts = Starts::default();
+        starts.begin(Stage::Write, t0);
+        starts.begin(Stage::Flush, t0 + Duration::from_secs(120));
+        let end = t0 + Duration::from_secs(129);
+        assert_eq!(starts.elapsed(Stage::Flush, end), Duration::from_secs(9));
+        assert_eq!(starts.elapsed(Stage::Write, end), Duration::from_secs(129));
+
+        let bytes = 2_689_781_760;
+        let line = progress_line(
+            Stage::Write,
+            bytes,
+            Some(bytes),
+            starts.elapsed(Stage::Write, end),
+        );
+        assert!(line.contains("20.9 MB/s"), "{line}");
+    }
+
+    #[test]
+    fn a_step_that_starts_again_is_timed_from_its_new_start() {
+        let t0 = Instant::now();
+        let mut starts = Starts::default();
+        starts.begin(Stage::Verify, t0);
+        starts.begin(Stage::Verify, t0 + Duration::from_secs(5));
+        let end = t0 + Duration::from_secs(7);
+        assert_eq!(starts.elapsed(Stage::Verify, end), Duration::from_secs(2));
+        assert_eq!(starts.elapsed(Stage::Unmount, end), Duration::ZERO);
     }
 
     #[test]
