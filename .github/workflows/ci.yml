@@ -69,11 +69,17 @@ jobs:
       - name: list the drives
         run: cargo run -p burnout -- list
 
-  # The exit test of the partition table and FAT32. Each host builds an image
-  # of the Windows layout, mounts it with its own mechanism, checks partition
-  # 1 with its own check tool, and reads every file back through its own FAT
-  # driver. Linux does it again at 4096-byte sectors. The job after this one
-  # proves that the three hosts built the same image, to the byte.
+  # The exit test of the partition table, FAT32 and exFAT. Each host builds
+  # an image of the Windows layout, mounts it with its own mechanism, checks
+  # partition 1 with its own FAT check tool and partition 2 with its own exFAT
+  # check tool, and reads every file back through its own drivers. Partition
+  # 2 holds a file past 4 GiB. Linux does it all again at 4096-byte sectors.
+  # The job after this one proves that the three hosts built the same image,
+  # to the byte.
+  #
+  # The example runs in release. It hashes each file on the way in and on the
+  # way back, and then the whole image, and a debug build takes minutes to
+  # hash 6 GiB.
   layout:
     name: layout on ${{ matrix.os }}
     strategy:
@@ -84,6 +90,9 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      # 6 GiB and 12,345 bytes: past 4 GiB, and its last cluster is not full.
+      LARGE_FILE: "6442463289"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
@@ -91,32 +100,38 @@ jobs:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: make the sample tree
-        run: cargo run -q -p burnout-layout --example layout_image -- tree sample
+        run: cargo run -q --release -p burnout-layout --example layout_image -- tree sample
 
+      # The first image goes before the second is made, so the runner never
+      # holds two images of 6 GiB.
       - name: check on Linux at 512 and 4096-byte sectors
         if: runner.os == 'Linux'
         run: |
-          command -v fsck.fat || { sudo apt-get update && sudo apt-get install -y dosfstools; }
-          cargo run -q -p burnout-layout --example layout_image -- image sample layout.img layout.sha256 > digest.txt
-          scripts/check-layout.sh layout.img layout.sha256 512
-          cargo run -q -p burnout-layout --example layout_image -- image sample layout4k.img layout4k.sha256 --sector-size 4096
-          scripts/check-layout.sh layout4k.img layout4k.sha256 4096
+          if ! command -v fsck.fat || ! command -v fsck.exfat; then
+            sudo apt-get update && sudo apt-get install -y dosfstools exfatprogs
+          fi
+          cargo run -q --release -p burnout-layout --example layout_image -- image sample layout.img boot.sha256 --install-manifest install.sha256 --large-file "$LARGE_FILE" > digest.txt
+          scripts/check-layout.sh layout.img boot.sha256 install.sha256 512
+          rm layout.img
+          cargo run -q --release -p burnout-layout --example layout_image -- image sample layout4k.img boot4k.sha256 --install-manifest install4k.sha256 --large-file "$LARGE_FILE" --sector-size 4096
+          scripts/check-layout.sh layout4k.img boot4k.sha256 install4k.sha256 4096
+          rm layout4k.img
 
       - name: check on macOS
         if: runner.os == 'macOS'
         run: |
-          cargo run -q -p burnout-layout --example layout_image -- image sample layout.img layout.sha256 > digest.txt
-          scripts/check-layout.sh layout.img layout.sha256 512
+          cargo run -q --release -p burnout-layout --example layout_image -- image sample layout.img boot.sha256 --install-manifest install.sha256 --large-file "$LARGE_FILE" > digest.txt
+          scripts/check-layout.sh layout.img boot.sha256 install.sha256 512
 
       # Windows mounts a VHD, which is the image with a footer after it. The
       # digest is of the image without the footer, as on the other hosts.
       - name: make the VHD on Windows
         if: runner.os == 'Windows'
-        run: cargo run -q -p burnout-layout --example layout_image -- image sample layout.vhd layout.sha256 --vhd > digest.txt
+        run: cargo run -q --release -p burnout-layout --example layout_image -- image sample layout.vhd boot.sha256 --install-manifest install.sha256 --large-file "$LARGE_FILE" --vhd > digest.txt
       - name: check on Windows
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/check-layout.ps1 layout.vhd layout.sha256
+        run: ./scripts/check-layout.ps1 layout.vhd boot.sha256 install.sha256
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
