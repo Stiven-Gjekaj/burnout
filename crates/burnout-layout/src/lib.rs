@@ -15,6 +15,7 @@
 
 mod copy;
 mod dot_entries;
+mod exfat;
 mod fat32;
 mod manifest;
 mod mbr;
