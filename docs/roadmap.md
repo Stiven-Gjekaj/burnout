@@ -215,7 +215,7 @@ The work:
 real hardware. The hash of the device matches the hash of the ISO. Every test
 in the suite runs against a file, and none opens a device.
 
-**It passes in virtual machines, and the real drive is still to come.**
+**It passed in virtual machines first.**
 
 A 2,689,781,760 byte Fedora ARM64 image went onto a drive from each host, and
 each of the three drives then started Fedora in a machine that had that drive
@@ -275,14 +275,15 @@ physical PC.
 | --- | --- | --- |
 | macOS 26 | `/dev/rdisk4`, 55 MB/s, read back at 128 MB/s | `162ba3c5...999933ef` |
 | Fedora 44 ARM64, a VM | the stick passed through, `/dev/sdb` | `162ba3c5...999933ef` |
-| Windows 11 ARM64, a VM | not run: it needs the administrator password | |
+| Windows 11 ARM64, a VM | the stick passed through, `\\.\PhysicalDrive2`, 29 MB/s, read back at 54 MB/s | `162ba3c5...999933ef` |
 
-The same digest as the ISO, from each host that ran. The stick that macOS
-wrote then started Fedora in a VM that had no disk of its own. The boot order
-of that VM named no disk, so its firmware stopped at the UEFI shell, and the
-shell started `\EFI\BOOT\BOOTAA64.EFI` from the stick. The media check of
-the initramfs, `checkisomd5`, then read the stick and passed, which is a
-check of the write that Burnout did not make.
+The same digest as the ISO, from each of the three hosts. The stick that
+macOS wrote then started Fedora in a VM that had no disk of its own, and so did
+the stick that Windows wrote. The boot order of that VM named no disk, so its
+firmware stopped at the UEFI shell, and the shell started
+`\EFI\BOOT\BOOTAA64.EFI` from the stick. The media check of the initramfs,
+`checkisomd5`, then read the image back from the first byte of the stick and
+passed each time. That is a check of the write that Burnout did not make.
 
 **Three faults that only the real stick found.**
 
@@ -299,6 +300,43 @@ check of the write that Burnout did not make.
   a write with no rate at all.
 - **`--device /dev/disk5` named no drive on macOS,** because Burnout writes
   `/dev/rdisk5`. The name under `/dev` now counts.
+
+**Three faults that only Windows and the real stick found, and one step that
+fixes all three.**
+
+- **Windows refused the first write with "Incorrect function".** Partition 1
+  of the Fedora image has the GPT attribute read-only. Windows refuses each
+  write that reaches such a partition, even when its volume is locked and
+  dismounted. A write past every partition went through.
+- **Windows read the new table during the write.** With the old table zeroed,
+  the first 4 MiB block put the Fedora table back, and the next write failed
+  the same way.
+- **Windows changed the stick after the write.** For a GPT that ends before
+  the drive does, Windows moves the backup to the end of the drive and
+  rewrites 12 bytes of the primary header. The check failed at byte 528. The
+  ISO with those 12 bytes in it hashes to what the drive held, so the rest of
+  the write was whole. The same 12 bytes also fail the media check of Fedora.
+  Its MD5, computed the way `checkisomd5` computes it, matches the image as
+  published and not the image with those 12 bytes.
+
+The step: the first write takes the drive offline. An offline drive has no
+partitions for Windows to apply. Offline, a write into
+the old read-only partition went through, and the new header held after the
+flush and after the handle closed. Online again, Windows rewrote it within
+three seconds. So the drive stays offline, and the write says so. A second
+write to the drive while it is offline passes too.
+
+The first write also zeroes the MBR and both GPT copies, and the first block
+of the image goes on last. So no stale backup stays at the end of the drive,
+and a write that stops leaves no table.
+
+When the drive is online again, Windows changes the 12 bytes, and the media
+check of Fedora then fails on that drive. Burnout does not persist the offline
+flag. What Windows does when the drive comes back, or after a restart, was not
+tried.
+
+The first failure also showed a fault of the terminal: the error printed on the
+end of the progress line. The line now ends before an error prints.
 
 **Two faults that only a real run could find.**
 
