@@ -12,7 +12,7 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 ![Linux](https://img.shields.io/badge/linux-facc15?style=for-the-badge&logo=linux&logoColor=0c0706)
 [![MIT licence](https://img.shields.io/badge/mit_licence-fde68a?style=for-the-badge&logoColor=0c0706)](LICENSE)
 
-![Phase](https://img.shields.io/badge/phase-P2_done-f97316?style=flat-square&labelColor=0c0706)
+![Phase](https://img.shields.io/badge/phase-P3_done-f97316?style=flat-square&labelColor=0c0706)
 ![No release](https://img.shields.io/badge/release-none_yet-78350f?style=flat-square&labelColor=0c0706)
 
 <p align="center">

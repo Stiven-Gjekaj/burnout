@@ -22,11 +22,11 @@ Nothing writes a drive yet, so nothing can erase one yet.
 Two rules set the order.
 
 **Risk first.**
-The layout that Windows mode writes rests on two claims that nobody has
+The layout that Windows mode writes rested on two claims that nobody had
 tested.
-If they are wrong, the layout changes, and any Windows code written before
-then is wasted.
-So the test comes before the code, and it needs no code.
+If they were wrong, the layout changed, and any Windows code written before
+then was wasted.
+So the test came before the code, and it needed no code. P0 ran it.
 
 **Useful early.**
 Raw mode is one code path, it exercises the whole device layer on three hosts,

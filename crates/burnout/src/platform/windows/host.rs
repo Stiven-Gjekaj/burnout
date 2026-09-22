@@ -4,8 +4,9 @@
 //! a buffer of bytes that [`super::parse`] reads, and that module is tested
 //! on all three hosts.
 //!
-//! **Every call here runs without Administrator.** The device handle asks for
-//! no access at all, and each IO control below is `FILE_ANY_ACCESS`:
+//! **Every call of the list path runs without Administrator.** The device
+//! handle asks for no access at all, and each IO control below is
+//! `FILE_ANY_ACCESS`:
 //!
 //! | Control | Code | Access |
 //! | --- | --- | --- |
@@ -17,6 +18,10 @@
 //! `IOCTL_DISK_GET_LENGTH_INFO` would give the size in one call, and it is
 //! declared `FILE_READ_ACCESS`. That needs a handle opened with
 //! `GENERIC_READ`, which needs Administrator. Do not use it here.
+//!
+//! The write path is the other half of this file, and it does need
+//! Administrator. [`WindowsAccess`] holds it, and says what it calls and
+//! why.
 
 use std::collections::BTreeSet;
 use std::ffi::c_void;
