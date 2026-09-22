@@ -9,8 +9,8 @@ use std::io::{self, Read};
 use burnout_core::{BlockTarget, Digest, Error, Result, Sha256};
 use fatfs::{Dir, ReadWriteSeek};
 
-use crate::copy::Manifest;
 use crate::fat32::with_volume;
+use crate::manifest::Manifest;
 use crate::tree::TreePath;
 
 /// How much of a file one read takes.

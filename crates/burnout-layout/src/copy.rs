@@ -1,9 +1,5 @@
 //! Copy a tree of files onto a FAT32 volume, and keep the digest of each
 //! file.
-//!
-//! The digests are what a later check compares against. Raw mode checks one
-//! digest of the whole drive. Windows mode writes files, so it checks one
-//! digest for each file.
 
 use std::io::{self, Read, Write};
 
@@ -12,6 +8,7 @@ use fatfs::{Dir, ReadWriteSeek};
 
 use crate::dot_entries::repair_dot_entries;
 use crate::fat32::{mounted, over_sectors, Volume};
+use crate::manifest::{CopiedFile, Manifest};
 use crate::tree::{Entry, FileSource, TreePath};
 
 /// The largest file that FAT32 holds: 4 GiB less one byte.
@@ -19,21 +16,6 @@ pub const MAX_FAT32_FILE_BYTES: u64 = u32::MAX as u64;
 
 /// How much of a file one read takes.
 const CHUNK_BYTES: usize = 1024 * 1024;
-
-/// A file that went onto a volume, and the digest of the bytes that went in.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CopiedFile {
-    pub path: TreePath,
-    pub bytes: u64,
-    pub digest: Digest,
-}
-
-/// Everything that a copy put onto a volume, in the order it went on.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Manifest {
-    pub dirs: Vec<TreePath>,
-    pub files: Vec<CopiedFile>,
-}
 
 /// Copy every directory and every file of `source` onto the FAT32 volume
 /// that fills `volume`.
