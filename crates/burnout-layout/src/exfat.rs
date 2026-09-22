@@ -13,6 +13,7 @@ mod boot;
 mod entries;
 mod geometry;
 mod place;
+mod read;
 mod sums;
 mod upcase;
 mod write;
