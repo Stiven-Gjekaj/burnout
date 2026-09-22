@@ -329,11 +329,14 @@ fn partition_to_disk(fs: &dyn SysfsSource, name: &str) -> String {
 /// **A drive is marked only when one mount holds that file.** The kernel says
 /// what the file was called and not which file was opened, and two mounts can
 /// hold the same name: a Fedora live USB and a Fedora disc both carry
-/// `LiveOS/squashfs.img`, measured on exactly that machine. A mark is a
-/// refusal that no option overrides, so a guess between two drives would take
-/// one away from its owner for good. When it is not certain this marks
-/// nothing, the list says the system disk is unknown, and the write command
-/// answers that with the stronger prompt.
+/// `LiveOS/squashfs.img`. A disc counts as a holder too, although Burnout
+/// never writes one. Both cases are measured: one machine started from the
+/// stick with the disc in the drive, and another started from the disc with
+/// the stick in a port, and the two mount tables differ only in the names of
+/// the mount points. A mark is a refusal that no option overrides, so a guess
+/// would take a drive away from its owner for good. When it is not certain
+/// this marks nothing, the list says the system disk is unknown, and the
+/// write command answers that with the stronger prompt.
 pub fn loop_backed_disks(fs: &dyn SysfsSource, mountinfo: &str) -> BTreeSet<String> {
     let mounts = mountinfo_sources(mountinfo);
     let mut out = BTreeSet::new();
@@ -355,7 +358,10 @@ pub fn loop_backed_disks(fs: &dyn SysfsSource, mountinfo: &str) -> BTreeSet<Stri
             continue;
         }
 
+        // Each device that holds the file, a disc included, and the drives
+        // under those devices.
         let mut holders = BTreeSet::new();
+        let mut drives = BTreeSet::new();
         for candidate in &mounts {
             if candidate.source.starts_with("/dev/loop") {
                 // A loop device does not carry its own backing file.
@@ -384,13 +390,15 @@ pub fn loop_backed_disks(fs: &dyn SysfsSource, mountinfo: &str) -> BTreeSet<Stri
             };
             if let Some(disk) = disk {
                 let disk = partition_to_disk(fs, &disk);
-                holders.extend(base_disks(fs, &disk));
+                drives.extend(base_disks(fs, &disk));
+                holders.insert(disk);
             }
         }
         // One holder is an answer. Two are a guess, and a mark is a refusal
-        // that no option overrides.
+        // that no option overrides. A disc that is the one holder marks
+        // nothing, because it is not a drive.
         if holders.len() == 1 {
-            out.extend(holders);
+            out.extend(drives);
         }
     }
     out
@@ -752,11 +760,11 @@ mod tests {
     }
 
     #[test]
-    fn a_disc_that_holds_the_same_name_does_not_hide_the_live_usb() {
-        // Measured on the machine this fix came from: the stick and the disc
-        // both carry LiveOS/squashfs.img, and the kernel says only what the
-        // file was called. A disc is not a drive that Burnout writes, so it
-        // adds no candidate and the stick is still the one.
+    fn a_stick_and_a_disc_that_hold_the_same_name_mark_neither() {
+        // Started from the stick, with the disc in the drive. Both carry
+        // LiveOS/squashfs.img, and the kernel says only what the file was
+        // called. The next test is the same machine started from the disc,
+        // and its mount table has the same shape, so neither can be marked.
         let fs = live_machine()
             .dir(
                 "/run/media/liveuser/Fedora-WS-Live-44/LiveOS",
@@ -768,7 +776,58 @@ mod tests {
 53 51 8:17 / /run/initramfs/live ro,relatime shared:17 - iso9660 /dev/sdb1 ro
 54 51 7:0 / /run/rootfsbase ro,relatime shared:18 - erofs /dev/loop0 ro
 1143 51 11:0 / /run/media/liveuser/Fedora-WS-Live-44 ro,nosuid shared:1068 - iso9660 /dev/sr0 ro";
-        assert!(loop_backed_disks(&fs, text).contains("sdb"));
+        let found = loop_backed_disks(&fs, text);
+        assert!(
+            found.is_empty(),
+            "a guess between a stick and a disc: {found:?}"
+        );
+    }
+
+    #[test]
+    fn a_stick_that_holds_a_copy_of_the_disc_the_system_started_from_is_not_marked() {
+        // Measured: the machine started from the disc, and the stick in the
+        // port held the same image, which the desktop mounted. Burnout
+        // refused the stick as the system disk, and no option overrides that
+        // refusal. The disc is a holder too, so this is a guess, and a guess
+        // marks nothing.
+        let tree = "../../devices/pci0000:00/0000:00:14.0/usb2/2-1/2-1:1.0/host6/target6:0:0/6:0:0:0/block/sdb";
+        let fs = MapSysfs::new()
+            .file("/sys/block/loop0/loop/backing_file", "/LiveOS/squashfs.img")
+            .dir("/run/initramfs/live/LiveOS", &["squashfs.img", "osmin.img"])
+            .dir(
+                "/run/media/liveuser/Fedora-WS-Live-44/LiveOS",
+                &["squashfs.img", "osmin.img"],
+            )
+            .link("/sys/dev/block/11:0", "../../devices/x/block/sr0")
+            .link("/sys/dev/block/8:17", &format!("{tree}/sdb1"))
+            .file("/sys/dev/block/8:17/partition", "1")
+            .link("/sys/class/block/sdb1", &format!("{tree}/sdb1"))
+            .file("/sys/class/block/sdb1/partition", "1");
+        let text = "\
+81 1 0:37 / / rw,relatime shared:1 - overlay LiveOS_rootfs rw,lowerdir=/run/rootfsbase
+53 51 11:0 / /run/initramfs/live ro,relatime shared:17 - iso9660 /dev/sr0 ro
+54 51 7:0 / /run/rootfsbase ro,relatime shared:18 - erofs /dev/loop0 ro
+1143 51 8:17 / /run/media/liveuser/Fedora-WS-Live-44 ro,nosuid shared:1068 - iso9660 /dev/sdb1 ro";
+        let found = loop_backed_disks(&fs, text);
+        assert!(
+            found.is_empty(),
+            "the stick is not the system disk: {found:?}"
+        );
+    }
+
+    #[test]
+    fn a_disc_that_is_the_only_holder_marks_nothing() {
+        // Started from the disc with no copy anywhere else. The disc is the
+        // one holder and it is not a drive, so no drive is marked.
+        let fs = MapSysfs::new()
+            .file("/sys/block/loop0/loop/backing_file", "/LiveOS/squashfs.img")
+            .dir("/run/initramfs/live/LiveOS", &["squashfs.img"])
+            .link("/sys/dev/block/11:0", "../../devices/x/block/sr0");
+        let text = "\
+81 1 0:37 / / rw,relatime shared:1 - overlay LiveOS_rootfs rw,lowerdir=/run/rootfsbase
+53 51 11:0 / /run/initramfs/live ro,relatime shared:17 - iso9660 /dev/sr0 ro
+54 51 7:0 / /run/rootfsbase ro,relatime shared:18 - erofs /dev/loop0 ro";
+        assert!(loop_backed_disks(&fs, text).is_empty());
     }
 
     #[test]
