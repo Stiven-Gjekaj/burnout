@@ -11,12 +11,15 @@ use std::collections::BTreeMap;
 pub(crate) enum Item<'a> {
     Dir(&'a str),
     File(&'a str, &'a [u8]),
+    /// A link and the path that it names. Only Rock Ridge holds a link, so
+    /// the other trees leave it out.
+    Link(&'a str, &'a str),
 }
 
 impl Item<'_> {
     fn path(&self) -> &str {
         match self {
-            Item::Dir(path) | Item::File(path, _) => path,
+            Item::Dir(path) | Item::File(path, _) | Item::Link(path, _) => path,
         }
     }
 }
@@ -25,9 +28,72 @@ impl Item<'_> {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Iso {
     pub joliet: bool,
+    /// Rock Ridge entries on the primary tree. Its plain names are then only
+    /// numbers, so a name that a walk gives can only come from Rock Ridge.
+    pub rock_ridge: bool,
 }
 
 const SECTOR: usize = 2048;
+
+/// A value in both byte orders, the low byte first.
+pub(crate) fn both(value: u32) -> Vec<u8> {
+    [value.to_le_bytes(), value.to_be_bytes()].concat()
+}
+
+/// One entry of a system use area.
+pub(crate) fn susp(signature: &[u8; 2], data: &[u8]) -> Vec<u8> {
+    let mut e = vec![signature[0], signature[1], (4 + data.len()) as u8, 1];
+    e.extend_from_slice(data);
+    e
+}
+
+/// The entries of the first record of a root with Rock Ridge: the protocol,
+/// with the bytes to skip in each other record, and the extension.
+pub(crate) fn rr_root(skip: u8) -> Vec<u8> {
+    let mut su = susp(b"SP", &[0xBE, 0xEF, skip]);
+    let (id, about, source) = (b"RRIP_1991A", b"ROCK RIDGE", b"TEST");
+    let mut er = vec![id.len() as u8, about.len() as u8, source.len() as u8, 1];
+    er.extend_from_slice(id);
+    er.extend_from_slice(about);
+    er.extend_from_slice(source);
+    su.extend(susp(b"ER", &er));
+    su
+}
+
+/// The POSIX mode of an entry, with one link and no owner.
+pub(crate) fn px(mode: u32) -> Vec<u8> {
+    let data: Vec<u8> = [mode, 1, 0, 0].into_iter().flat_map(both).collect();
+    susp(b"PX", &data)
+}
+
+/// The name of an entry.
+pub(crate) fn nm(name: &str) -> Vec<u8> {
+    susp(b"NM", &[&[0], name.as_bytes()].concat())
+}
+
+/// A link to `target`: one component for each name, and flags for the root,
+/// for `.` and for `..`.
+pub(crate) fn sl(target: &str) -> Vec<u8> {
+    let mut data = vec![0];
+    let rest = match target.strip_prefix('/') {
+        Some(rest) => {
+            data.extend([0x08, 0]);
+            rest
+        }
+        None => target,
+    };
+    for part in rest.split('/').filter(|p| !p.is_empty()) {
+        match part {
+            "." => data.extend([0x02, 0]),
+            ".." => data.extend([0x04, 0]),
+            _ => {
+                data.extend([0, part.len() as u8]);
+                data.extend_from_slice(part.as_bytes());
+            }
+        }
+    }
+    susp(b"SL", &data)
+}
 
 /// The bytes of one directory record of ISO 9660.
 pub(crate) fn record_bytes(
@@ -73,20 +139,38 @@ fn pack(records: &[Vec<u8>]) -> Vec<u8> {
 /// A tree of one kind of names: the primary one or the Joliet one.
 struct Names {
     joliet: bool,
+    rock_ridge: bool,
 }
 
 impl Names {
-    fn id(&self, name: &str, is_file: bool) -> Vec<u8> {
-        let name = if is_file {
-            format!("{name};1")
-        } else {
-            name.to_string()
+    /// The identifier of the item at `at` of the items.
+    fn id(&self, at: usize, name: &str, is_file: bool) -> Vec<u8> {
+        let name = match self.rock_ridge {
+            true => format!("I{at:04}"),
+            false => name.to_string(),
         };
+        let name = if is_file { format!("{name};1") } else { name };
         if self.joliet {
             name.encode_utf16().flat_map(|u| u.to_be_bytes()).collect()
         } else {
             name.to_uppercase().into_bytes()
         }
+    }
+
+    /// The system use area of the record of an item.
+    fn system_use(&self, item: &Item, name: &str) -> Vec<u8> {
+        if !self.rock_ridge {
+            return Vec::new();
+        }
+        let (mode, target) = match item {
+            Item::Dir(_) => (0o040755, None),
+            Item::File(..) => (0o100644, None),
+            Item::Link(_, target) => (0o120777, Some(*target)),
+        };
+        let mut su = px(mode);
+        su.extend(nm(name));
+        su.extend(target.map(sl).unwrap_or_default());
+        su
     }
 }
 
@@ -103,8 +187,16 @@ pub(crate) fn iso9660(items: &[Item], options: Iso) -> Vec<u8> {
             dirs.push(path);
         }
     }
-    let trees: Vec<Names> = std::iter::once(Names { joliet: false })
-        .chain(options.joliet.then_some(Names { joliet: true }))
+    let primary = Names {
+        joliet: false,
+        rock_ridge: options.rock_ridge,
+    };
+    let joliet = Names {
+        joliet: true,
+        rock_ridge: false,
+    };
+    let trees: Vec<Names> = std::iter::once(primary)
+        .chain(options.joliet.then_some(joliet))
         .collect();
 
     // Sector 16 on: one descriptor for each tree, and the terminator.
@@ -118,22 +210,31 @@ pub(crate) fn iso9660(items: &[Item], options: Iso) -> Vec<u8> {
         let parent = dir.rsplit_once('/').map_or("", |(p, _)| p);
         let (own, own_len) = extents.get(&(t, dir)).copied().unwrap_or((0, 0));
         let (up, up_len) = extents.get(&(t, parent)).copied().unwrap_or((0, 0));
+        let dot = match names.rock_ridge && dir.is_empty() {
+            true => rr_root(0),
+            false => Vec::new(),
+        };
         let mut records = vec![
-            record_bytes(own, own_len, 0x02, &[0], &[]),
+            record_bytes(own, own_len, 0x02, &[0], &dot),
             record_bytes(up, up_len, 0x02, &[1], &[]),
         ];
         for at in children.get(dir).map(Vec::as_slice).unwrap_or(&[]) {
             let item = &items[*at];
             let name = item.path().rsplit('/').next().unwrap();
+            let su = names.system_use(item, name);
             let r = match item {
                 Item::Dir(path) => {
                     let (e, l) = extents.get(&(t, *path)).copied().unwrap_or((0, 0));
-                    record_bytes(e, l, 0x02, &names.id(name, false), &[])
+                    record_bytes(e, l, 0x02, &names.id(*at, name, false), &su)
                 }
                 Item::File(_, bytes) => {
                     let (e, _) = files[*at];
-                    record_bytes(e, bytes.len() as u32, 0, &names.id(name, true), &[])
+                    record_bytes(e, bytes.len() as u32, 0, &names.id(*at, name, true), &su)
                 }
+                Item::Link(..) if names.rock_ridge => {
+                    record_bytes(0, 0, 0, &names.id(*at, name, true), &su)
+                }
+                Item::Link(..) => continue,
             };
             records.push(r);
         }
