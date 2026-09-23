@@ -609,6 +609,54 @@ The work:
 - Detect the mode from the first 512 bytes and from what is inside.
 - Refuse a macOS installer by name, and say `createinstallmedia`.
 
+**What the two ISOs hold.** Measured on Windows 11 25H2 and Ubuntu 26.04.1
+before the design.
+
+- The Windows ISO has no boot table in its first sector. Its ISO 9660 tree
+  holds one file, `README.TXT`, and the real tree is in UDF 1.02. That UDF
+  uses file entries with short allocation descriptors, one partition of
+  type 1, whose number is 0BADh and not 0, and extended attributes on the
+  root. `install.wim` is eight extents of 1,023 MiB, one after the other.
+- The Ubuntu ISO has a boot table, so it goes to raw mode. Its ISO 9660 tree
+  carries Rock Ridge, with names, links and continuation areas, and a Joliet
+  copy of the names.
+
+**How the reader works.** These are the decisions, and the reason for each.
+
+- **The reader lives in a new crate, `burnout-iso`.** It depends on
+  `burnout-core` alone. The tree of files moves from `burnout-layout` into
+  `burnout-core` first, so the reader and the writers share one tree and no
+  crate depends on another for it.
+- **UDF wins when an image has it.** A Windows ISO keeps its real tree there.
+  Without UDF, the reader takes Rock Ridge, then Joliet, then plain ISO 9660,
+  because each of them holds more of a name than the next.
+- **The reader checks what it reads.** Each UDF descriptor has to carry its
+  own checksum, its CRC and its own location. A fault is an error that names
+  the image, and the reader does not guess past it.
+- **It reads what a Windows ISO uses, and it refuses the rest by name.**
+  That is type 1 partitions, file entries and extended file entries, short
+  and long allocation descriptors and data inside the entry, and names in
+  8-bit and 16-bit form. A virtual, sparable or metadata partition, and
+  zisofs compression, give an error that says what is missing.
+- **A link is listed and not copied.** Rock Ridge keeps links, and a FAT or
+  an exFAT volume cannot hold one. A Windows ISO has none.
+- **The mode comes from the image.** A boot table in the first sector is raw
+  mode. An `.app` bundle, an installer package or a compressed `.dmg` is macOS
+  media, and Burnout refuses it and names `createinstallmedia`. A `.dmg`
+  counts as compressed when its trailer describes more sectors than its data
+  holds, which is true of each compressed and read-only format that
+  `hdiutil` makes and of no raw one. An image with `sources/install.wim` or
+  `sources/install.esd` is Windows mode. Anything else is raw mode, with the
+  warning that the drive may start nothing.
+- **`burnout write` refuses a Windows ISO until P6.** A byte copy of one
+  starts nothing on most machines. `--mode raw` makes the copy anyway.
+- **Each test builds its own image.** A small ISO 9660 builder and a small UDF
+  builder live beside the tests. Each check that the reader makes has a test
+  that breaks it.
+- **The gate reads an ISO that each host makes.** macOS makes one with
+  `hdiutil makehybrid`, Linux with `xorriso`, and Windows with its own IMAPI2.
+  Burnout reads each one and compares every file with the tree it came from.
+
 **The exit test.** Burnout lists the contents of a Windows 11 ISO and a Ubuntu
 ISO, and extracts `install.wim` from the first with the hash that the host's
 own mount gives for the same file.
