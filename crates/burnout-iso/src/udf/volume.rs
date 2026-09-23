@@ -27,7 +27,7 @@ const BLOCK: u32 = 2048;
 
 /// Where a block is: its number in a partition, and the partition, as the
 /// partition maps count them.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct Address {
     pub block: u32,
     pub partition: u16,

@@ -210,12 +210,25 @@ pub(crate) const UDF_MAIN: u32 = 257;
 pub(crate) const UDF_RESERVE: u32 = 273;
 pub(crate) const UDF_PARTITION: u32 = 289;
 
+/// How the builder of UDF records where the data of each entry is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Ads {
+    Short,
+    Long,
+    /// The data in the entry, when it fits there, and short descriptors
+    /// when it does not.
+    Embedded,
+}
+
 /// Choices for an image of UDF.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Udf {
     pub label: &'static str,
     /// The descriptor that says that UDF is there: NSR02 or NSR03.
     pub nsr: &'static [u8; 5],
+    /// Extended file entries, as UDF 2.00 and later write them.
+    pub extended: bool,
+    pub ads: Ads,
 }
 
 impl Default for Udf {
@@ -223,6 +236,8 @@ impl Default for Udf {
         Udf {
             label: "TEST",
             nsr: b"NSR02",
+            extended: false,
+            ads: Ads::Short,
         }
     }
 }
@@ -381,6 +396,150 @@ pub(crate) fn allocation_extent(location: u32, area: &[u8]) -> Vec<u8> {
     write_at(&mut b, 4, &(area.len() as u32).to_le_bytes());
     b.extend_from_slice(area);
     tagged(258, location, &b)
+}
+
+/// A file set descriptor whose root has its file entry at block `root`.
+pub(crate) fn file_set(location: u32, root: u32) -> Vec<u8> {
+    let mut b = vec![0u8; 512 - 16];
+    write_at(&mut b, 400 - 16, &2048u32.to_le_bytes());
+    write_at(&mut b, 404 - 16, &root.to_le_bytes());
+    write_at(&mut b, 417 - 16, b"*OSTA UDF Compliant");
+    tagged(256, location, &b)
+}
+
+/// A file identifier descriptor that names the file entry at block `icb`.
+/// The name of the parent is empty.
+pub(crate) fn identifier(location: u32, characteristics: u8, name: &str, icb: u32) -> Vec<u8> {
+    let name = match name.is_empty() {
+        true => Vec::new(),
+        false => cs0(name),
+    };
+    let length = (38 + name.len()).div_ceil(4) * 4;
+    let mut b = vec![0u8; length - 16];
+    write_at(&mut b, 0, &1u16.to_le_bytes());
+    b[2] = characteristics;
+    b[3] = name.len() as u8;
+    write_at(&mut b, 4, &2048u32.to_le_bytes());
+    write_at(&mut b, 8, &icb.to_le_bytes());
+    write_at(&mut b, 22, &name);
+    tagged(257, location, &b)
+}
+
+/// The data of a link to `target`: a component for the root, for `..`, for
+/// `.`, and for each name.
+fn link_data(target: &str) -> Vec<u8> {
+    let mut data = Vec::new();
+    let rest = match target.strip_prefix('/') {
+        Some(rest) => {
+            data.extend([2, 0, 0, 0]);
+            rest
+        }
+        None => target,
+    };
+    for part in rest.split('/').filter(|p| !p.is_empty()) {
+        match part {
+            ".." => data.extend([3, 0, 0, 0]),
+            "." => data.extend([4, 0, 0, 0]),
+            name => {
+                let name = cs0(name);
+                data.extend([5, name.len() as u8, 0, 0]);
+                data.extend(name);
+            }
+        }
+    }
+    data
+}
+
+/// The directory that holds a path of a tree, which is `""` for the root.
+fn parent_of(path: &str) -> &str {
+    path.rsplit_once('/').map_or("", |(p, _)| p)
+}
+
+/// An image of UDF that holds these items. Each directory comes before what
+/// it holds.
+///
+/// Block 0 of the partition holds the file set descriptor, block 1 the file
+/// entry of the root, and block `n + 2` the file entry of item `n`. The data
+/// comes after the entries.
+pub(crate) fn udf(items: &[Item], options: &Udf) -> Vec<u8> {
+    let paths: Vec<&str> = std::iter::once("")
+        .chain(items.iter().map(Item::path))
+        .collect();
+    let entry_of: BTreeMap<&str, usize> = paths.iter().enumerate().map(|(n, p)| (*p, n)).collect();
+    let mut children: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (n, path) in paths.iter().enumerate().skip(1) {
+        children
+            .entry(entry_of[parent_of(path)])
+            .or_default()
+            .push(n);
+    }
+    let block = |n: usize| 1 + n as u32;
+    let item = |n: usize| (n > 0).then(|| items[n - 1]);
+    let is_dir = |n: usize| matches!(item(n), None | Some(Item::Dir(_)));
+
+    // The identifiers of a directory, the parent first. Each one records the
+    // block that it starts in: the entry itself when the data is there.
+    let stream = |n: usize, first: Option<u32>| -> Vec<u8> {
+        let location = |at: usize| first.map_or(block(n), |b| b + (at / SECTOR) as u32);
+        let up = block(entry_of[parent_of(paths[n])]);
+        let mut s = identifier(location(0), 0x0A, "", up);
+        for &c in children.get(&n).map(Vec::as_slice).unwrap_or(&[]) {
+            let name = paths[c].rsplit('/').next().unwrap();
+            let characteristics = if is_dir(c) { 0x02 } else { 0 };
+            let at = location(s.len());
+            s.extend(identifier(at, characteristics, name, block(c)));
+        }
+        s
+    };
+    let data = |n: usize, first: Option<u32>| -> Vec<u8> {
+        match item(n) {
+            None | Some(Item::Dir(_)) => stream(n, first),
+            Some(Item::File(_, bytes)) => bytes.to_vec(),
+            Some(Item::Link(_, target)) => link_data(target),
+        }
+    };
+
+    // The data of each entry goes into the entry, or into blocks after the
+    // entries.
+    let room = SECTOR - if options.extended { 216 } else { 176 } - 24;
+    let mut next = block(paths.len());
+    let mut place = Vec::new();
+    for n in 0..paths.len() {
+        let length = data(n, None).len();
+        if length == 0 || (options.ads == Ads::Embedded && length <= room) {
+            place.push(None);
+        } else {
+            place.push(Some(next));
+            next += length.div_ceil(SECTOR) as u32;
+        }
+    }
+
+    let mut image = udf_volume(options, next);
+    put(&mut image, UDF_PARTITION, &file_set(0, block(0)));
+    for (n, place) in place.into_iter().enumerate() {
+        let bytes = data(n, place);
+        let file_type = match item(n) {
+            None | Some(Item::Dir(_)) => 4,
+            Some(Item::File(..)) => 5,
+            Some(Item::Link(..)) => 12,
+        };
+        let length = bytes.len() as u32;
+        let (form, area) = match (place, options.ads) {
+            (None, Ads::Embedded) => (3, bytes.clone()),
+            (None, Ads::Long) => (1, Vec::new()),
+            (None, _) => (0, Vec::new()),
+            (Some(first), Ads::Long) => (1, long_ad(0, length, first, 0)),
+            (Some(first), _) => (0, short_ad(0, length, first)),
+        };
+        let size = bytes.len() as u64;
+        let entry = file_entry(block(n), options.extended, file_type, size, form, &area);
+        put(&mut image, UDF_PARTITION + block(n), &entry);
+        if let Some(first) = place {
+            let at = (UDF_PARTITION + first) as usize * SECTOR;
+            image[at..at + bytes.len()].copy_from_slice(&bytes);
+        }
+    }
+    image
 }
 
 /// An image with a volume of UDF and a partition of `blocks` empty blocks.

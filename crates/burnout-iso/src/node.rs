@@ -5,6 +5,11 @@
 
 use burnout_core::TreePath;
 
+/// The deepest directory that a walk goes into. ISO 9660 allows eight
+/// levels, and Rock Ridge and UDF more. A tree deeper than this is a loop or
+/// an attack, and not an operating system.
+pub(crate) const DEEPEST: usize = 64;
+
 /// A run of bytes of the image that holds a part of a file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Extent {

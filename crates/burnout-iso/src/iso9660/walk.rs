@@ -9,12 +9,7 @@ use super::descriptors::Root;
 use super::directory::{joliet_name, plain_name, records, Record, ASSOCIATED, MULTI_EXTENT};
 use super::rock_ridge::read_entries;
 use crate::image::{Image, SECTOR};
-use crate::node::{Extent, Kind, Node};
-
-/// The deepest directory that the walk goes into. ISO 9660 allows eight
-/// levels, and Rock Ridge more. A tree deeper than this is a loop or an
-/// attack, and not an operating system.
-const DEEPEST: usize = 64;
+use crate::node::{Extent, Kind, Node, DEEPEST};
 
 /// Which names a tree keeps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

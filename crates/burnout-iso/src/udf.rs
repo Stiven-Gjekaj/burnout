@@ -9,9 +9,11 @@ mod entry;
 mod tag;
 mod text;
 mod volume;
+mod walk;
 
 pub(crate) use tag::{crc_itu_t, read_tag, Tag};
 pub(crate) use volume::{find_volume, Address, Volume};
+pub(crate) use walk::walk;
 
 /// The little-endian numbers that UDF records.
 fn u16_at(bytes: &[u8], at: usize) -> u16 {
