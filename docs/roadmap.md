@@ -12,8 +12,7 @@ Do not start a phase until the phase it depends on passes its exit test.
 The sizes are relative: S is a day or two, M is a week, L is longer, and XL is
 the one that needs a plan of its own.
 
-P0 and P1 are done. `burnout list` runs on all three hosts.
-Nothing writes a drive yet, so nothing can erase one yet.
+P0 to P3 are done. Raw mode writes a drive on all three hosts.
 
 ---
 
