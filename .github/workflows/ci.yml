@@ -110,6 +110,13 @@ jobs:
           if ! command -v fsck.fat || ! command -v fsck.exfat; then
             sudo apt-get update && sudo apt-get install -y dosfstools exfatprogs
           fi
+          # The kernel of the runner finds no exFAT driver until the extra
+          # modules of that kernel are in.
+          if ! sudo modprobe exfat; then
+            sudo apt-get update
+            sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+            sudo modprobe exfat
+          fi
           cargo run -q --release -p burnout-layout --example layout_image -- image sample layout.img boot.sha256 --install-manifest install.sha256 --large-file "$LARGE_FILE" > digest.txt
           scripts/check-layout.sh layout.img boot.sha256 install.sha256 512
           rm layout.img
