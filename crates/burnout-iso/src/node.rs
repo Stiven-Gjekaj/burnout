@@ -10,6 +10,14 @@ use burnout_core::TreePath;
 /// an attack, and not an operating system.
 pub(crate) const DEEPEST: usize = 64;
 
+/// A name that a tree can hold: not empty, not `.` or `..`, and with no `/`.
+pub(crate) fn tree_name(name: String) -> Result<String, String> {
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+        return Err(format!("the name {name:?} is not one that a tree can hold"));
+    }
+    Ok(name)
+}
+
 /// A run of bytes of the image that holds a part of a file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Extent {

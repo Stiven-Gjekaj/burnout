@@ -17,7 +17,7 @@ use super::text::cs0;
 use super::volume::{Address, Volume};
 use super::{u16_at, u32_at};
 use crate::image::{Image, SECTOR};
-use crate::node::{Kind, Node, DEEPEST};
+use crate::node::{tree_name, Kind, Node, DEEPEST};
 
 /// The characteristics of a file identifier descriptor. A hidden file is
 /// still a part of the tree, because a drive that starts a system needs it.
@@ -231,14 +231,6 @@ fn identifier(bytes: &[u8], location: Option<u32>) -> std::result::Result<Identi
         },
         length,
     })
-}
-
-/// A name that a tree can hold.
-fn tree_name(name: String) -> std::result::Result<String, String> {
-    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
-        return Err(format!("the name {name:?} is not one that a tree can hold"));
-    }
-    Ok(name)
 }
 
 /// The path that the data of a link names. Each component has a type, the

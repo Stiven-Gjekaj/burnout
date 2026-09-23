@@ -1,5 +1,7 @@
 //! The records of a directory of ISO 9660, and the names in them.
 
+use crate::node::tree_name;
+
 /// The flags of a record.
 pub(crate) const DIRECTORY: u8 = 0x02;
 pub(crate) const ASSOCIATED: u8 = 0x04;
@@ -121,10 +123,7 @@ fn clean(name: String) -> Result<String, String> {
         None => &name,
     };
     let base = base.strip_suffix('.').unwrap_or(base);
-    if base.is_empty() || base.contains('/') || base == "." || base == ".." {
-        return Err(format!("the name {name:?} is not one that a tree can hold"));
-    }
-    Ok(base.to_string())
+    tree_name(base.to_string())
 }
 
 #[cfg(test)]

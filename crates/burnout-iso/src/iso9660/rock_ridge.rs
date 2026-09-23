@@ -14,6 +14,7 @@ use burnout_core::Result;
 use super::descriptors::Root;
 use super::directory::records;
 use crate::image::{Image, SECTOR};
+use crate::node::tree_name;
 
 /// The most continuation areas that one record may chain.
 const MOST_AREAS: usize = 32;
@@ -57,14 +58,9 @@ impl Entries {
     /// The name that Rock Ridge gives, or `None` when it gives none.
     pub(crate) fn name(&self) -> Option<std::result::Result<String, String>> {
         self.has_name.then(|| {
-            let name = String::from_utf8(self.name.clone())
-                .map_err(|_| "a Rock Ridge name is not UTF-8".to_string())?;
-            if name.is_empty() || name.contains('/') || name == "." || name == ".." {
-                return Err(format!(
-                    "the Rock Ridge name {name:?} is not one that a tree can hold"
-                ));
-            }
-            Ok(name)
+            String::from_utf8(self.name.clone())
+                .map_err(|_| "a Rock Ridge name is not UTF-8".to_string())
+                .and_then(tree_name)
         })
     }
 
