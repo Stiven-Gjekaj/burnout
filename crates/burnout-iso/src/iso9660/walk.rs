@@ -417,6 +417,7 @@ mod tests {
         let options = Iso {
             joliet: true,
             rock_ridge: true,
+            ..Iso::default()
         };
         let image = iso9660(LINKS, options);
         let nodes = rock_ridge_tree(image.clone()).unwrap();
@@ -441,6 +442,7 @@ mod tests {
         let options = Iso {
             joliet: true,
             rock_ridge: true,
+            ..Iso::default()
         };
         let nodes = tree(iso9660(LINKS, options), true).unwrap();
         assert_eq!(

@@ -10,12 +10,13 @@
 //! [The roadmap]: https://github.com/Stiven-Gjekaj/burnout/blob/main/docs/roadmap.md
 
 #![forbid(unsafe_code)]
-// The parts come before the source that uses them.
-#![allow(dead_code, unused_imports)]
 
 mod image;
 mod iso9660;
 mod node;
+mod source;
 #[cfg(test)]
 mod testing;
 mod udf;
+
+pub use source::{FileSystem, IsoSource, Link};

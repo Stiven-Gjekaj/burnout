@@ -36,6 +36,23 @@ impl<R: Read + Seek> Image<R> {
     /// A read past the end of the image is refused, and the error names what
     /// the read was for, so a person sees which part of the image is missing.
     pub(crate) fn read_at(&mut self, at: u64, length: usize, what: &str) -> Result<Vec<u8>> {
+        // The check comes before the buffer, so a length from a broken image
+        // does not ask for more memory than the image holds.
+        self.check(at, length, what)?;
+        let mut bytes = vec![0u8; length];
+        self.read_into(at, &mut bytes, what)?;
+        Ok(bytes)
+    }
+
+    /// Fill `bytes` from byte `at`, with the check of `read_at`.
+    pub(crate) fn read_into(&mut self, at: u64, bytes: &mut [u8], what: &str) -> Result<()> {
+        self.check(at, bytes.len(), what)?;
+        self.reader.seek(SeekFrom::Start(at))?;
+        self.reader.read_exact(bytes)?;
+        Ok(())
+    }
+
+    fn check(&self, at: u64, length: usize, what: &str) -> Result<()> {
         let end = at.checked_add(length as u64);
         if end.map_or(true, |end| end > self.length) {
             return Err(self.fault(format!(
@@ -44,10 +61,7 @@ impl<R: Read + Seek> Image<R> {
                 at.saturating_add(length as u64)
             )));
         }
-        let mut bytes = vec![0u8; length];
-        self.reader.seek(SeekFrom::Start(at))?;
-        self.reader.read_exact(&mut bytes)?;
-        Ok(bytes)
+        Ok(())
     }
 
     /// One sector of 2048 bytes.

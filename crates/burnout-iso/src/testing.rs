@@ -31,6 +31,9 @@ pub(crate) struct Iso {
     /// Rock Ridge entries on the primary tree. Its plain names are then only
     /// numbers, so a name that a walk gives can only come from Rock Ridge.
     pub rock_ridge: bool,
+    /// Sectors left empty after the terminator, where a Windows ISO keeps
+    /// the recognition sequence of UDF.
+    pub gap: u32,
 }
 
 const SECTOR: usize = 2048;
@@ -542,6 +545,27 @@ pub(crate) fn udf(items: &[Item], options: &Udf) -> Vec<u8> {
     image
 }
 
+/// A Windows ISO in small: ISO 9660 that holds only `note`, and UDF that
+/// holds `items`. The recognition sequence of UDF comes after the terminator
+/// of ISO 9660, as Windows writes it.
+pub(crate) fn bridge(note: &[Item], items: &[Item]) -> Vec<u8> {
+    let iso = iso9660(
+        note,
+        Iso {
+            gap: 3,
+            ..Iso::default()
+        },
+    );
+    let mut image = udf(items, &Udf::default());
+    assert!(iso.len() <= 256 * SECTOR, "the note runs into the anchor");
+    image[16 * SECTOR..iso.len()].copy_from_slice(&iso[16 * SECTOR..]);
+    for (sector, id) in [(18, b"BEA01"), (19, b"NSR02"), (20, b"TEA01")] {
+        write_at(&mut image, sector * SECTOR + 1, id);
+        image[sector * SECTOR + 6] = 1;
+    }
+    image
+}
+
 /// An image with a volume of UDF and a partition of `blocks` empty blocks.
 ///
 /// The partition has the number that Windows gives it, 0x0BAD, so a reader
@@ -595,7 +619,7 @@ pub(crate) fn iso9660(items: &[Item], options: Iso) -> Vec<u8> {
         .collect();
 
     // Sector 16 on: one descriptor for each tree, and the terminator.
-    let mut next = 16 + trees.len() as u32 + 1;
+    let mut next = 16 + trees.len() as u32 + 1 + options.gap;
     let record_set = |names: &Names,
                       dir: &str,
                       extents: &BTreeMap<(usize, &str), (u32, u32)>,

@@ -11,8 +11,9 @@ mod text;
 mod volume;
 mod walk;
 
-pub(crate) use tag::{crc_itu_t, read_tag, Tag};
-pub(crate) use volume::{find_volume, Address, Volume};
+#[cfg(test)]
+pub(crate) use tag::crc_itu_t;
+pub(crate) use volume::find_volume;
 pub(crate) use walk::walk;
 
 /// The little-endian numbers that UDF records.

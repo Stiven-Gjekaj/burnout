@@ -9,6 +9,6 @@ mod directory;
 mod rock_ridge;
 mod walk;
 
-pub(crate) use descriptors::{read_descriptors, Descriptors, Root, Tree};
+pub(crate) use descriptors::read_descriptors;
 pub(crate) use rock_ridge::detect as detect_rock_ridge;
 pub(crate) use walk::{walk, Names};
