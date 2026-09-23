@@ -76,6 +76,13 @@ name = "burnout-core"
 version = "0.0.0"
 
 [[package]]
+name = "burnout-iso"
+version = "0.0.0"
+dependencies = [
+ "burnout-core",
+]
+
+[[package]]
 name = "burnout-layout"
 version = "0.0.0"
 dependencies = [

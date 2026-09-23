@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/burnout-core", "crates/burnout-layout", "crates/burnout"]
+members = ["crates/burnout-core", "crates/burnout-layout", "crates/burnout-iso", "crates/burnout"]
 resolver = "2"
 
 [workspace.package]
