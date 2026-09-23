@@ -174,18 +174,190 @@ impl Names {
     }
 }
 
+/// Write bytes into one block of an image, and zeros into the rest of it.
+pub(crate) fn put(image: &mut [u8], block: u32, bytes: &[u8]) {
+    let at = block as usize * SECTOR;
+    image[at..at + SECTOR].fill(0);
+    image[at..at + bytes.len()].copy_from_slice(bytes);
+}
+
 /// A descriptor of UDF: a tag of version 2 for `id` at block `location`,
 /// with the checksum and the CRC of `body`, and then the body.
 pub(crate) fn tagged(id: u16, location: u32, body: &[u8]) -> Vec<u8> {
     let mut d = vec![0u8; 16];
     d[0..2].copy_from_slice(&id.to_le_bytes());
     d[2..4].copy_from_slice(&2u16.to_le_bytes());
-    d[8..10].copy_from_slice(&crate::udf::crc_itu_t(body).to_le_bytes());
     d[10..12].copy_from_slice(&(body.len() as u16).to_le_bytes());
     d[12..16].copy_from_slice(&location.to_le_bytes());
-    d[4] = d.iter().fold(0u8, |sum, b| sum.wrapping_add(*b));
     d.extend_from_slice(body);
+    retag(&mut d);
     d
+}
+
+/// Set the CRC and the checksum of a descriptor again, after a test
+/// changes a byte of it.
+pub(crate) fn retag(d: &mut [u8]) {
+    let length = u16::from_le_bytes([d[10], d[11]]) as usize;
+    let crc = crate::udf::crc_itu_t(&d[16..16 + length]);
+    d[8..10].copy_from_slice(&crc.to_le_bytes());
+    d[4] = 0;
+    d[4] = d[..16].iter().fold(0u8, |sum, b| sum.wrapping_add(*b));
+}
+
+/// Where the builder of UDF puts the main sequence, its reserve copy and the
+/// partition.
+pub(crate) const UDF_MAIN: u32 = 257;
+pub(crate) const UDF_RESERVE: u32 = 273;
+pub(crate) const UDF_PARTITION: u32 = 289;
+
+/// Choices for an image of UDF.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Udf {
+    pub label: &'static str,
+    /// The descriptor that says that UDF is there: NSR02 or NSR03.
+    pub nsr: &'static [u8; 5],
+}
+
+impl Default for Udf {
+    fn default() -> Self {
+        Udf {
+            label: "TEST",
+            nsr: b"NSR02",
+        }
+    }
+}
+
+/// Text in CS0: 8 bits for each character when all of them fit, else 16.
+pub(crate) fn cs0(text: &str) -> Vec<u8> {
+    if text.chars().all(|c| (c as u32) < 256) {
+        std::iter::once(8)
+            .chain(text.chars().map(|c| c as u8))
+            .collect()
+    } else {
+        std::iter::once(16)
+            .chain(text.encode_utf16().flat_map(|u| u.to_be_bytes()))
+            .collect()
+    }
+}
+
+/// CS0 text in a field of `length` bytes, with its length in the last byte.
+pub(crate) fn dstring(text: &str, length: usize) -> Vec<u8> {
+    let mut field = cs0(text);
+    let used = field.len();
+    assert!(used < length, "{text:?} does not fit {length} bytes");
+    field.resize(length - 1, 0);
+    field.push(used as u8);
+    field
+}
+
+fn write_at(bytes: &mut [u8], at: usize, value: &[u8]) {
+    bytes[at..at + value.len()].copy_from_slice(value);
+}
+
+/// A logical volume descriptor with its partition maps, and its file set at
+/// a block of the first partition.
+pub(crate) fn logical_volume(
+    location: u32,
+    number: u32,
+    label: &str,
+    maps: &[Vec<u8>],
+    file_set: u32,
+) -> Vec<u8> {
+    let table: Vec<u8> = maps.concat();
+    // The body starts after the tag, so each place is 16 less than in the
+    // descriptor.
+    let mut b = vec![0u8; 440 - 16];
+    write_at(&mut b, 0, &number.to_le_bytes());
+    write_at(&mut b, 5, b"OSTA Compressed Unicode");
+    write_at(&mut b, 68, &dstring(label, 128));
+    write_at(&mut b, 196, &2048u32.to_le_bytes());
+    write_at(&mut b, 201, b"*OSTA UDF Compliant");
+    write_at(&mut b, 224, &0x0102u16.to_le_bytes());
+    write_at(&mut b, 232, &2048u32.to_le_bytes());
+    write_at(&mut b, 236, &file_set.to_le_bytes());
+    write_at(&mut b, 248, &(table.len() as u32).to_le_bytes());
+    write_at(&mut b, 252, &(maps.len() as u32).to_le_bytes());
+    b.extend(table);
+    tagged(6, location, &b)
+}
+
+/// A partition map of type 1, which names a partition by its number.
+pub(crate) fn type1_map(number: u16) -> Vec<u8> {
+    let [low, high] = number.to_le_bytes();
+    vec![1, 6, 1, 0, low, high]
+}
+
+/// A partition map of type 2, with the identifier of what it is.
+pub(crate) fn type2_map(identifier: &str) -> Vec<u8> {
+    let mut map = vec![0u8; 64];
+    map[0] = 2;
+    map[1] = 64;
+    write_at(&mut map, 5, identifier.as_bytes());
+    map
+}
+
+/// A partition descriptor of UDF.
+pub(crate) fn partition(location: u32, number: u32, id: u16, start: u32, length: u32) -> Vec<u8> {
+    let mut b = vec![0u8; 512 - 16];
+    write_at(&mut b, 0, &number.to_le_bytes());
+    write_at(&mut b, 4, &1u16.to_le_bytes());
+    write_at(&mut b, 6, &id.to_le_bytes());
+    write_at(&mut b, 9, b"+NSR02");
+    write_at(&mut b, 168, &1u32.to_le_bytes());
+    write_at(&mut b, 172, &start.to_le_bytes());
+    write_at(&mut b, 176, &length.to_le_bytes());
+    tagged(5, location, &b)
+}
+
+/// An anchor that names a main sequence and a reserve copy of 16 sectors.
+pub(crate) fn anchor(location: u32, main: u32, reserve: u32) -> Vec<u8> {
+    let mut b = vec![0u8; 496];
+    write_at(&mut b, 0, &(16 * 2048u32).to_le_bytes());
+    write_at(&mut b, 4, &main.to_le_bytes());
+    write_at(&mut b, 8, &(16 * 2048u32).to_le_bytes());
+    write_at(&mut b, 12, &reserve.to_le_bytes());
+    tagged(2, location, &b)
+}
+
+/// A volume descriptor pointer to the next part of a sequence.
+pub(crate) fn pointer(location: u32, number: u32, next: u32, sectors: u32) -> Vec<u8> {
+    let mut b = vec![0u8; 496];
+    write_at(&mut b, 0, &number.to_le_bytes());
+    write_at(&mut b, 4, &(sectors * 2048).to_le_bytes());
+    write_at(&mut b, 8, &next.to_le_bytes());
+    tagged(3, location, &b)
+}
+
+/// The descriptor that ends a sequence.
+pub(crate) fn terminator(location: u32) -> Vec<u8> {
+    tagged(8, location, &[0; 496])
+}
+
+/// An image with a volume of UDF and a partition of `blocks` empty blocks.
+///
+/// The partition has the number that Windows gives it, 0x0BAD, so a reader
+/// that takes the number of a map for its place in the list fails.
+pub(crate) fn udf_volume(options: &Udf, blocks: u32) -> Vec<u8> {
+    let last = UDF_PARTITION + blocks;
+    let mut image = vec![0u8; (last as usize + 1) * SECTOR];
+    for (sector, id) in [(16, b"BEA01"), (17, options.nsr), (18, b"TEA01")] {
+        write_at(&mut image, sector * SECTOR + 1, id);
+        image[sector * SECTOR + 6] = 1;
+    }
+    put(&mut image, 256, &anchor(256, UDF_MAIN, UDF_RESERVE));
+    put(&mut image, last, &anchor(last, UDF_MAIN, UDF_RESERVE));
+    for first in [UDF_MAIN, UDF_RESERVE] {
+        let maps = [type1_map(0x0BAD)];
+        put(
+            &mut image,
+            first,
+            &logical_volume(first, 1, options.label, &maps, 0),
+        );
+        let pd = partition(first + 1, 2, 0x0BAD, UDF_PARTITION, blocks);
+        put(&mut image, first + 1, &pd);
+        put(&mut image, first + 2, &terminator(first + 2));
+    }
+    image
 }
 
 /// An ISO 9660 image that holds these items. Each directory comes before

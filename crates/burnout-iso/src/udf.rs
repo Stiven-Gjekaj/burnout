@@ -6,5 +6,17 @@
 //! root of the file set is the tree.
 
 mod tag;
+mod text;
+mod volume;
 
 pub(crate) use tag::{crc_itu_t, read_tag, Tag};
+pub(crate) use volume::{find_volume, Address, Volume};
+
+/// The little-endian numbers that UDF records.
+fn u16_at(bytes: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes([bytes[at], bytes[at + 1]])
+}
+
+fn u32_at(bytes: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+}

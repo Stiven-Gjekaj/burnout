@@ -222,7 +222,7 @@ mod tests {
     use super::super::directory::DIRECTORY;
     use super::*;
     use crate::iso9660::{detect_rock_ridge, read_descriptors};
-    use crate::testing::{both, iso9660, nm, px, record_bytes, rr_root, susp, Iso, Item};
+    use crate::testing::{both, iso9660, nm, put, px, record_bytes, rr_root, susp, Iso, Item};
     use std::io::Cursor;
 
     fn tree(image: Vec<u8>, joliet: bool) -> Result<Vec<Node>> {
@@ -338,13 +338,6 @@ mod tests {
         put(&mut image, root, &bytes);
         image.resize(image.len() + data_sectors * 2048, 0x5A);
         image
-    }
-
-    /// Write the bytes of a directory or of data into one block.
-    fn put(image: &mut [u8], block: u32, bytes: &[u8]) {
-        let at = block as usize * 2048;
-        image[at..at + 2048].fill(0);
-        image[at..at + bytes.len()].copy_from_slice(bytes);
     }
 
     #[test]

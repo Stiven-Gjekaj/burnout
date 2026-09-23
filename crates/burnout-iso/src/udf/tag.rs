@@ -5,6 +5,8 @@
 //! descriptor. A block of zeros, a copy at the wrong place or a torn write
 //! then shows up as a fault, and not as a tree with holes in it.
 
+use super::{u16_at, u32_at};
+
 /// The bytes of a tag.
 pub(crate) const TAG: usize = 16;
 
@@ -58,10 +60,6 @@ pub(crate) struct Tag {
     pub crc_length: u16,
 }
 
-fn u16_at(bytes: &[u8], at: usize) -> u16 {
-    u16::from_le_bytes([bytes[at], bytes[at + 1]])
-}
-
 /// The CRC of UDF, which is CRC-ITU-T: the polynomial x^16 + x^12 + x^5 + 1,
 /// with a start of zero.
 pub(crate) fn crc_itu_t(bytes: &[u8]) -> u16 {
@@ -99,7 +97,7 @@ pub(crate) fn read_tag(bytes: &[u8], location: u32) -> Result<Tag, String> {
         id: u16_at(tag, 0),
         version: u16_at(tag, 2),
         serial: u16_at(tag, 6),
-        location: u32::from_le_bytes(tag[12..16].try_into().unwrap()),
+        location: u32_at(tag, 12),
         crc_length: u16_at(tag, 10),
     };
     if found.version != 2 && found.version != 3 {
