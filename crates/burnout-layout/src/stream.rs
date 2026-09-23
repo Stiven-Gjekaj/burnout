@@ -8,7 +8,7 @@ use std::io::{self, Read};
 
 use burnout_core::{Digest, Error, Result, Sha256};
 
-use crate::tree::TreePath;
+use burnout_core::TreePath;
 
 /// How much of a file one read takes.
 pub(crate) const CHUNK_BYTES: usize = 1024 * 1024;

@@ -16,7 +16,7 @@ use burnout_core::{BlockTarget, Error, Result};
 
 use super::sums::{boot_checksum, name_hash, set_checksum, table_checksum};
 use super::upcase::UpCase;
-use crate::tree::TreePath;
+use burnout_core::TreePath;
 
 /// The bytes of one directory entry.
 const ENTRY: usize = 32;
@@ -655,7 +655,7 @@ mod tests {
     use crate::exfat::place::Placement;
     use crate::exfat::{write_exfat, ExfatOptions};
     use crate::testing::{windows_like, Drive, MIB};
-    use crate::tree::{Entry, FileSource, MemorySource};
+    use burnout_core::{Entry, FileSource, MemorySource};
     use std::io::{Read, Seek, Write};
 
     fn options() -> ExfatOptions<'static> {

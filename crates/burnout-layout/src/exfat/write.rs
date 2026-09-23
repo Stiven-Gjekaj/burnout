@@ -11,7 +11,7 @@ use super::place::{min_volume_bytes, Placement, Run};
 use super::upcase::{recommended_bytes, UpCase};
 use crate::manifest::{CopiedFile, Manifest};
 use crate::stream::{stream_file, CHUNK_BYTES};
-use crate::tree::FileSource;
+use burnout_core::FileSource;
 
 /// The entry of the FAT for the first of the two clusters that do not exist:
 /// the media type F8h, as on a fixed disk, and ones.
@@ -230,7 +230,7 @@ where
 mod tests {
     use super::*;
     use crate::testing::{pattern, windows_like, Drive, MIB};
-    use crate::tree::{Entry, MemorySource, TreePath};
+    use burnout_core::{Entry, MemorySource, TreePath};
     use std::io::{Read, Write};
 
     const SERIAL: u32 = 0x1234_ABCD;

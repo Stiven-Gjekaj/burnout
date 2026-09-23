@@ -12,7 +12,7 @@ use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
-use burnout_core::{Error, Result};
+use crate::{Error, Result};
 
 /// A path inside a tree, from its root, with `/` between the names.
 ///

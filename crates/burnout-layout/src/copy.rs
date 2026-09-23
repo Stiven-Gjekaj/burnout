@@ -10,7 +10,7 @@ use crate::dot_entries::repair_dot_entries;
 use crate::fat32::{mounted, over_sectors, Volume};
 use crate::manifest::{CopiedFile, Manifest};
 use crate::stream::{stream_file, CHUNK_BYTES};
-use crate::tree::{Entry, FileSource, TreePath};
+use burnout_core::{Entry, FileSource, TreePath};
 
 /// The largest file that FAT32 holds: 4 GiB less one byte.
 pub const MAX_FAT32_FILE_BYTES: u64 = u32::MAX as u64;
@@ -153,8 +153,8 @@ mod tests {
     use super::*;
     use crate::fat32::with_volume;
     use crate::testing::{windows_like, Drive};
-    use crate::tree::MemorySource;
     use burnout_core::sha256;
+    use burnout_core::MemorySource;
     use std::io::Read;
 
     fn read_back<T: BlockTarget>(volume: T, path: &str) -> Vec<u8> {

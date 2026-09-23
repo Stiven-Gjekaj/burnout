@@ -11,7 +11,7 @@ use fatfs::{Dir, ReadWriteSeek};
 
 use crate::fat32::with_volume;
 use crate::manifest::Manifest;
-use crate::tree::TreePath;
+use burnout_core::TreePath;
 
 /// How much of a file one read takes.
 const CHUNK_BYTES: usize = 1024 * 1024;

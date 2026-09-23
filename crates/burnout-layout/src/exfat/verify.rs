@@ -10,7 +10,7 @@ use burnout_core::{BlockTarget, Error, Result, Sha256};
 
 use super::read::{Node, Volume};
 use crate::manifest::Manifest;
-use crate::tree::TreePath;
+use burnout_core::TreePath;
 
 /// Read each file of `manifest` back from the exFAT volume that fills
 /// `volume`, and compare it with what went in.
@@ -86,8 +86,8 @@ mod tests {
     use super::*;
     use crate::exfat::{write_exfat, ExfatOptions};
     use crate::testing::{pattern, windows_like, Drive, MIB};
-    use crate::tree::MemorySource;
     use crate::CopiedFile;
+    use burnout_core::MemorySource;
     use std::io::{Seek, SeekFrom, Write};
 
     fn options() -> ExfatOptions<'static> {

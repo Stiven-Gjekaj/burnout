@@ -6,7 +6,7 @@
 
 use burnout_core::Digest;
 
-use crate::tree::TreePath;
+use burnout_core::TreePath;
 
 /// A file that went onto a volume, and the digest of the bytes that went in.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -16,7 +16,7 @@ use super::entries::{
 use super::geometry::{Geometry, FIRST_CLUSTER};
 use super::sums::name_hash;
 use super::upcase::{recommended_bytes, UpCase, RECOMMENDED_CHECKSUM};
-use crate::tree::{Entry, TreePath};
+use burnout_core::{Entry, TreePath};
 
 /// The largest directory of exFAT, in bytes of entries.
 pub(crate) const MAX_DIRECTORY_BYTES: u64 = 256 * 1024 * 1024;
@@ -304,7 +304,7 @@ mod tests {
     use super::*;
     use crate::exfat::entries::label_entry;
     use crate::testing::{windows_like, MIB};
-    use crate::tree::{FileSource, MemorySource};
+    use burnout_core::{FileSource, MemorySource};
 
     const GIB: u64 = 1024 * MIB;
 
