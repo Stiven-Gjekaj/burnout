@@ -333,6 +333,56 @@ pub(crate) fn terminator(location: u32) -> Vec<u8> {
     tagged(8, location, &[0; 496])
 }
 
+/// A file entry of UDF, or an extended one, of the given type and size, with
+/// 24 bytes of extended attributes before the allocation descriptors. The
+/// type of the descriptors is 0 for short, 1 for long and 3 for data in the
+/// entry.
+pub(crate) fn file_entry(
+    location: u32,
+    extended: bool,
+    file_type: u8,
+    size: u64,
+    descriptors: u16,
+    area: &[u8],
+) -> Vec<u8> {
+    let (id, base, lengths) = match extended {
+        true => (266, 216, 208),
+        false => (261, 176, 168),
+    };
+    let mut b = vec![0u8; base - 16];
+    write_at(&mut b, 4, &4u16.to_le_bytes());
+    b[11] = file_type;
+    write_at(&mut b, 18, &descriptors.to_le_bytes());
+    write_at(&mut b, 40, &size.to_le_bytes());
+    write_at(&mut b, lengths - 16, &24u32.to_le_bytes());
+    write_at(&mut b, lengths - 12, &(area.len() as u32).to_le_bytes());
+    b.extend([0xEA; 24]);
+    b.extend_from_slice(area);
+    tagged(id, location, &b)
+}
+
+/// A short allocation descriptor: the type of the run in the two high bits
+/// of its length, then its first block.
+pub(crate) fn short_ad(kind: u32, length: u32, block: u32) -> Vec<u8> {
+    [(kind << 30 | length).to_le_bytes(), block.to_le_bytes()].concat()
+}
+
+/// A long allocation descriptor, which names its partition.
+pub(crate) fn long_ad(kind: u32, length: u32, block: u32, partition: u16) -> Vec<u8> {
+    let mut ad = short_ad(kind, length, block);
+    ad.extend(partition.to_le_bytes());
+    ad.extend([0; 6]);
+    ad
+}
+
+/// An allocation extent descriptor, which holds more descriptors.
+pub(crate) fn allocation_extent(location: u32, area: &[u8]) -> Vec<u8> {
+    let mut b = vec![0u8; 8];
+    write_at(&mut b, 4, &(area.len() as u32).to_le_bytes());
+    b.extend_from_slice(area);
+    tagged(258, location, &b)
+}
+
 /// An image with a volume of UDF and a partition of `blocks` empty blocks.
 ///
 /// The partition has the number that Windows gives it, 0x0BAD, so a reader

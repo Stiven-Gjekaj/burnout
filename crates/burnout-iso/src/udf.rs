@@ -5,6 +5,7 @@
 //! then a sequence of volume descriptors, a partition and a file set. The
 //! root of the file set is the tree.
 
+mod entry;
 mod tag;
 mod text;
 mod volume;
@@ -19,4 +20,8 @@ fn u16_at(bytes: &[u8], at: usize) -> u16 {
 
 fn u32_at(bytes: &[u8], at: usize) -> u32 {
     u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+}
+
+fn u64_at(bytes: &[u8], at: usize) -> u64 {
+    u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap())
 }
