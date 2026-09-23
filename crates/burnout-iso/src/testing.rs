@@ -174,6 +174,20 @@ impl Names {
     }
 }
 
+/// A descriptor of UDF: a tag of version 2 for `id` at block `location`,
+/// with the checksum and the CRC of `body`, and then the body.
+pub(crate) fn tagged(id: u16, location: u32, body: &[u8]) -> Vec<u8> {
+    let mut d = vec![0u8; 16];
+    d[0..2].copy_from_slice(&id.to_le_bytes());
+    d[2..4].copy_from_slice(&2u16.to_le_bytes());
+    d[8..10].copy_from_slice(&crate::udf::crc_itu_t(body).to_le_bytes());
+    d[10..12].copy_from_slice(&(body.len() as u16).to_le_bytes());
+    d[12..16].copy_from_slice(&location.to_le_bytes());
+    d[4] = d.iter().fold(0u8, |sum, b| sum.wrapping_add(*b));
+    d.extend_from_slice(body);
+    d
+}
+
 /// An ISO 9660 image that holds these items. Each directory comes before
 /// what it holds, as a tree gives them.
 pub(crate) fn iso9660(items: &[Item], options: Iso) -> Vec<u8> {
