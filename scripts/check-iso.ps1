@@ -81,6 +81,9 @@ try {
     if ($LASTEXITCODE -eq 0 -or -not $refusal.Contains('metadata partition')) {
         throw "the reader did not refuse the metadata partition of UDF 2.50: $refusal"
     }
+    # The runner of CI takes the exit code of the last program as the result
+    # of the step, and the refusal left its exit code there.
+    $global:LASTEXITCODE = 0
     Write-Output "==> udf-250.iso: refused by name"
     Write-Output $refusal
 } finally {
