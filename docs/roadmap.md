@@ -16,6 +16,9 @@ P0 to P4 are done. Raw mode writes a drive on all three hosts.
 The layout of Windows mode, the table and both of its file systems, passes
 the checks of each host, and the command line does not use it yet. P6 joins
 it to the command line.
+The reader of an ISO, P5, passes its exit test here, and `burnout write` uses
+it to choose the mode. Its gate runs on Linux and on Windows for the first
+time at the next push, so P5 is not done yet.
 
 ---
 
@@ -629,7 +632,9 @@ before the design.
   crate depends on another for it.
 - **UDF wins when an image has it.** A Windows ISO keeps its real tree there.
   Without UDF, the reader takes Rock Ridge, then Joliet, then plain ISO 9660,
-  because each of them holds more of a name than the next.
+  because each of them holds more of a name than the next. Rock Ridge comes
+  first only when it gives names. `hdiutil` writes Rock Ridge with modes and
+  times and no names, and then Joliet holds more of each name.
 - **The reader checks what it reads.** Each UDF descriptor has to carry its
   own checksum, its CRC and its own location. A fault is an error that names
   the image, and the reader does not guess past it.
@@ -646,20 +651,80 @@ before the design.
   counts as compressed when its trailer describes more sectors than its data
   holds, which is true of each compressed and read-only format that
   `hdiutil` makes and of no raw one. An image with `sources/install.wim` or
-  `sources/install.esd` is Windows mode. Anything else is raw mode, with the
-  warning that the drive may start nothing.
+  `sources/install.esd` is Windows mode. Anything else fits neither mode, and
+  `burnout write` stops and says what it found, as the README says. A
+  compressed image, such as an `.img.xz`, is one of these.
 - **`burnout write` refuses a Windows ISO until P6.** A byte copy of one
-  starts nothing on most machines. `--mode raw` makes the copy anyway.
+  starts nothing on most machines. `--mode raw` makes the copy anyway, of a
+  Windows ISO and of an image that fits neither mode.
 - **Each test builds its own image.** A small ISO 9660 builder and a small UDF
   builder live beside the tests. Each check that the reader makes has a test
   that breaks it.
-- **The gate reads an ISO that each host makes.** macOS makes one with
-  `hdiutil makehybrid`, Linux with `xorriso`, and Windows with its own IMAPI2.
-  Burnout reads each one and compares every file with the tree it came from.
+- **The gate reads an ISO that each host makes.** macOS makes UDF 1.02, UDF
+  1.50, and ISO 9660 with Joliet, with `hdiutil makehybrid`. Linux makes Rock
+  Ridge with Joliet, Joliet alone, and a file past 4 GiB, with `xorriso`.
+  Windows makes UDF at the revisions 1.02 to 2.01, and ISO 9660 with Joliet,
+  with its own IMAPI2. Burnout reads each one and compares every file with the
+  tree it came from, and each ISO has to read as the file system that the
+  reader has to choose. UDF 2.50 from IMAPI2 keeps its tree in a metadata
+  partition, and it has to give the refusal by name.
 
 **The exit test.** Burnout lists the contents of a Windows 11 ISO and a Ubuntu
 ISO, and extracts `install.wim` from the first with the hash that the host's
 own mount gives for the same file.
+
+**The exit test passes here.** The example `iso_tree` is the reader of
+Burnout. It lists an ISO, extracts one file, writes a manifest in the form of
+`sha256sum`, and compares an ISO with a directory.
+
+| Image | The tree that the reader takes | What it is checked against | What agrees |
+| --- | --- | --- | --- |
+| Windows 11 25H2 x64 | UDF, 976 files | the macOS mount, with `shasum -a 256 -c` on the manifest | 976 of 976 files, and the mount holds no other |
+| Windows 11 25H2 Arm64 | UDF, 962 files | the same | 962 of 962 files, and the mount holds no other |
+| Windows 10 22H2 x64 | UDF, 906 files | the macOS mount, the path, the type and the size of each entry | 991 of 991 entries |
+| Ubuntu 26.04.1 server | Rock Ridge, 834 files and 3 links | libarchive 3.7.4: its list, and each file that it extracts | 991 of 991 entries, and 834 of 834 files |
+| Lubuntu 26.04.1, and Fedora 44 for x86_64 and aarch64 | Rock Ridge | libarchive 3.7.4, the path, the type, the size and the link of each entry | 775, 355 and 440 entries |
+
+`iso_tree extract` gives `sources/install.wim` of the x64 ISO as
+7,578,075,168 bytes, with the SHA-256 `93ee38f5...babd9809d0`. `shasum` gives
+the same digest for the file of the macOS mount. The Ubuntu ISO carries an MD5
+of 831 of its files too, and each file that the reader gives agrees with it.
+
+**macOS mounts no file system of a hybrid Linux ISO.** `hdiutil attach` sees
+the GPT of the Ubuntu ISO and says that it holds no file system that it can
+mount. So the Ubuntu ISO is checked against libarchive, the reader behind
+`bsdtar` on macOS, and against its own list of MD5 digests. The plan said to
+mount it in the Fedora VM as well. That step is dropped: xorriso 1.5.6 made
+the Ubuntu ISO, and the Linux job of the gate reads an ISO that xorriso makes,
+on each push.
+
+**What the real media and the tools found.**
+
+- `hdiutil` pads a directory record to an even length with one zero byte, and
+  can put a padding entry of Rock Ridge after it. The reader took that byte
+  for the start of an entry, and refused the record. A zero byte where an
+  entry starts now ends the area, as in the reader of Linux.
+- `hdiutil` writes Rock Ridge with no names. The reader took it over Joliet,
+  and gave the short names of ISO 9660, in upper case and without the
+  characters that are not ASCII. It now takes Rock Ridge only when the root
+  gives names.
+- The plan said that an image with no boot table and no install image is raw
+  mode with a warning. The README says that Burnout stops, and the code now
+  does. The `.img.xz` of Raspberry Pi OS on the drive here is one of these.
+- The Windows ISOs use less of UDF than the reader reads. In the three of
+  them, each of the 3,119 file entries and each of the 3,391 file identifiers
+  passes the four checks of its tag. Each file entry uses strategy 4 and short
+  descriptors, and holds 56 bytes of extended attributes. No ISO holds an
+  extended file entry, data inside an entry, an area of more descriptors, a
+  hidden file or a deleted one. The tests build each of those.
+
+**The gate.** `scripts/check-iso.sh` passes here on macOS 26 for the three
+forms of `hdiutil`, with 8 directories and 207 files in each. This Mac has no
+xorriso and no IMAPI2, so the Linux job and `scripts/check-iso.ps1` run for
+the first time in CI at the next push. P5 is done when they pass.
+
+**What this does not prove.** The reader reads an image file. P6 copies its
+files onto a drive, and that is where the tree meets a device.
 
 ---
 

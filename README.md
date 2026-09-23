@@ -31,8 +31,9 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 > [!NOTE]
 > **Raw mode is built. Windows mode is not.**
 > `burnout list` and `burnout write` run on Windows, on macOS and on Linux.
-> `write` copies a hybrid image to a drive, flushes it, reads it back and
-> compares a hash. A Windows ISO needs Windows mode, which is phase P6.
+> `write` reads the image first. It copies a hybrid image to a drive, flushes
+> it, reads it back and compares a hash. It refuses a Windows ISO, which needs
+> Windows mode, and that is phase P6.
 > There is no release, so build it from the source.
 > [docs/roadmap.md](docs/roadmap.md) holds the measurements behind both
 > claims.
@@ -134,7 +135,8 @@ Without them, it looks inside for `sources/install.wim` or
 `sources/install.esd` and builds the installer.
 If it finds neither, it stops and says what it found.
 
-`--mode raw|windows` overrides the result.
+`--mode raw` overrides the result, and `--mode windows` comes with Windows
+mode.
 It exists for the day the guess is wrong, and a normal person never types it.
 
 > [!NOTE]
