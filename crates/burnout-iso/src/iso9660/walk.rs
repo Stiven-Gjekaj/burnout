@@ -232,7 +232,9 @@ mod tests {
     fn rock_ridge_tree(image: Vec<u8>) -> Result<Vec<Node>> {
         let mut i = Image::new(Cursor::new(image), "test.iso").unwrap();
         let d = read_descriptors(&mut i).unwrap().unwrap();
-        let skip = detect_rock_ridge(&mut i, d.primary.root)?.expect("Rock Ridge");
+        let skip = detect_rock_ridge(&mut i, d.primary.root)?
+            .expect("Rock Ridge")
+            .skip;
         walk(&mut i, d.primary.root, Names::RockRidge { skip })
     }
 

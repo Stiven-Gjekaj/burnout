@@ -72,9 +72,14 @@ impl<R: Read + Seek> IsoSource<R> {
             (FileSystem::Udf, volume.label, nodes)
         } else if let Some(d) = read_descriptors(&mut image)? {
             let primary = d.primary.root;
-            match (detect_rock_ridge(&mut image, primary)?, d.joliet) {
-                (Some(skip), _) => {
-                    let nodes = iso9660::walk(&mut image, primary, Names::RockRidge { skip })?;
+            // Rock Ridge holds more of a name than Joliet, when it gives
+            // names at all.
+            let rock_ridge =
+                detect_rock_ridge(&mut image, primary)?.filter(|rr| rr.names || d.joliet.is_none());
+            match (rock_ridge, d.joliet) {
+                (Some(rr), _) => {
+                    let names = Names::RockRidge { skip: rr.skip };
+                    let nodes = iso9660::walk(&mut image, primary, names)?;
                     (FileSystem::RockRidge, d.primary.label, nodes)
                 }
                 (None, Some(joliet)) => {
@@ -293,6 +298,28 @@ mod tests {
         let s = source(iso9660(&[Item::File("readme.txt", b"x")], Iso::default()));
         assert_eq!(s.file_system(), FileSystem::Iso9660);
         assert_eq!(s.entries().unwrap(), [file("README.TXT", 1)]);
+    }
+
+    #[test]
+    fn joliet_comes_before_rock_ridge_that_gives_no_names() {
+        let items = [Item::File("A long name.txt", b"x")];
+        let nameless = Iso {
+            joliet: true,
+            rock_ridge: true,
+            nameless: true,
+            ..Iso::default()
+        };
+        let s = source(iso9660(&items, nameless));
+        assert_eq!(s.file_system(), FileSystem::Joliet);
+        assert_eq!(s.entries().unwrap(), [file("A long name.txt", 1)]);
+        let alone = Iso {
+            joliet: false,
+            ..nameless
+        };
+        assert_eq!(
+            source(iso9660(&items, alone)).file_system(),
+            FileSystem::RockRidge
+        );
     }
 
     #[test]

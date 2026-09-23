@@ -31,6 +31,8 @@ pub(crate) struct Iso {
     /// Rock Ridge entries on the primary tree. Its plain names are then only
     /// numbers, so a name that a walk gives can only come from Rock Ridge.
     pub rock_ridge: bool,
+    /// Rock Ridge with no names, as hdiutil writes it.
+    pub nameless: bool,
     /// Sectors left empty after the terminator, where a Windows ISO keeps
     /// the recognition sequence of UDF.
     pub gap: u32,
@@ -143,6 +145,7 @@ fn pack(records: &[Vec<u8>]) -> Vec<u8> {
 struct Names {
     joliet: bool,
     rock_ridge: bool,
+    nameless: bool,
 }
 
 impl Names {
@@ -171,7 +174,9 @@ impl Names {
             Item::Link(_, target) => (0o120777, Some(*target)),
         };
         let mut su = px(mode);
-        su.extend(nm(name));
+        if !self.nameless {
+            su.extend(nm(name));
+        }
         su.extend(target.map(sl).unwrap_or_default());
         su
     }
@@ -609,10 +614,12 @@ pub(crate) fn iso9660(items: &[Item], options: Iso) -> Vec<u8> {
     let primary = Names {
         joliet: false,
         rock_ridge: options.rock_ridge,
+        nameless: options.nameless,
     };
     let joliet = Names {
         joliet: true,
         rock_ridge: false,
+        nameless: false,
     };
     let trees: Vec<Names> = std::iter::once(primary)
         .chain(options.joliet.then_some(joliet))

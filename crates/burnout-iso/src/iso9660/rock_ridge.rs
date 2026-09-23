@@ -214,27 +214,48 @@ pub(crate) fn read_entries<R: Read + Seek>(
     Ok(entries)
 }
 
-/// Whether the tree at `root` carries Rock Ridge, and the bytes to skip in
-/// each system use area if it does.
+/// What the root of a tree says of Rock Ridge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RockRidge {
+    /// The bytes to skip in each system use area.
+    pub skip: u8,
+    /// Whether the records of the root give names. hdiutil writes Rock
+    /// Ridge with modes and times and no names, and then its tree holds
+    /// only the short names of ISO 9660.
+    pub names: bool,
+}
+
+/// Whether the tree at `root` carries Rock Ridge, and how.
 ///
 /// The first record of the root directory holds an SP entry when the tree
 /// uses the protocol, and the entries of Rock Ridge say which extension it
 /// is.
-pub(crate) fn detect<R: Read + Seek>(image: &mut Image<R>, root: Root) -> Result<Option<u8>> {
+pub(crate) fn detect<R: Read + Seek>(
+    image: &mut Image<R>,
+    root: Root,
+) -> Result<Option<RockRidge>> {
     let first = image.read_at(
         root.extent as u64 * SECTOR,
         SECTOR as usize,
         "the root directory",
     )?;
     let records = records(&first).map_err(|e| image.fault(format!("the root directory: {e}")))?;
-    let Some(dot) = records.into_iter().find(|r| r.is_self()) else {
+    let Some(dot) = records.iter().find(|r| r.is_self()) else {
         return Ok(None);
     };
     let entries = read_entries(image, &dot.system_use, 0, "the root directory")?;
-    Ok(match (entries.skip, entries.rock_ridge) {
-        (Some(skip), true) => Some(skip),
-        _ => None,
-    })
+    let (Some(skip), true) = (entries.skip, entries.rock_ridge) else {
+        return Ok(None);
+    };
+    let mut names = false;
+    for r in records.iter().filter(|r| !r.is_self() && !r.is_parent()) {
+        let entries = read_entries(image, &r.system_use, skip as usize, "the root directory")?;
+        if entries.name().is_some() {
+            names = true;
+            break;
+        }
+    }
+    Ok(Some(RockRidge { skip, names }))
 }
 
 #[cfg(test)]
@@ -368,7 +389,20 @@ mod tests {
             rock_ridge: true,
             ..Iso::default()
         };
-        assert_eq!(found(rock_ridge), Some(0));
+        let names = RockRidge {
+            skip: 0,
+            names: true,
+        };
+        assert_eq!(found(rock_ridge), Some(names));
+        let nameless = Iso {
+            nameless: true,
+            ..rock_ridge
+        };
+        let no_names = RockRidge {
+            skip: 0,
+            names: false,
+        };
+        assert_eq!(found(nameless), Some(no_names));
     }
 
     #[test]
