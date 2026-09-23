@@ -9,7 +9,7 @@
 #
 # Linux makes ISOs with xorriso: Rock Ridge with Joliet, Joliet alone, and
 # Rock Ridge with a file past 4 GiB, which ISO 9660 keeps in more than one
-# extent. macOS makes ISOs with hdiutil: UDF 1.02 and UDF 1.50 beside ISO
+# extent. xorriso writes Rock Ridge unless it gets --norock. macOS makes ISOs with hdiutil: UDF 1.02 and UDF 1.50 beside ISO
 # 9660 and Joliet, and ISO 9660 with Joliet alone.
 
 set -euo pipefail
@@ -36,7 +36,7 @@ case "$(uname -s)" in
     Linux)
         xorriso -as mkisofs -quiet -R -J -V SAMPLE -o "$WORK/rock-ridge.iso" "$TREE"
         check "$WORK/rock-ridge.iso" "$TREE" "ISO 9660 with Rock Ridge"
-        xorriso -as mkisofs -quiet -J -V SAMPLE -o "$WORK/joliet.iso" "$TREE"
+        xorriso -as mkisofs -quiet --norock -J -V SAMPLE -o "$WORK/joliet.iso" "$TREE"
         check "$WORK/joliet.iso" "$TREE" "ISO 9660 with Joliet"
         rm "$WORK"/*.iso
 
