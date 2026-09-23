@@ -5,5 +5,8 @@
 //! adds the names, modes and links of a POSIX system to the first tree.
 
 mod descriptors;
+mod directory;
+mod walk;
 
 pub(crate) use descriptors::{read_descriptors, Descriptors, Root, Tree};
+pub(crate) use walk::{walk, Names};

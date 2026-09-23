@@ -15,3 +15,6 @@
 
 mod image;
 mod iso9660;
+mod node;
+#[cfg(test)]
+mod testing;
