@@ -160,6 +160,43 @@ jobs:
           test "$(ls digests | wc -l)" = 3
           test "$(cat digests/*/digest.txt | sort -u | wc -l)" = 1
 
+  # The exit test of the reader of an ISO. Each host makes ISOs of the
+  # sample tree with its own tool, and Burnout reads each one back and
+  # compares it with the tree, byte for byte. The two scripts name the tools
+  # and the forms. Linux adds a file past 4 GiB, which ISO 9660 keeps in
+  # more than one extent, so the example runs in release to hash it.
+  iso:
+    name: iso on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: make the sample tree and the reader
+        run: |
+          cargo run -q --release -p burnout-layout --example layout_image -- tree sample
+          cargo build -q --release -p burnout-iso --example iso_tree
+      - name: check on Linux and macOS
+        if: runner.os != 'Windows'
+        run: |
+          if [ "$(uname -s)" = Linux ] && ! command -v xorriso; then
+            sudo apt-get update && sudo apt-get install -y xorriso
+          fi
+          scripts/check-iso.sh sample target/release/examples/iso_tree
+      - name: check on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/check-iso.ps1 sample target/release/examples/iso_tree.exe
+
   # A shim that belongs to one host is compiled only on that host, so a break
   # in it waits for that job. `cargo check` does not link, so this catches the
   # break from Linux in about a minute.
