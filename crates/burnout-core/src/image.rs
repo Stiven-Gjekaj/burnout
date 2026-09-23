@@ -1,9 +1,9 @@
 //! What the first sector of an image says about itself.
 //!
 //! This reads 512 bytes and decides nothing about what to do with them. The
-//! choice between raw mode and Windows mode is a later phase and needs a
-//! reader for the file system inside the image. Until then this is a fact to
-//! show a person before they erase a drive, and not a rule.
+//! choice between raw mode and Windows mode needs a reader for the file
+//! system inside the image as well, and `burnout-iso` makes it with this
+//! check as its first rule.
 
 /// The size of the sector that carries a master boot record.
 pub const BOOT_SECTOR_BYTES: usize = 512;

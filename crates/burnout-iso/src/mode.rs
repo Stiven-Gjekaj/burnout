@@ -9,7 +9,8 @@
 //!   which starts from a disc and from a drive.
 //! - An ISO with `sources/install.wim` or `sources/install.esd` is Windows
 //!   mode.
-//! - Anything else is raw mode, and the drive may start nothing.
+//! - Anything else fits neither mode. A byte copy of it may start nothing,
+//!   and a compressed image is one of these.
 
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
@@ -22,11 +23,14 @@ use crate::IsoSource;
 /// What Burnout does with an image.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    /// A copy of the image, byte for byte. A drive starts from the copy
-    /// when the first sector of the image holds a boot table.
-    Raw { boot_table: bool },
+    /// A copy of the image, byte for byte. The first sector of the image
+    /// holds a boot table, so a drive starts from the copy.
+    Raw,
     /// A drive laid out for Windows, with the files of the image on it.
     Windows,
+    /// Neither mode fits: the first sector holds no boot table, and the
+    /// image holds no install image of Windows.
+    Neither,
 }
 
 /// The mode for the image at `path`.
@@ -65,10 +69,10 @@ pub fn mode_of<R: Read + Seek>(mut reader: R, name: &str) -> Result<Mode> {
         }
     }
     if has_boot_table(&first) {
-        return Ok(Mode::Raw { boot_table: true });
+        return Ok(Mode::Raw);
     }
     let Some(source) = IsoSource::new(reader, name)? else {
-        return Ok(Mode::Raw { boot_table: false });
+        return Ok(Mode::Neither);
     };
     let entries = source.entries()?;
     let installer = entries.iter().any(|e| match e {
@@ -87,7 +91,7 @@ pub fn mode_of<R: Read + Seek>(mut reader: R, name: &str) -> Result<Mode> {
     });
     Ok(match windows {
         true => Mode::Windows,
-        false => Mode::Raw { boot_table: false },
+        false => Mode::Neither,
     })
 }
 
@@ -150,12 +154,12 @@ mod tests {
     const NOTE: &[Item] = &[Item::File("README.TXT", b"use a reader of UDF")];
 
     #[test]
-    fn a_hybrid_image_is_raw_mode_with_its_boot_table() {
+    fn a_hybrid_image_is_raw_mode() {
         let mut image = iso9660(&[Item::File("a.txt", b"a")], Iso::default());
         image[510] = 0x55;
         image[511] = 0xAA;
         image[446 + 4] = 0xEE;
-        assert_eq!(mode(image).unwrap(), Mode::Raw { boot_table: true });
+        assert_eq!(mode(image).unwrap(), Mode::Raw);
     }
 
     #[test]
@@ -184,14 +188,16 @@ mod tests {
     fn an_install_image_in_another_directory_is_not_windows_mode() {
         let items = [Item::Dir("x"), Item::File("x/install.wim", b"x")];
         let found = mode(udf(&items, &Udf::default())).unwrap();
-        assert_eq!(found, Mode::Raw { boot_table: false });
+        assert_eq!(found, Mode::Neither);
     }
 
     #[test]
-    fn an_image_that_is_no_iso_is_raw_mode_without_a_boot_table() {
+    fn an_image_with_no_boot_table_and_no_install_image_fits_neither_mode() {
         for image in [vec![0u8; 400 * 2048], vec![7u8; 100], Vec::new()] {
-            assert_eq!(mode(image).unwrap(), Mode::Raw { boot_table: false });
+            assert_eq!(mode(image).unwrap(), Mode::Neither);
         }
+        let iso = iso9660(&[Item::File("a.txt", b"a")], Iso::default());
+        assert_eq!(mode(iso).unwrap(), Mode::Neither);
     }
 
     #[test]
@@ -208,7 +214,7 @@ mod tests {
         let e = refused(with_trailer(4096, 4096, 100));
         assert!(e.contains("a compressed disk image of macOS"), "{e}");
         let complete = with_trailer(4096, 4096, 8);
-        assert_eq!(mode(complete).unwrap(), Mode::Raw { boot_table: false });
+        assert_eq!(mode(complete).unwrap(), Mode::Neither);
     }
 
     #[test]

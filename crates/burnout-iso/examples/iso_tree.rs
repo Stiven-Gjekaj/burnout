@@ -25,7 +25,8 @@
 //! gate in CI uses it on an ISO that the tools of each host make from the
 //! sample tree.
 //!
-//! `mode` gives the mode that the image asks for, or the refusal.
+//! `mode` gives the mode that the image asks for, `neither` when no mode
+//! fits it, or the refusal.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};
@@ -199,9 +200,9 @@ fn compare(image: &str, dir: &Path) -> Outcome {
 
 fn mode(image: &str) -> Outcome {
     match mode_of_file(Path::new(image))? {
-        Mode::Raw { boot_table: true } => println!("raw, with a boot table"),
-        Mode::Raw { boot_table: false } => println!("raw, with no boot table"),
+        Mode::Raw => println!("raw"),
         Mode::Windows => println!("windows"),
+        Mode::Neither => println!("neither: no boot table, and no install image of Windows"),
     }
     Ok(())
 }

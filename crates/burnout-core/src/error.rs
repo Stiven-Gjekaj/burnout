@@ -105,6 +105,12 @@ pub enum Error {
         /// The path, as the person gave it.
         path: String,
     },
+    /// Neither mode fits the image: its first sector holds no boot table,
+    /// and it holds no install image of Windows.
+    NoMode {
+        /// The path, as the person gave it.
+        path: String,
+    },
     /// The operation needs more privilege than this process holds.
     NeedsPrivilege {
         /// What a person types to get it.
@@ -251,6 +257,14 @@ impl fmt::Display for Error {
                     "{path} is a Windows ISO. A byte copy of it starts nothing on most computers, \
                      and Burnout does not write Windows mode yet. \
                      To make the byte copy anyway, use --mode raw"
+                )
+            }
+            Error::NoMode { path } => {
+                write!(
+                    f,
+                    "{path} holds no boot table in its first sector and no install image of Windows, \
+                     so a byte copy of it may start nothing. A compressed image is one of these, \
+                     and it has to be expanded first. To make the byte copy anyway, use --mode raw"
                 )
             }
             Error::NeedsPrivilege { remedy } => {

@@ -37,7 +37,7 @@ use crate::report::Bar;
 /// Write an image to a drive.
 pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
     if args.mode != Some(ModeArg::Raw) {
-        allow_raw(mode_of_file(&args.image), &args.image)?;
+        check_mode(mode_of_file(&args.image), &args.image)?;
     }
     let mut image = File::open(&args.image).map_err(|e| Error::Image {
         path: args.image.display().to_string(),
@@ -141,19 +141,18 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
     Ok(0)
 }
 
-/// Refuse an image that the mode it asks for does not allow Burnout to copy
-/// byte for byte.
+/// Go on only with an image that asks for raw mode.
 ///
-/// A Windows ISO asks for Windows mode, which a later phase writes. A file
-/// whose contents Burnout cannot read gives the fault, and says how to copy
-/// it anyway. A path that is not a file gives the fault alone, because no
-/// mode copies it.
-fn allow_raw(mode: Result<Mode>, image: &Path) -> Result<()> {
+/// A Windows ISO asks for Windows mode, which a later phase writes. An image
+/// that fits neither mode stops, and so does a file whose contents Burnout
+/// cannot read, and each error says how to copy it anyway. A path that is
+/// not a file gives the fault alone, because no mode copies it.
+fn check_mode(mode: Result<Mode>, image: &Path) -> Result<()> {
+    let path = image.display().to_string();
     match mode {
-        Ok(Mode::Raw { .. }) => Ok(()),
-        Ok(Mode::Windows) => Err(Error::WindowsMode {
-            path: image.display().to_string(),
-        }),
+        Ok(Mode::Raw) => Ok(()),
+        Ok(Mode::Windows) => Err(Error::WindowsMode { path }),
+        Ok(Mode::Neither) => Err(Error::NoMode { path }),
         Err(Error::Image { path, detail }) if image.is_file() => Err(Error::Image {
             path,
             detail: format!("{detail}. To copy it byte for byte anyway, use --mode raw"),
@@ -310,18 +309,24 @@ mod tests {
     use burnout_core::DriveId;
 
     #[test]
-    fn raw_mode_allows_an_image_that_asks_for_raw_mode() {
-        let path = Path::new("ubuntu.iso");
-        for boot_table in [true, false] {
-            assert!(allow_raw(Ok(Mode::Raw { boot_table }), path).is_ok());
-        }
+    fn an_image_that_asks_for_raw_mode_goes_on() {
+        assert!(check_mode(Ok(Mode::Raw), Path::new("ubuntu.iso")).is_ok());
     }
 
     #[test]
     fn a_windows_iso_is_refused_and_the_message_names_the_way_past() {
-        let e = allow_raw(Ok(Mode::Windows), Path::new("Win11.iso")).unwrap_err();
+        let e = check_mode(Ok(Mode::Windows), Path::new("Win11.iso")).unwrap_err();
         assert!(matches!(e, Error::WindowsMode { .. }), "{e}");
         assert!(e.to_string().contains("--mode raw"), "{e}");
+    }
+
+    #[test]
+    fn an_image_that_fits_neither_mode_is_refused_and_the_message_names_the_way_past() {
+        let e = check_mode(Ok(Mode::Neither), Path::new("disk.img.xz")).unwrap_err();
+        assert!(matches!(e, Error::NoMode { .. }), "{e}");
+        let text = e.to_string();
+        assert!(text.contains("expanded first"), "{text}");
+        assert!(text.ends_with("use --mode raw"), "{text}");
     }
 
     fn fault(path: &Path) -> Error {
@@ -335,7 +340,7 @@ mod tests {
     fn a_file_that_cannot_be_read_names_the_way_past() {
         let file = std::env::temp_dir().join(format!("burnout-odd-{}.iso", std::process::id()));
         std::fs::write(&file, b"odd").unwrap();
-        let e = allow_raw(Err(fault(&file)), &file).unwrap_err();
+        let e = check_mode(Err(fault(&file)), &file).unwrap_err();
         std::fs::remove_file(&file).unwrap();
         let text = e.to_string();
         assert!(
@@ -348,7 +353,9 @@ mod tests {
     #[test]
     fn a_path_that_is_not_a_file_gives_its_fault_alone() {
         for path in [std::env::temp_dir(), "no-such-image.iso".into()] {
-            let text = allow_raw(Err(fault(&path)), &path).unwrap_err().to_string();
+            let text = check_mode(Err(fault(&path)), &path)
+                .unwrap_err()
+                .to_string();
             assert!(!text.contains("--mode raw"), "{text}");
         }
     }
@@ -359,7 +366,7 @@ mod tests {
             path: "Install.dmg".to_string(),
             what: "a compressed disk image of macOS",
         };
-        let e = allow_raw(Err(media), Path::new("Install.dmg")).unwrap_err();
+        let e = check_mode(Err(media), Path::new("Install.dmg")).unwrap_err();
         assert!(matches!(e, Error::MacosMedia { .. }), "{e}");
     }
 
