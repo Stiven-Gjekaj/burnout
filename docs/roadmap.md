@@ -12,7 +12,10 @@ Do not start a phase until the phase it depends on passes its exit test.
 The sizes are relative: S is a day or two, M is a week, L is longer, and XL is
 the one that needs a plan of its own.
 
-P0 to P3 are done. Raw mode writes a drive on all three hosts.
+P0 to P4 are done. Raw mode writes a drive on all three hosts.
+The layout of Windows mode, the table and both of its file systems, passes
+the checks of each host, and the command line does not use it yet. P6 joins
+it to the command line.
 
 ---
 
@@ -467,7 +470,7 @@ P6 writes the layout to a device, and that is where the device half closes.
 
 ## P4. The exFAT writer
 
-**Size XL. Depends on P3. Ships as v0.2.**
+**Size XL. Depends on P3. Done. Ships as v0.2.**
 
 The one piece with no crate behind it, and the reason macOS can take part at
 all.
@@ -517,8 +520,9 @@ The work:
 - **Each file and each directory fills whole clusters, and the rest of its
   last cluster is zero.** Old data on a drive then cannot show through, and
   the same tree gives the same bytes on a device too.
-- **The check reads the volume with a reader of its own.** It shares no code
-  and no cache with the writer. It checks the boot region, its checksum and
+- **The check reads the volume with a reader of its own.** It shares only
+  the checksums and the up-case table with the writer, and no cache. It
+  checks the boot region, its checksum and
   its copy, the checksum of each entry set and the hash of each name. It
   checks that the bitmap marks each cluster that the volume uses and no other.
   Then it reads each file and compares its digest with the one it went in
@@ -529,6 +533,55 @@ The work:
 **The exit test.** A volume that Burnout formats mounts on Windows, on macOS
 and on Linux. A 6 GiB file written into it reads back with the same hash on
 all three. The host's own check tool reports no error.
+
+**It passes on the three hosts, and CI runs it on each push.**
+
+The example `layout_image` now also writes partition 2 as exFAT. It holds the
+same tree of 207 files and one more: `sources/install.wim` of 6,442,463,289
+bytes, which is 6 GiB and 12,345 bytes. Its bytes come from a generator, so no
+host holds a file of that size. The example checks both partitions with its
+own readers. Each host then mounts the image with its own mechanism, checks
+each partition with its own tool, and reads each file back through its own
+driver.
+
+| Host | How it mounts the image | Its exFAT check tool | Files of partition 2 that match |
+| --- | --- | --- | --- |
+| macOS 26 | `hdiutil`, `mount -t exfat` | `fsck_exfat -n`, "appears to be OK" | 208 of 208 |
+| Fedora 44 ARM64, 512-byte sectors | `losetup` | `fsck.exfat -n` of exfatprogs 1.3.2, "clean" | 208 of 208 |
+| Fedora 44 ARM64, 4096-byte sectors | `losetup --sector-size 4096` | the same | 208 of 208 |
+| Ubuntu 24.04 in CI, at both sizes | `losetup` | `fsck.exfat -n` of exfatprogs 1.2.2, "clean" | 208 of 208 |
+| Windows Server 2025, in CI | a VHD, `Mount-DiskImage -Access ReadOnly` | `chkdsk`, "found no problems" | 208 of 208 |
+
+Partition 1 passes on each host too, with 207 of 207 files, as in P3. The
+large file has the SHA-256 `9f122a80...b7b8fa6d20` on each host, which is the
+digest it went in with. The `same-image` job got one digest of the whole
+image from the three hosts, `0b3d05d3...c536408dc`, and it is the digest of
+the image built on macOS here.
+
+**What the host tools found.** Nothing in the volume. Each check tool passed
+the first volume that the writer made. Two things around it:
+
+- The Linux runner of CI, Ubuntu 24.04 with the kernel 6.17.0-1022-azure,
+  had no exFAT driver. `fsck.exfat` passed the volume, and `mount -t exfat`
+  said that it does not know the file system. The driver is in
+  `linux-modules-extra` of that kernel, and CI now installs it when
+  `modprobe exfat` finds no module.
+- macOS shows each time on both partitions as 23:00 on 31 December 1979, in
+  the zone of the Mac here, which is one hour ahead of UTC in January. The
+  entries hold midnight on 1 January 1980. The two partitions agree, because
+  the exFAT entries hold no offset from UTC, which the specification allows,
+  and which means local time, as FAT keeps it.
+
+**The checksums are the ones that macOS writes.** The tests hold entry sets,
+entries of the root and a boot region from a volume that macOS 26 formatted.
+The writer gives the same bytes and the same checksums. The reader also reads
+that volume of macOS whole, bitmap and all.
+
+**What this does not prove.** Every write went to an image file. A raw device
+is proven only through `StrictTarget`, which refuses what a device refuses.
+P6 writes the layout to a device, and that is where the device half closes.
+The Windows machine here asks for an administrator password before it mounts
+a VHD, so the Windows answer is the runner of CI, as in P3.
 
 ---
 
