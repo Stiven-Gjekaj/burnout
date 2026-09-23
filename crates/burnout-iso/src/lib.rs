@@ -11,6 +11,7 @@
 
 #![forbid(unsafe_code)]
 // The parts come before the source that uses them.
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
 
 mod image;
+mod iso9660;
