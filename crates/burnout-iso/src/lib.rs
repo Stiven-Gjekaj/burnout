@@ -13,10 +13,12 @@
 
 mod image;
 mod iso9660;
+mod mode;
 mod node;
 mod source;
 #[cfg(test)]
 mod testing;
 mod udf;
 
+pub use mode::{mode_of, mode_of_file, Mode};
 pub use source::{FileSystem, IsoSource, Link};

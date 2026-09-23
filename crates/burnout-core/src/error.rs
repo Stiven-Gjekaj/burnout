@@ -92,6 +92,13 @@ pub enum Error {
         /// What is wrong with it.
         detail: String,
     },
+    /// The image is macOS media, which only macOS can make into a drive.
+    MacosMedia {
+        /// The path, as the person gave it.
+        path: String,
+        /// What the image is, such as "an installer package".
+        what: &'static str,
+    },
     /// The operation needs more privilege than this process holds.
     NeedsPrivilege {
         /// What a person types to get it.
@@ -225,6 +232,13 @@ impl fmt::Display for Error {
             Error::Image { path, detail } => {
                 write!(f, "cannot read {path}: {detail}")
             }
+            Error::MacosMedia { path, what } => {
+                write!(
+                    f,
+                    "{path} is {what}, and only macOS can make a drive from macOS media. \
+                     Use createinstallmedia, which is in Contents/Resources of the installer app"
+                )
+            }
             Error::NeedsPrivilege { remedy } => {
                 write!(f, "this needs more privilege than it has. {remedy}")
             }
@@ -340,6 +354,20 @@ mod tests {
         let text = e.to_string();
         assert!(text.contains("Samsung T7"));
         assert!(text.contains("SanDisk Ultra"));
+    }
+
+    #[test]
+    fn a_macos_message_names_what_the_image_is_and_createinstallmedia() {
+        let e = Error::MacosMedia {
+            path: "InstallAssistant.pkg".to_string(),
+            what: "an installer package",
+        };
+        let text = e.to_string();
+        assert!(
+            text.starts_with("InstallAssistant.pkg is an installer package"),
+            "{text}"
+        );
+        assert!(text.contains("createinstallmedia"), "{text}");
     }
 
     #[test]
