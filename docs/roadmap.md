@@ -12,13 +12,12 @@ Do not start a phase until the phase it depends on passes its exit test.
 The sizes are relative: S is a day or two, M is a week, L is longer, and XL is
 the one that needs a plan of its own.
 
-P0 to P4 are done. Raw mode writes a drive on all three hosts.
+P0 to P5 are done. Raw mode writes a drive on all three hosts.
 The layout of Windows mode, the table and both of its file systems, passes
 the checks of each host, and the command line does not use it yet. P6 joins
 it to the command line.
-The reader of an ISO, P5, passes its exit test here, and `burnout write` uses
-it to choose the mode. Its gate runs on Linux and on Windows for the first
-time at the next push, so P5 is not done yet.
+Burnout reads an ISO itself, and `burnout write` uses the reader to choose the
+mode.
 
 ---
 
@@ -590,7 +589,7 @@ a VHD, so the Windows answer is the runner of CI, as in P3.
 
 ## P5. Reading an ISO
 
-**Size L. Depends on nothing. Start it beside P3.**
+**Size L. Depends on nothing. Done.**
 
 Burnout has to read the image itself, for the same reason it writes the
 filesystem itself: a mount through the host is three different behaviours.
@@ -718,10 +717,29 @@ on each push.
   extended file entry, data inside an entry, an area of more descriptors, a
   hidden file or a deleted one. The tests build each of those.
 
-**The gate.** `scripts/check-iso.sh` passes here on macOS 26 for the three
-forms of `hdiutil`, with 8 directories and 207 files in each. This Mac has no
-xorriso and no IMAPI2, so the Linux job and `scripts/check-iso.ps1` run for
-the first time in CI at the next push. P5 is done when they pass.
+**The gate passes on the three hosts, and CI runs it on each push.** Each
+host makes the ISOs of the sample tree with its own tool. The reader gives
+the tree back from each one, byte for byte, as the file system that it has to
+choose.
+
+| Host | Tool | ISO | What the reader gives |
+| --- | --- | --- | --- |
+| macOS 26.6 in CI, and macOS 26 here | `hdiutil makehybrid` | UDF 1.02, UDF 1.50, and ISO 9660 with Joliet | the 8 directories and 207 files of the tree, from each |
+| Ubuntu 24.04 in CI | xorriso 1.5.6 | Rock Ridge with Joliet, and Joliet alone | the same, from each |
+| | | Rock Ridge with one file of 4 GiB, 5 MiB and 7 bytes, which ISO 9660 keeps in more than one extent | the file |
+| Windows Server 2025 in CI | IMAPI2 | UDF 1.02, 1.50, 2.00 and 2.01, and ISO 9660 with Joliet | the tree, from each |
+| | | UDF 2.50 | the refusal of its metadata partition, by name |
+
+**What the first run of the gate found.** Two faults, both in the gate:
+
+- xorriso writes Rock Ridge unless it gets `--norock`. The gate made its
+  Joliet ISO with `-J` alone, the reader took the Rock Ridge in it, as it has
+  to, and the check that it takes Joliet failed. The gate now gives
+  `--norock`.
+- The runner of CI takes the exit code of the last program in a PowerShell
+  step as the result of the step. The refusal of UDF 2.50 left its exit code
+  there, so the step failed after the check passed. The check now sets the
+  exit code back.
 
 **What this does not prove.** The reader reads an image file. P6 copies its
 files onto a drive, and that is where the tree meets a device.
