@@ -96,9 +96,11 @@ impl Entries {
             let signature = &area[at..at + 2];
             let length = area[at + 2] as usize;
             if length < 4 || at + length > area.len() {
-                // Padding at the end of an area is zero, and a zero entry
-                // ends it. Anything else is a fault.
-                if signature == [0, 0] {
+                // A signature is two letters, so a zero byte where an entry
+                // starts is padding, and it ends the area. hdiutil pads a
+                // record to an even length with one zero byte, and can put
+                // a padding entry after it. Anything else is a fault.
+                if signature[0] == 0 {
                     break;
                 }
                 return Err(format!(
@@ -374,5 +376,16 @@ mod tests {
         let mut area = entry(b"NM", b"\0ok");
         area.extend([0, 0, 0, 0, 0]);
         assert_eq!(fed(&area).name().unwrap().unwrap(), "ok");
+    }
+
+    #[test]
+    fn a_zero_byte_before_a_padding_entry_ends_an_area() {
+        // The end of a record that hdiutil wrote: a time entry, one byte to
+        // make the record even, and a padding entry of 32 bytes.
+        let mut area = entry(b"NM", b"\0file.txt");
+        area.extend(entry(b"TF", &[0x0F; 29]));
+        area.push(0);
+        area.extend(entry(b"PD", &[0; 28]));
+        assert_eq!(fed(&area).name().unwrap().unwrap(), "file.txt");
     }
 }
