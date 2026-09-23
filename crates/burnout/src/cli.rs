@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// Writes a bootable USB drive from the command line.
 #[derive(Debug, Parser)]
@@ -59,4 +59,20 @@ pub struct WriteArgs {
     /// Stop rather than ask for a password.
     #[arg(long)]
     pub no_elevate: bool,
+
+    /// Choose the mode, and do not read the image to choose it.
+    ///
+    /// Burnout reads the image to choose the mode. It refuses a Windows ISO,
+    /// because a byte copy of one starts nothing on most computers, and it
+    /// refuses macOS media. `raw` copies the image byte for byte, whatever
+    /// it holds.
+    #[arg(long, value_enum, value_name = "MODE")]
+    pub mode: Option<ModeArg>,
+}
+
+/// A mode that a person can choose.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum ModeArg {
+    /// Copy the image byte for byte.
+    Raw,
 }

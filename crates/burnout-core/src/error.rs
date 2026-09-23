@@ -99,6 +99,12 @@ pub enum Error {
         /// What the image is, such as "an installer package".
         what: &'static str,
     },
+    /// The image is a Windows ISO, which needs Windows mode, and Burnout does
+    /// not write Windows mode yet.
+    WindowsMode {
+        /// The path, as the person gave it.
+        path: String,
+    },
     /// The operation needs more privilege than this process holds.
     NeedsPrivilege {
         /// What a person types to get it.
@@ -237,6 +243,14 @@ impl fmt::Display for Error {
                     f,
                     "{path} is {what}, and only macOS can make a drive from macOS media. \
                      Use createinstallmedia, which is in Contents/Resources of the installer app"
+                )
+            }
+            Error::WindowsMode { path } => {
+                write!(
+                    f,
+                    "{path} is a Windows ISO. A byte copy of it starts nothing on most computers, \
+                     and Burnout does not write Windows mode yet. \
+                     To make the byte copy anyway, use --mode raw"
                 )
             }
             Error::NeedsPrivilege { remedy } => {

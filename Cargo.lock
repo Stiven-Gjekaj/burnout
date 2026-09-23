@@ -63,6 +63,7 @@ name = "burnout"
 version = "0.0.0"
 dependencies = [
  "burnout-core",
+ "burnout-iso",
  "clap",
  "core-foundation",
  "core-foundation-sys",
