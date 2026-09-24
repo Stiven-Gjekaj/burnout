@@ -892,22 +892,35 @@ write passed on its third run.
   mount approval of Disk Arbitration, from the first unmount until the check
   ends.
 
-**What is still open.**
+**Two items that the exit test left open, now fixed.** The same macOS write,
+run again with both fixes on the same drive, passed.
 
-- **The host writes to the drive after Burnout ends.** When the drive came
+- **The host wrote to the drive after Burnout ended.** When the drive came
   back to the Mac, macOS mounted it, and Spotlight wrote 16,584 KiB to
-  partition 1 and 11,904 KiB to partition 2, as `du` counts them. Windows
-  Setup wrote `System Volume Information` to both. That is after the check, so the check stands, but it
-  takes from the room on partition 1.
-- **Partition 1 goes to the drive in writes of 4 KiB.** `fatfs` writes one
-  cluster at a time, and `SectorIo` passes each cluster on by itself. Through
+  partition 1 and 11,904 KiB to partition 2, as `du` counts them. On macOS,
+  Burnout now ejects the drive when the check ends, while the mounts are
+  still refused. After the run the drive stayed on the USB bus with no disk
+  and no mount. It was then connected again with each mount refused, and its
+  two volumes were mounted read-only. They held the 962 files of the ISO,
+  each with the SHA-256 of its copy in the ISO, and `autounattend.xml`, and
+  nothing else: no `.Spotlight-V100` and no `.fseventsd`. Windows Setup still
+  writes `System Volume Information` when it installs from the drive, and
+  that is Setup.
+- **Partition 1 went to the drive in writes of 4 KiB.** `fatfs` writes one
+  cluster at a time, and `SectorIo` sent each cluster on by itself. Through
   the USB pass-through of the Windows VM that part ran at 0.5 to 1.3 MB/s.
-- **The VM stopped at "Start boot option" after a warm restart.** It did so
-  twice in the install from the drive that Windows wrote, and in the first
-  run with a drive image. A cold stop and start went on each time, so the
-  fault is in the VM and not in the drive.
-- **x64 and the firmware of a physical PC are not run.** The drive started in
-  an Arm64 VM on this Mac.
+  `SectorIo` now sends whole sectors that follow one another in one write of
+  up to 1 MiB. On macOS the write reached 803.4 MB at 31.8 MB/s, where it was
+  at 12.7 MB/s near 997 MB before, and the whole write ran at 50.9 MB/s
+  against 38.9 MB/s. The Windows VM was not measured again.
+
+The VM stopped at "Start boot option" after a warm restart twice, in the
+install from the drive that Windows wrote, and in its first run with a drive
+image. A cold stop and start went on each time, so the fault is in that VM
+and not in the drive. The VM was made for this test, and it is gone.
+
+**What is still open.** x64 and the firmware of a physical PC are not run.
+The drive started in an Arm64 VM on this Mac.
 
 ---
 
