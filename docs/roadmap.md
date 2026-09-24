@@ -12,10 +12,8 @@ Do not start a phase until the phase it depends on passes its exit test.
 The sizes are relative: S is a day or two, M is a week, L is longer, and XL is
 the one that needs a plan of its own.
 
-P0 to P5 are done. Raw mode writes a drive on all three hosts.
-The layout of Windows mode, the table and both of its file systems, passes
-the checks of each host, and the command line does not use it yet. P6 joins
-it to the command line.
+P0 to P6 are done. Raw mode and Windows mode write a drive on all three
+hosts, and a drive from each host installs Windows 11.
 Burnout reads an ISO itself, and `burnout write` uses the reader to choose the
 mode.
 
@@ -748,7 +746,7 @@ files onto a drive, and that is where the tree meets a device.
 
 ## P6. Windows mode
 
-**Size L. Depends on P0, P4 and P5. Ships as v0.3.**
+**Size L. Depends on P0, P4 and P5. Done. Ships as v0.3.**
 
 Put the four pieces together.
 
@@ -849,6 +847,67 @@ drive, in the VM above. macOS writes the drive on this Mac. Fedora and Windows
 write it in their VMs, with the drive passed through. An emulated x64 machine
 cannot run a current Windows image, and [the spike](spike-layout.md) measured
 why.
+
+**The exit test, run.** Each host wrote the Samsung drive from
+`Win11_25H2_English_Arm64_v2.iso` with `--skip-hardware-checks` and
+`--no-microsoft-account`. Each write put 963 files of 7,988,543,418 bytes on
+the drive, and checked each file against its SHA-256. The drive then started
+the VM above, and Windows installed to the desktop.
+
+| Host | How it reached the drive | Write | Check | Disk signature |
+| --- | --- | --- | --- | --- |
+| macOS 26 | `/dev/rdisk5` | 38.9 MB/s | 78.7 MB/s | `0x09381FF3` |
+| Fedora 44 ARM64, a VM | the drive passed through, `/dev/sdb` | 54.7 MB/s | 224.9 MB/s | `0x110C19AC` |
+| Windows 11 ARM64, a VM | the drive passed through, `\\.\PhysicalDrive1` | 8.8 MB/s | 11.0 MB/s | `0x8C36F180` |
+
+Each write gives the drive a new disk signature, and the UEFI shell of the VM
+prints it, so each install shows which host wrote the drive. Each install went
+the same way:
+
+- The drive arrived after the VM started, so the firmware stopped at the UEFI
+  shell, and the shell started `\EFI\BOOT\BOOTAA64.EFI` from partition 1.
+- Setup showed the three editions, and Home was chosen. No page refused the
+  VM for its missing TPM.
+- The disk page selected partition 2 of the drive, said that Windows cannot go
+  there, and kept Next off. The blank NVMe disk was selected by hand.
+- The first-run setup offered "I don't have internet", and then asked for the
+  name and the password of a local account. In the VM the password stayed
+  empty, and each privacy setting went off.
+- `winver` showed Windows 11 Home, version 25H2, OS build 26200.8037.
+
+Fedora checked at 224.9 MB/s. In the same VM, `dd iflag=direct` read 2 GB of
+the drive at 220 MB/s. So the drive itself reads that fast, and the speed of
+the check does not show a read out of the page cache.
+
+**Two faults that only the real drive found.** Both are fixed, and the macOS
+write passed on its third run.
+
+- **macOS mounted the new volumes when the handle that wrote closed.** The
+  open for the check then failed with `EBUSY`. The check now takes the volumes
+  off before each open, and tries again for ten seconds while the drive is
+  busy.
+- **Spotlight wrote to a volume before the check read it.** The check found
+  `.Spotlight-V100` on partition 1 and refused the drive, which is its job. On
+  macOS, Burnout now refuses each mount of a volume of the drive, through the
+  mount approval of Disk Arbitration, from the first unmount until the check
+  ends.
+
+**What is still open.**
+
+- **The host writes to the drive after Burnout ends.** When the drive came
+  back to the Mac, macOS mounted it, and Spotlight wrote 16,584 KiB to
+  partition 1 and 11,904 KiB to partition 2, as `du` counts them. Windows
+  Setup wrote `System Volume Information` to both. That is after the check, so the check stands, but it
+  takes from the room on partition 1.
+- **Partition 1 goes to the drive in writes of 4 KiB.** `fatfs` writes one
+  cluster at a time, and `SectorIo` passes each cluster on by itself. Through
+  the USB pass-through of the Windows VM that part ran at 0.5 to 1.3 MB/s.
+- **The VM stopped at "Start boot option" after a warm restart.** It did so
+  twice in the install from the drive that Windows wrote, and in the first
+  run with a drive image. A cold stop and start went on each time, so the
+  fault is in the VM and not in the drive.
+- **x64 and the firmware of a physical PC are not run.** The drive started in
+  an Arm64 VM on this Mac.
 
 ---
 
