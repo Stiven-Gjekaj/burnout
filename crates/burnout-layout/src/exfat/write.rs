@@ -11,7 +11,7 @@ use super::place::{min_volume_bytes, Placement, Run};
 use super::upcase::{recommended_bytes, UpCase};
 use crate::manifest::{CopiedFile, Manifest};
 use crate::stream::{stream_file, CHUNK_BYTES};
-use burnout_core::FileSource;
+use burnout_core::{Entry, FileSource};
 
 /// The entry of the FAT for the first of the two clusters that do not exist:
 /// the media type F8h, as on a fixed disk, and ones.
@@ -73,18 +73,8 @@ where
     S: FileSource + ?Sized,
 {
     let sector = volume.logical_sector_size();
-    let volume_bytes = volume.length();
-    let up = UpCase::recommended();
-    let label = label_entry(options.label);
-
-    let too_small = || Error::PartitionTooSmall {
-        file_system: "exFAT",
-        partition_bytes: volume_bytes,
-        needed_bytes: min_volume_bytes(sector),
-    };
-    let geometry = Geometry::new(volume_bytes, sector).ok_or_else(too_small)?;
-    Placement::new(geometry, label, &[], &up).map_err(|_| too_small())?;
-    let placement = Placement::new(geometry, label, &source.entries()?, &up)?;
+    let placement = place(volume.length(), sector, options.label, &source.entries()?)?;
+    let geometry = placement.geometry;
 
     write_fat(&mut volume, &placement)?;
     write_run(
@@ -172,6 +162,34 @@ fn bitmap(placement: &Placement) -> Vec<u8> {
         bits[used / 8] = (1u8 << (used % 8)) - 1;
     }
     bits
+}
+
+/// Where a tree goes on a volume of `volume_bytes`, or the error that says
+/// why it does not fit.
+fn place(volume_bytes: u64, sector: u32, label: &str, entries: &[Entry]) -> Result<Placement> {
+    let up = UpCase::recommended();
+    let label = label_entry(label);
+    let too_small = || Error::PartitionTooSmall {
+        file_system: "exFAT",
+        partition_bytes: volume_bytes,
+        needed_bytes: min_volume_bytes(sector),
+    };
+    let geometry = Geometry::new(volume_bytes, sector).ok_or_else(too_small)?;
+    Placement::new(geometry, label, &[], &up).map_err(|_| too_small())?;
+    Placement::new(geometry, label, entries, &up)
+}
+
+/// Whether an exFAT volume of `volume_bytes` holds a tree of these entries.
+///
+/// Nothing is written. The error is the one that [`write_exfat`] gives for
+/// the same tree, so a caller can refuse a drive before a byte goes onto it.
+pub fn check_exfat_fits(
+    volume_bytes: u64,
+    sector: u32,
+    label: &str,
+    entries: &[Entry],
+) -> Result<()> {
+    place(volume_bytes, sector, label, entries).map(|_| ())
 }
 
 /// Write `bytes` into a run, and zero to the end of its last cluster.

@@ -17,4 +17,4 @@ mod verify;
 mod write;
 
 pub use verify::{verify_exfat, verify_exfat_with};
-pub use write::{write_exfat, write_exfat_with, ExfatOptions};
+pub use write::{check_exfat_fits, write_exfat, write_exfat_with, ExfatOptions};

@@ -158,6 +158,13 @@ pub enum Error {
         /// The smallest partition that the file system fits, in bytes.
         needed_bytes: u64,
     },
+    /// The drive is too small for the layout of Windows mode.
+    NeedsLargerDrive {
+        /// The smallest drive that holds the layout, in bytes.
+        needed_bytes: u64,
+        /// The size of the drive in bytes.
+        drive_bytes: u64,
+    },
     /// The files of a tree do not fit on the volume that has to hold them.
     VolumeFull {
         /// The file system, such as exFAT.
@@ -298,6 +305,16 @@ impl fmt::Display for Error {
                 write!(
                     f,
                     "{file_system} needs a partition of {needed_bytes} bytes or more, and this one holds {partition_bytes}"
+                )
+            }
+            Error::NeedsLargerDrive {
+                needed_bytes,
+                drive_bytes,
+            } => {
+                write!(
+                    f,
+                    "the layout of Windows mode needs a drive of {needed_bytes} bytes or more, \
+                     and this drive holds {drive_bytes}"
                 )
             }
             Error::VolumeFull {
