@@ -764,9 +764,83 @@ The work:
   the whole device proves nothing here, because Burnout built a filesystem
   that the source never had.
 
+**What is there, and what P6 adds.** P3 and P4 write the table, FAT32 and
+exFAT into an image file, and check each file through a new mount. P5 reads
+the ISO and chooses the mode. P6 joins them in `burnout write`, writes the
+file that Setup needs, and runs the same code on a drive.
+
+**What the three Windows ISOs hold.** Measured before the design.
+
+| ISO | Boot files, in clusters of 4 KiB | `install.wim` | Editions | Index 1 | Pro |
+| --- | --- | --- | --- | --- | --- |
+| Windows 11 25H2 x64 | 975 files, 849 MiB | 7.06 GiB | 11 | Home | index 6 |
+| Windows 11 25H2 Arm64 | 961 files, 873 MiB | 6.59 GiB | 3 | Home | index 3 |
+| Windows 10 22H2 x64 | 905 files, 912 MiB | 4.83 GiB | 11 | Home | index 6 |
+
+The image lists its editions in XML, in UTF-16 and not compressed, at a place
+that its header gives. Each edition names its architecture: 9 is x64, and 12
+is Arm64.
+
+**How Windows mode works.** These are the decisions, and the reason for each.
+
+- **The tree splits in two.** Partition 2 holds `sources/install.wim` or
+  `sources/install.esd` alone. Partition 1 holds every other file, and
+  `autounattend.xml`.
+- **Partition 1 holds the boot files and 256 MiB more.** Each file counts in
+  whole clusters of 4 KiB. A fixed 1 GiB leaves Windows 10 about 100 MiB, and
+  the next ISO can hold more. The room that is left takes a driver that a
+  person adds later.
+- **The drive has to hold both partitions, and Burnout checks that first.**
+  The check runs before the privilege and before the confirmation, and a
+  drive that is too small is refused with the size it needs.
+- **`autounattend.xml` goes on every drive, and it holds what the spike
+  measured.** The search that pins the install volume to `W:`, and the
+  `InstallFrom` path that uses it. Each component names the architecture of
+  the image, because Setup ignores a component for another one. The options
+  add the rest, and nothing else: `--skip-hardware-checks` adds the five
+  `LabConfig` keys, and `--no-microsoft-account` takes away the step of the
+  Microsoft account. The empty product key stays out, because Setup is to ask
+  for the key.
+- **Burnout does not choose the edition.** Index 1 is Home on each ISO above.
+  The spike gave index 1, and a person who wanted Pro got Home. How the
+  edition gets chosen waits for a measurement, below.
+- **The check reads the drive again through a new handle.** The write ends
+  with a flush, the drive opens again, and each file is read back through a
+  new mount of its volume, as raw mode reads the drive again. The report says
+  that it checked each file against the SHA-256 that it went in with.
+- **The labels come from the ISO.** Partition 1 takes the label of the ISO,
+  cut to what FAT32 holds, and partition 2 is `INSTALL`. The search in the
+  file finds the volume by its content, so no label is part of the layout.
+- **`--mode windows` forces the layout** on an image that carries a boot table
+  and an install image, which some tools make.
+- **The code that writes the drive lives in `burnout-layout`.** It works on
+  any target, so an example writes an image file with it, and CI checks that
+  image on each host with the tools of the host.
+
+**What is open, and how it gets measured.** Two questions decide the options,
+and a VM answers both before the command line changes:
+
+1. **Does Setup take `InstallFrom` with no index?** With the path alone, Setup
+   either shows the list of editions, or stops. If it stops, Burnout reads the
+   editions out of the image, shows them, and the person chooses one.
+   `--edition` names one for a script.
+2. **Does `HideOnlineAccountScreens` alone skip the Microsoft account on
+   25H2?** If it does, Setup asks for a local account and its password, and
+   Burnout holds no password. If it does not, `<LocalAccounts>` names the
+   account.
+
+The VM is made for this: aarch64, UEFI, no TPM, a blank NVMe disk, no network
+adapter, and a drive image from the example as a USB disk.
+
 **The exit test.** A drive made on each of the three hosts installs Windows 11
 on a machine with no TPM, with no Microsoft account step, from an ISO whose
 `install.wim` is over 4 GiB.
+
+Here that is the Arm64 ISO, whose `install.wim` is 6.59 GiB, on the Samsung
+drive, in the VM above. macOS writes the drive on this Mac. Fedora and Windows
+write it in their VMs, with the drive passed through. An emulated x64 machine
+cannot run a current Windows image, and [the spike](spike-layout.md) measured
+why.
 
 ---
 
