@@ -1,20 +1,28 @@
 [package]
 name = "burnout-layout"
-description = "The partition table and the file systems of a Windows installer drive."
+description = "The partition table and the file systems of a Windows installer drive. Burnout uses it, and its interface is not stable."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+keywords = ["fat32", "exfat", "mbr", "windows", "installer"]
+categories = ["filesystem"]
+# This example reads an ISO, and the reader is a dev-dependency by path alone,
+# which crates.io leaves out. The crate on crates.io leaves the example out too,
+# so that `cargo test` there builds.
+exclude = ["examples/windows_image.rs"]
 
 [dependencies]
-burnout-core = { path = "../burnout-core" }
+burnout-core.workspace = true
 # No chrono: every timestamp is the FAT epoch, which also makes an image the
 # same on each build.
 fatfs = { version = "0.3.6", default-features = false, features = ["std", "alloc"] }
 
 # The example that writes a Windows drive image reads the ISO with the
-# reader of Burnout. The crate itself reads no ISO.
+# reader of Burnout. The crate itself reads no ISO. A path alone, so that
+# crates.io takes this crate without the reader, which the example alone
+# needs.
 [dev-dependencies]
 burnout-iso = { path = "../burnout-iso" }

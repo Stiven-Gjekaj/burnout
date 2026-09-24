@@ -1,14 +1,16 @@
 [package]
 name = "burnout-iso"
-description = "Reads the image that a person gives: ISO 9660 with Joliet and Rock Ridge, and UDF."
+description = "Reads the image that a person gives: ISO 9660 with Joliet and Rock Ridge, and UDF. Burnout uses it, and its interface is not stable."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+keywords = ["iso9660", "udf", "joliet", "rock-ridge", "iso"]
+categories = ["filesystem", "parser-implementations"]
 
 # This crate takes no dependency beside the core of Burnout. The formats are
 # public, and each reader here is a few hundred lines.
 [dependencies]
-burnout-core = { path = "../burnout-core" }
+burnout-core.workspace = true

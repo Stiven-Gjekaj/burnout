@@ -1,12 +1,14 @@
 [package]
 name = "burnout-core"
-description = "The part of Burnout that no operating system changes."
+description = "The part of Burnout that no operating system changes. Burnout uses it, and its interface is not stable."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+keywords = ["usb", "block-device", "sector", "disk"]
+categories = ["filesystem", "hardware-support"]
 
 # This crate takes no dependency. Everything in it works on any target that
 # reads, writes and seeks, so a test gives it a file.

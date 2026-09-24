@@ -10,6 +10,13 @@ license = "MIT"
 repository = "https://github.com/Stiven-Gjekaj/burnout"
 authors = ["Stiven Gjekaj <stivenagostingjekaj@gmail.com>"]
 
+# The crates of this workspace, by path for a build and by version for
+# crates.io. A release sets each version here to the version above.
+[workspace.dependencies]
+burnout-core = { path = "crates/burnout-core", version = "0.0.0" }
+burnout-iso = { path = "crates/burnout-iso", version = "0.0.0" }
+burnout-layout = { path = "crates/burnout-layout", version = "0.0.0" }
+
 [profile.release]
 strip = true
 lto = true

@@ -7,11 +7,14 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+readme = "../../README.md"
+keywords = ["usb", "bootable", "iso", "windows", "installer"]
+categories = ["command-line-utilities", "filesystem"]
 
 [dependencies]
-burnout-core = { path = "../burnout-core" }
-burnout-iso = { path = "../burnout-iso" }
-burnout-layout = { path = "../burnout-layout" }
+burnout-core.workspace = true
+burnout-iso.workspace = true
+burnout-layout.workspace = true
 clap = { version = "4", features = ["derive"] }
 
 # umount2, geteuid and O_EXCL have no equivalent in the standard library.
