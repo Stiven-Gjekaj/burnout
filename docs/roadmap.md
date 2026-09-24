@@ -940,6 +940,8 @@ The work that turns a program that works into one somebody else can use.
 - The macOS and Windows download warning, and the way past it, in the README.
 - `install.esd` alongside `install.wim` everywhere.
 - The README stops saying that nothing is built.
+- winget and Scoop, with a manifest for each release. The decision on
+  distribution below says why they wait until here.
 
 **The exit test.** Somebody who has never seen the project writes a Windows
 drive and a Linux drive, on a host you did not choose, without asking you a
@@ -949,7 +951,7 @@ question.
 
 ## The decisions that were open
 
-All three are settled. The reasons are here so that a later reader can reopen
+All four are settled. The reasons are here so that a later reader can reopen
 one with an argument rather than a preference.
 
 ### A fixed disk can be a target, and it costs two steps
@@ -989,6 +991,38 @@ not plan around one.
 **The fallback stays on the shelf:** take an extracted folder instead of an
 ISO. It is honest and nearly free, and it makes the tool worse at the one
 thing it exists to do.
+
+### A crate and a tap now, and winget and Scoop at version 1
+
+From v0.3, Burnout reaches people in three ways.
+
+- **The binaries of the release.** Six binaries, `SHA256SUMS` and an
+  attestation, as [releasing.md](releasing.md) says.
+- **crates.io.** `cargo install burnout` builds on the machine, so nothing
+  carries the quarantine mark. The four crates go up in the order of their
+  dependencies: `burnout-core`, `burnout-iso`, `burnout-layout`, and then
+  `burnout`. The three libraries go up only because the binary needs them,
+  and their interface is not stable. A version on crates.io can be yanked,
+  and never deleted.
+- **A Homebrew tap of the project.** `brew install stiven-gjekaj/tap/burnout`
+  installs the binary of the release, for macOS on each chip and for Linux.
+  Homebrew downloads with curl, so the Gatekeeper warning never shows.
+  homebrew-core asks for a project that people already know, and this one is
+  not known yet.
+
+Two rules hold for all of them.
+
+- **Nothing goes out before a person publishes the draft.** The crates go up
+  from the job that the published release starts, and not from the tag.
+- **A person writes each commit.** No bot pushes to the tap. After the
+  release, a script writes the formula from the `SHA256SUMS` of the release,
+  and a person commits it.
+
+winget and Scoop wait for version 1. Both download with no Mark of the Web,
+so SmartScreen shows no warning, as Homebrew shows no Gatekeeper warning.
+They wait because Rufus already serves Windows, and the people who need
+Burnout most are on macOS and on Linux. homebrew-core, the AUR, COPR and Nix
+wait for users. The static binaries already run on any Linux.
 
 ### Version 1 buys no certificate
 
