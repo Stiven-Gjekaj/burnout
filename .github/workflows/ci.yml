@@ -197,6 +197,82 @@ jobs:
         shell: pwsh
         run: ./scripts/check-iso.ps1 sample target/release/examples/iso_tree.exe
 
+  # The exit test of Windows mode, against an image file. Each host makes a
+  # Windows ISO of the sample tree with its own tool, and windows_image writes
+  # the drive of Windows mode from it with the code of the product. The host
+  # then mounts the image with its own mechanism, checks both volumes with its
+  # own tools, and reads each file back against the manifests, autounattend.xml
+  # with them. The install image is random bytes, and the manifests hold the
+  # digests that went in.
+  windows-mode:
+    name: windows mode on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      # 64 MiB and 7 bytes, so the last cluster of the image is not full.
+      INSTALL_BYTES: "67108871"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: make the Windows tree and the writer
+        run: |
+          cargo run -q --release -p burnout-layout --example layout_image -- tree sample
+          head -c "$INSTALL_BYTES" /dev/urandom > sample/sources/install.wim
+          cargo build -q --release -p burnout-layout --example windows_image
+
+      - name: check on Linux at 512 and 4096-byte sectors
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v fsck.fat || ! command -v fsck.exfat || ! command -v xorriso; then
+            sudo apt-get update && sudo apt-get install -y dosfstools exfatprogs xorriso
+          fi
+          if ! sudo modprobe exfat; then
+            sudo apt-get update
+            sudo apt-get install -y "linux-modules-extra-$(uname -r)"
+            sudo modprobe exfat
+          fi
+          xorriso -as mkisofs -quiet -iso-level 3 -R -J -V SAMPLE -o windows.iso sample
+          for sector in 512 4096; do
+            target/release/examples/windows_image windows.iso windows.img --sector-size "$sector" \
+              --skip-hardware-checks --no-microsoft-account \
+              --boot-manifest boot.sha256 --install-manifest install.sha256
+            scripts/check-layout.sh windows.img boot.sha256 install.sha256 "$sector"
+            rm windows.img
+          done
+
+      - name: check on macOS
+        if: runner.os == 'macOS'
+        run: |
+          hdiutil makehybrid -quiet -o windows.iso sample -udf -udf-version 1.02 -iso -joliet \
+            -default-volume-name SAMPLE
+          target/release/examples/windows_image windows.iso windows.img \
+            --skip-hardware-checks --no-microsoft-account \
+            --boot-manifest boot.sha256 --install-manifest install.sha256
+          scripts/check-layout.sh windows.img boot.sha256 install.sha256 512
+
+      - name: make the VHD on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./scripts/make-iso.ps1 sample windows.iso 7 0x102
+          target/release/examples/windows_image.exe windows.iso windows.vhd --vhd `
+            --skip-hardware-checks --no-microsoft-account `
+            --boot-manifest boot.sha256 --install-manifest install.sha256
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: check on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/check-layout.ps1 windows.vhd boot.sha256 install.sha256
+
   # A shim that belongs to one host is compiled only on that host, so a break
   # in it waits for that job. `cargo check` does not link, so this catches the
   # break from Linux in about a minute.
