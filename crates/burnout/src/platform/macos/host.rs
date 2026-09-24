@@ -237,6 +237,10 @@ impl DriveAccess for MacosAccess {
         Ok(Box::new(MountRefusal::start(id.as_str())?))
     }
 
+    fn eject(&self, id: &DriveId) -> Result<()> {
+        eject_whole(id.as_str())
+    }
+
     fn open(&self, id: &DriveId) -> Result<MacosDisk> {
         let info = one_drive(id)?;
         // The raw node, and never /dev/diskN. The raw node skips the buffer
@@ -275,6 +279,16 @@ fn unmount_whole(bsd_name: &str) -> Result<()> {
         // SAFETY: the disk is live for the length of this call, and the
         // context is the Outcome that settle owns.
         unsafe { DADiskUnmount(disk, UNMOUNT_WHOLE, answered, context) }
+    })
+}
+
+/// Eject one whole disk, so that macOS lets go of it until it is connected
+/// again.
+fn eject_whole(bsd_name: &str) -> Result<()> {
+    settle(bsd_name, "DADiskEject", |disk, context| {
+        // SAFETY: the disk is live for the length of this call, and the
+        // context is the Outcome that settle owns.
+        unsafe { DADiskEject(disk, EJECT_DEFAULT, answered, context) }
     })
 }
 
@@ -541,6 +555,9 @@ const DKIOCSYNCHRONIZECACHE: libc::c_ulong = 0x2000_6416;
 /// `kDADiskUnmountOptionWhole`, which takes every volume of the disk.
 const UNMOUNT_WHOLE: u32 = 0x0000_0001;
 
+/// `kDADiskEjectOptionDefault`.
+const EJECT_DEFAULT: u32 = 0;
+
 /// `kDAReturnExclusiveAccess`, the reason that a refused mount gives.
 const EXCLUSIVE_ACCESS: i32 = 0xF8DA_0004_u32 as i32;
 
@@ -548,6 +565,7 @@ type DASessionRef = *const c_void;
 type DADiskRef = *const c_void;
 type DADissenterRef = *const c_void;
 type DADiskUnmountCallback = extern "C" fn(DADiskRef, DADissenterRef, *mut c_void);
+type DADiskEjectCallback = extern "C" fn(DADiskRef, DADissenterRef, *mut c_void);
 type DADiskMountApprovalCallback = extern "C" fn(DADiskRef, *mut c_void) -> DADissenterRef;
 
 // Disk Arbitration has no binding crate that this project would depend on, so
@@ -575,6 +593,12 @@ extern "C" {
         disk: DADiskRef,
         options: u32,
         callback: DADiskUnmountCallback,
+        context: *mut c_void,
+    );
+    fn DADiskEject(
+        disk: DADiskRef,
+        options: u32,
+        callback: DADiskEjectCallback,
         context: *mut c_void,
     );
     fn DADissenterGetStatus(dissenter: DADissenterRef) -> i32;

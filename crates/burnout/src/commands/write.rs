@@ -10,7 +10,7 @@
 //! ----------------------------------  check the privilege, start again here
 //! confirm the target with the person
 //! list again, and refuse a drive that changed
-//! unmount, write, flush, unmount again, verify
+//! unmount, write, flush, unmount again, verify, eject
 //! ```
 //!
 //! The privilege comes after the image check, so nobody gives a password and
@@ -241,6 +241,7 @@ fn write_raw<A: DriveAccess>(
         let mut target = open_again(access, drive, OPEN_TRIES, OPEN_PAUSE)?;
         verify_image(image, &mut target, bar)?
     };
+    let ejected = access.eject(&drive.id);
 
     println!();
     println!(
@@ -254,6 +255,7 @@ fn write_raw<A: DriveAccess>(
     );
     println!("SHA-256 {}", proof.digest);
     offline_note();
+    eject_note(&ejected);
     Ok(0)
 }
 
@@ -283,6 +285,7 @@ fn write_windows_mode<A: DriveAccess>(
         let mut target = open_again(access, drive, OPEN_TRIES, OPEN_PAUSE)?;
         verify_windows(&mut target, &plan, &written, bar)?;
     }
+    let ejected = access.eject(&drive.id);
 
     let (files, bytes) = written.files();
     println!();
@@ -298,7 +301,28 @@ fn write_windows_mode<A: DriveAccess>(
          with, and the partition table against the one that Burnout wrote."
     );
     offline_note();
+    eject_note(&ejected);
     Ok(0)
+}
+
+/// Say that the host let go of the drive, or why it did not.
+///
+/// The eject comes after the check, so a failed eject leaves a drive that is
+/// written and checked. That gives a line in the report, and not an error.
+fn eject_note(ejected: &Result<()>) {
+    match ejected {
+        Ok(()) => {
+            #[cfg(target_os = "macos")]
+            println!(
+                "macOS ejected the drive, so nothing mounts it or writes to it until you connect \
+                 it again."
+            );
+        }
+        Err(e) => println!(
+            "The eject failed: {e}. The host can mount the drive and write to it, so eject it \
+             before you remove it."
+        ),
+    }
 }
 
 /// Open the drive again for the check.

@@ -71,6 +71,16 @@ pub trait DriveAccess {
         Ok(Box::new(()))
     }
 
+    /// Take the drive away from the host when the write and its check end.
+    ///
+    /// macOS mounts a drive as soon as nothing holds it, and Spotlight then
+    /// writes its index onto the drive. An eject stops that until the drive
+    /// is connected again. A host that does not do this keeps the default,
+    /// which does nothing. Windows already holds the drive offline.
+    fn eject(&self, _id: &DriveId) -> Result<()> {
+        Ok(())
+    }
+
     /// Open the drive for the write.
     ///
     /// The drop of the handle closes the device. Call
