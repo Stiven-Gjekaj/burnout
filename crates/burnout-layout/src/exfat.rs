@@ -16,5 +16,5 @@ mod upcase;
 mod verify;
 mod write;
 
-pub use verify::verify_exfat;
-pub use write::{write_exfat, ExfatOptions};
+pub use verify::{verify_exfat, verify_exfat_with};
+pub use write::{write_exfat, write_exfat_with, ExfatOptions};

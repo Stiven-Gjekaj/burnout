@@ -26,10 +26,10 @@ mod testing;
 mod verify;
 
 pub use burnout_core::{DirSource, Entry, FileSource, MemorySource, TreePath};
-pub use copy::{copy_to_fat32, MAX_FAT32_FILE_BYTES};
-pub use exfat::{verify_exfat, write_exfat, ExfatOptions};
+pub use copy::{copy_to_fat32, copy_to_fat32_with, MAX_FAT32_FILE_BYTES};
+pub use exfat::{verify_exfat, verify_exfat_with, write_exfat, write_exfat_with, ExfatOptions};
 pub use fat32::{format_fat32, Fat32Options};
 pub use manifest::{CopiedFile, Manifest};
 pub use mbr::{mbr_bytes, write_table, TYPE_EXFAT, TYPE_FAT32};
 pub use plan::{plan, Extent, Layout, ALIGN, MBR_SECTORS};
-pub use verify::verify_fat32;
+pub use verify::{verify_fat32, verify_fat32_with};

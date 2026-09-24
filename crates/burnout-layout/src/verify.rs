@@ -23,6 +23,16 @@ const CHUNK_BYTES: usize = 1024 * 1024;
 /// file with its size and its digest, and nothing else. The first difference
 /// is the error.
 pub fn verify_fat32<T: BlockTarget>(volume: T, manifest: &Manifest) -> Result<()> {
+    verify_fat32_with(volume, manifest, &mut |_| {})
+}
+
+/// [`verify_fat32`], and `tally` hears the bytes of each piece of a file as
+/// it is read back.
+pub fn verify_fat32_with<T: BlockTarget>(
+    volume: T,
+    manifest: &Manifest,
+    tally: &mut dyn FnMut(u64),
+) -> Result<()> {
     with_volume(volume, |fs| {
         let root = fs.root_dir();
         // What the volume holds, from a walk of its own directories.
@@ -50,7 +60,7 @@ pub fn verify_fat32<T: BlockTarget>(volume: T, manifest: &Manifest) -> Result<()
                     ),
                 ));
             }
-            let digest = digest_of(&root, path, &mut chunk)?;
+            let digest = digest_of(&root, path, &mut chunk, tally)?;
             if digest != copied.digest {
                 return Err(differs(
                     path,
@@ -100,6 +110,7 @@ fn digest_of<IO: ReadWriteSeek>(
     root: &Dir<'_, IO>,
     path: &TreePath,
     chunk: &mut [u8],
+    tally: &mut dyn FnMut(u64),
 ) -> Result<Digest> {
     let unreadable = |e: io::Error| differs(path, &format!("it cannot be read back: {e}"));
     let mut file = root.open_file(path.as_str()).map_err(unreadable)?;
@@ -107,7 +118,10 @@ fn digest_of<IO: ReadWriteSeek>(
     loop {
         match file.read(chunk) {
             Ok(0) => return Ok(hash.finish()),
-            Ok(n) => hash.update(&chunk[..n]),
+            Ok(n) => {
+                hash.update(&chunk[..n]);
+                tally(n as u64);
+            }
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
             Err(e) => return Err(unreadable(e)),
         }

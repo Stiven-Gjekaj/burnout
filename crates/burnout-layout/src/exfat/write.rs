@@ -52,7 +52,22 @@ pub struct ExfatOptions<'a> {
 ///
 /// The digest of each file is of the bytes that came from the source, taken
 /// on their way onto the volume.
-pub fn write_exfat<T, S>(mut volume: T, source: &S, options: &ExfatOptions) -> Result<Manifest>
+pub fn write_exfat<T, S>(volume: T, source: &S, options: &ExfatOptions) -> Result<Manifest>
+where
+    T: BlockTarget,
+    S: FileSource + ?Sized,
+{
+    write_exfat_with(volume, source, options, &mut |_| {})
+}
+
+/// [`write_exfat`], and `tally` hears the bytes of each piece of a file once
+/// the piece is on the volume.
+pub fn write_exfat_with<T, S>(
+    mut volume: T,
+    source: &S,
+    options: &ExfatOptions,
+    tally: &mut dyn FnMut(u64),
+) -> Result<Manifest>
 where
     T: BlockTarget,
     S: FileSource + ?Sized,
@@ -90,7 +105,7 @@ where
         placement.root,
         &placement.root_directory(),
     )?;
-    let manifest = write_items(&mut volume, &placement, source)?;
+    let manifest = write_items(&mut volume, &placement, source, tally)?;
     volume.flush()?;
 
     let region = boot_region(
@@ -176,7 +191,12 @@ fn write_run<T: BlockTarget>(
 
 /// Write each directory and each file of the tree into its run, in the
 /// order of the tree.
-fn write_items<T, S>(volume: &mut T, placement: &Placement, source: &S) -> Result<Manifest>
+fn write_items<T, S>(
+    volume: &mut T,
+    placement: &Placement,
+    source: &S,
+    tally: &mut dyn FnMut(u64),
+) -> Result<Manifest>
 where
     T: BlockTarget,
     S: FileSource + ?Sized,
@@ -207,12 +227,15 @@ where
                         // piece can end inside a cluster, and the rest of that
                         // cluster goes to zero.
                         if piece.len() == CHUNK_BYTES {
-                            return volume.write_all(piece);
+                            volume.write_all(piece)?;
+                        } else {
+                            tail.clear();
+                            tail.extend_from_slice(piece);
+                            tail.resize(piece.len().div_ceil(cluster) * cluster, 0);
+                            volume.write_all(&tail)?;
                         }
-                        tail.clear();
-                        tail.extend_from_slice(piece);
-                        tail.resize(piece.len().div_ceil(cluster) * cluster, 0);
-                        volume.write_all(&tail)
+                        tally(piece.len() as u64);
+                        Ok(())
                     },
                 )?;
                 manifest.files.push(CopiedFile {
@@ -289,6 +312,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_tally_of_the_write_and_of_the_check_is_the_bytes_of_the_files() {
+        let tree = windows_like();
+        let files: u64 = tree
+            .entries()
+            .unwrap()
+            .iter()
+            .map(|e| match e {
+                burnout_core::Entry::File(_, bytes) => *bytes,
+                burnout_core::Entry::Dir(_) => 0,
+            })
+            .sum();
+        let mut d = Drive::new(4096, 64 * MIB);
+        let (mut written, mut checked) = (0, 0);
+        let manifest =
+            write_exfat_with(d.partition(), &tree, &options(), &mut |n| written += n).unwrap();
+        crate::verify_exfat_with(d.partition(), &manifest, &mut |n| checked += n).unwrap();
+        assert_eq!((written, checked), (files, files));
     }
 
     #[test]

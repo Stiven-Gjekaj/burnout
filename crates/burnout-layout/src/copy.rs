@@ -33,6 +33,20 @@ where
     T: BlockTarget,
     S: FileSource + ?Sized,
 {
+    copy_to_fat32_with(volume, source, &mut |_| {})
+}
+
+/// [`copy_to_fat32`], and `tally` hears the bytes of each piece of a file
+/// once the piece is on the volume.
+pub fn copy_to_fat32_with<T, S>(
+    volume: T,
+    source: &S,
+    tally: &mut dyn FnMut(u64),
+) -> Result<Manifest>
+where
+    T: BlockTarget,
+    S: FileSource + ?Sized,
+{
     let entries = source.entries()?;
     for entry in &entries {
         if let Entry::File(path, bytes) = entry {
@@ -48,14 +62,19 @@ where
     }
 
     over_sectors(volume, |io| {
-        let manifest = mounted(io, |fs| copy_entries(fs, source, &entries))?;
+        let manifest = mounted(io, |fs| copy_entries(fs, source, &entries, tally))?;
         repair_dot_entries(io)?;
         Ok(manifest)
     })
 }
 
 /// Copy the entries onto a mounted volume, in order.
-fn copy_entries<T, S>(fs: &Volume<'_, T>, source: &S, entries: &[Entry]) -> Result<Manifest>
+fn copy_entries<T, S>(
+    fs: &Volume<'_, T>,
+    source: &S,
+    entries: &[Entry],
+    tally: &mut dyn FnMut(u64),
+) -> Result<Manifest>
 where
     T: BlockTarget,
     S: FileSource + ?Sized,
@@ -82,7 +101,7 @@ where
                 manifest.dirs.push(path.clone());
             }
             Entry::File(path, bytes) => {
-                let digest = copy_file(dir, source, path, *bytes, &mut chunk)?;
+                let digest = copy_file(dir, source, path, *bytes, &mut chunk, tally)?;
                 manifest.files.push(CopiedFile {
                     path: path.clone(),
                     bytes: *bytes,
@@ -125,6 +144,7 @@ fn copy_file<IO, S>(
     path: &TreePath,
     bytes: u64,
     chunk: &mut [u8],
+    tally: &mut dyn FnMut(u64),
 ) -> Result<Digest>
 where
     IO: ReadWriteSeek,
@@ -135,7 +155,9 @@ where
         .create_file(path.name())
         .map_err(|e| cannot_copy(path, e))?;
     let digest = stream_file(&mut *reader, path, bytes, chunk, |piece| {
-        file.write_all(piece)
+        file.write_all(piece)?;
+        tally(piece.len() as u64);
+        Ok(())
     })?;
     file.flush().map_err(|e| cannot_copy(path, e))?;
     Ok(digest)
@@ -185,6 +207,25 @@ mod tests {
                 assert_eq!(read_back(d.partition(), copied.path.as_str()), want);
             }
         }
+    }
+
+    #[test]
+    fn the_tally_of_the_copy_and_of_the_check_is_the_bytes_of_the_files() {
+        let tree = windows_like();
+        let files: u64 = tree
+            .entries()
+            .unwrap()
+            .iter()
+            .map(|e| match e {
+                Entry::File(_, bytes) => *bytes,
+                Entry::Dir(_) => 0,
+            })
+            .sum();
+        let mut d = Drive::formatted(4096);
+        let (mut copied, mut checked) = (0, 0);
+        let manifest = copy_to_fat32_with(d.partition(), &tree, &mut |n| copied += n).unwrap();
+        crate::verify_fat32_with(d.partition(), &manifest, &mut |n| checked += n).unwrap();
+        assert_eq!((copied, checked), (files, files));
     }
 
     #[test]

@@ -22,6 +22,16 @@ use burnout_core::TreePath;
 /// each file with its size and its digest, and nothing else. The first
 /// difference is the error.
 pub fn verify_exfat<T: BlockTarget>(volume: T, manifest: &Manifest) -> Result<()> {
+    verify_exfat_with(volume, manifest, &mut |_| {})
+}
+
+/// [`verify_exfat`], and `tally` hears the bytes of each piece of a file as
+/// it is read back.
+pub fn verify_exfat_with<T: BlockTarget>(
+    volume: T,
+    manifest: &Manifest,
+    tally: &mut dyn FnMut(u64),
+) -> Result<()> {
     let mut volume = Volume::open(volume)?;
     let nodes = volume.walk()?;
     volume.check_allocation()?;
@@ -56,7 +66,10 @@ pub fn verify_exfat<T: BlockTarget>(volume: T, manifest: &Manifest) -> Result<()
             ));
         }
         let mut hash = Sha256::new();
-        volume.read_file(&node, &mut |piece| hash.update(piece))?;
+        volume.read_file(&node, &mut |piece| {
+            hash.update(piece);
+            tally(piece.len() as u64);
+        })?;
         let digest = hash.finish();
         if digest != copied.digest {
             return Err(differs(
