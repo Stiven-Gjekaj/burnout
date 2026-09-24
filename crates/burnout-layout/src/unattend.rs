@@ -63,7 +63,8 @@ pub struct Unattend {
     /// Turn off the checks of Windows 11 for TPM, Secure Boot, RAM, CPU and
     /// storage.
     pub skip_hardware_checks: bool,
-    /// Take away the step that asks for a Microsoft account.
+    /// Take away the step that asks for a Microsoft account, and the network
+    /// page before it, so Setup asks for a local account.
     pub no_microsoft_account: bool,
 }
 
@@ -75,6 +76,13 @@ const CHECKS: [&str; 5] = [
     "BypassCPUCheck",
     "BypassStorageCheck",
 ];
+
+/// The key that lets the first-run setup go on with no network. Without it,
+/// Windows 11 25H2 stops at "Let's connect you to a network" on a machine
+/// with no network, whatever `HideOnlineAccountScreens` says. Measured on
+/// build 26200.8037.
+const BYPASS_NRO: &str =
+    "reg add HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE /v BypassNRO /t REG_DWORD /d 1 /f";
 
 /// The letters that the search tries. `W` is the letter that it gives, and
 /// `X` is the RAM disk of Windows PE.
@@ -146,6 +154,21 @@ pub fn unattend_xml(u: &Unattend) -> String {
     x.push_str("          </InstallFrom>\n        </OSImage>\n      </ImageInstall>\n");
     x.push_str("    </component>\n  </settings>\n");
     if u.no_microsoft_account {
+        // The key goes in before the first-run setup starts, in the pass
+        // that sets up the system that Setup installed.
+        x.push_str("  <settings pass=\"specialize\">\n");
+        let _ = writeln!(
+            x,
+            "    {}",
+            component("Microsoft-Windows-Deployment", u.architecture)
+        );
+        x.push_str("      <RunSynchronous>\n");
+        x.push_str("        <RunSynchronousCommand wcm:action=\"add\">\n");
+        x.push_str("          <Order>1</Order>\n");
+        let _ = writeln!(x, "          <Path>{}</Path>", escape(BYPASS_NRO));
+        x.push_str("        </RunSynchronousCommand>\n");
+        x.push_str("      </RunSynchronous>\n");
+        x.push_str("    </component>\n  </settings>\n");
         x.push_str("  <settings pass=\"oobeSystem\">\n");
         let _ = writeln!(
             x,
@@ -281,12 +304,24 @@ mod tests {
     }
 
     #[test]
-    fn no_microsoft_account_hides_the_online_account_screens() {
+    fn no_microsoft_account_lets_the_first_run_go_on_with_no_network() {
         let xml = unattend_xml(&Unattend {
             no_microsoft_account: true,
             ..plain()
         });
-        assert!(xml.contains("<settings pass=\"oobeSystem\">"));
+        assert!(xml.contains("<component name=\"Microsoft-Windows-Deployment\""));
+        assert!(xml.contains(
+            "<Path>reg add HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE /v BypassNRO \
+             /t REG_DWORD /d 1 /f</Path>"
+        ));
+        let passes: Vec<&str> = xml
+            .match_indices("<settings pass=\"")
+            .map(|(at, found)| {
+                let rest = &xml[at + found.len()..];
+                &rest[..rest.find('"').unwrap()]
+            })
+            .collect();
+        assert_eq!(passes, ["windowsPE", "specialize", "oobeSystem"]);
         assert!(xml.contains("<HideOnlineAccountScreens>true</HideOnlineAccountScreens>"));
         assert!(
             !xml.contains("LocalAccount"),
@@ -308,8 +343,8 @@ mod tests {
                 ..plain()
             });
             let wanted = format!("processorArchitecture=\"{name}\"");
-            assert_eq!(xml.matches("<component ").count(), 2);
-            assert_eq!(xml.matches(&wanted).count(), 2, "{name}");
+            assert_eq!(xml.matches("<component ").count(), 3);
+            assert_eq!(xml.matches(&wanted).count(), 3, "{name}");
         }
     }
 
@@ -322,6 +357,6 @@ mod tests {
             ..plain()
         }));
         assert_eq!(names[0], "unattend");
-        assert_eq!(names.iter().filter(|n| *n == "settings").count(), 2);
+        assert_eq!(names.iter().filter(|n| *n == "settings").count(), 3);
     }
 }
