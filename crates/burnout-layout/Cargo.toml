@@ -13,3 +13,8 @@ burnout-core = { path = "../burnout-core" }
 # No chrono: every timestamp is the FAT epoch, which also makes an image the
 # same on each build.
 fatfs = { version = "0.3.6", default-features = false, features = ["std", "alloc"] }
+
+# The example that writes a Windows drive image reads the ISO with the
+# reader of Burnout. The crate itself reads no ISO.
+[dev-dependencies]
+burnout-iso = { path = "../burnout-iso" }
