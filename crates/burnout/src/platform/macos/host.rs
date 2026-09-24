@@ -270,11 +270,27 @@ fn one_drive(id: &DriveId) -> Result<DriveInfo> {
 ///
 /// Disk Arbitration and not `diskutil`. The framework is the interface that
 /// `diskutil` itself calls, and a program is a tool of the host.
-///
-/// The call is asynchronous: it hands the request to a run loop and answers
-/// through a callback. So this schedules the session, runs the loop until the
-/// callback arrives, and reads what the callback recorded.
 fn unmount_whole(bsd_name: &str) -> Result<()> {
+    settle(bsd_name, "DADiskUnmount", |disk, context| {
+        // SAFETY: the disk is live for the length of this call, and the
+        // context is the Outcome that settle owns.
+        unsafe { DADiskUnmount(disk, UNMOUNT_WHOLE, answered, context) }
+    })
+}
+
+/// Send one request about a whole disk to Disk Arbitration, and wait for the
+/// answer.
+///
+/// A request is asynchronous: it goes to a run loop and answers through a
+/// callback. So this schedules the session, lets `request` send the request
+/// with [`answered`] and the context it gets, runs the loop until the callback
+/// arrives, and reads what the callback recorded. `source` names the request
+/// in an error.
+fn settle(
+    bsd_name: &str,
+    source: &str,
+    request: impl FnOnce(DADiskRef, *mut c_void),
+) -> Result<()> {
     let name = CString::new(bsd_name).map_err(|_| Error::Host {
         source: bsd_name.to_string(),
         detail: "the name holds a zero byte".to_string(),
@@ -306,12 +322,7 @@ fn unmount_whole(bsd_name: &str) -> Result<()> {
             answered: false,
             status: 0,
         };
-        DADiskUnmount(
-            disk,
-            UNMOUNT_WHOLE,
-            answered,
-            &mut outcome as *mut Outcome as *mut c_void,
-        );
+        request(disk, &mut outcome as *mut Outcome as *mut c_void);
 
         // A deadline, because a file system that will not let go would
         // otherwise hold this here for ever with nothing on the screen.
@@ -326,13 +337,13 @@ fn unmount_whole(bsd_name: &str) -> Result<()> {
 
         if !outcome.answered {
             return Err(Error::Host {
-                source: "DADiskUnmount".to_string(),
+                source: source.to_string(),
                 detail: format!("{bsd_name} did not answer in thirty seconds"),
             });
         }
         if outcome.status != 0 {
             return Err(Error::Host {
-                source: "DADiskUnmount".to_string(),
+                source: source.to_string(),
                 detail: format!("{bsd_name} refused with status {:#010x}", outcome.status),
             });
         }
@@ -340,19 +351,19 @@ fn unmount_whole(bsd_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// What the callback of the unmount recorded.
+/// What the callback of a request recorded.
 struct Outcome {
     answered: bool,
     status: i32,
 }
 
-/// The callback that Disk Arbitration calls when the unmount is settled.
+/// The callback that Disk Arbitration calls when a request is settled.
 ///
-/// A null dissenter means the unmount happened. Anything else carries the
+/// A null dissenter means the request happened. Anything else carries the
 /// reason it did not.
 extern "C" fn answered(_disk: DADiskRef, dissenter: DADissenterRef, context: *mut c_void) {
-    // SAFETY: the context is the Outcome that unmount_whole owns, and that
-    // Outcome outlives the run loop that calls this.
+    // SAFETY: the context is the Outcome that settle owns, and that Outcome
+    // outlives the run loop that calls this.
     let outcome = unsafe { &mut *(context as *mut Outcome) };
     outcome.answered = true;
     outcome.status = if dissenter.is_null() {
