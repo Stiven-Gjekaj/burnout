@@ -15,6 +15,7 @@
 
 mod copy;
 mod dot_entries;
+mod drive;
 mod exfat;
 mod fat32;
 mod manifest;
@@ -29,6 +30,7 @@ mod windows;
 
 pub use burnout_core::{DirSource, Entry, FileSource, MemorySource, TreePath};
 pub use copy::{copy_to_fat32, copy_to_fat32_with, MAX_FAT32_FILE_BYTES};
+pub use drive::{verify_windows, write_windows, Serials, WindowsDrive, Written};
 pub use exfat::{
     check_exfat_fits, verify_exfat, verify_exfat_with, write_exfat, write_exfat_with, ExfatOptions,
 };
