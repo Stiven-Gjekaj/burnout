@@ -213,8 +213,13 @@ want:
 - **Skip the hardware checks.** A `RunSynchronous` command in the `windowsPE`
   pass adds the `LabConfig` keys for the TPM, Secure Boot, RAM, storage and
   CPU checks.
-- **Skip the Microsoft account.** A local account in `<UserAccounts>`.
-  WinDiskWriterX lists this as a thing it does not do.
+- **Skip the Microsoft account.** `HideOnlineAccountScreens` in the
+  `oobeSystem` pass, and a command in the `specialize` pass that sets the
+  `BypassNRO` key. Setup then asks for a local account and its password, so
+  Burnout holds no password. On 25H2 with no network, the first alone stops at
+  the network page, and [the roadmap](roadmap.md) records that measurement.
+  A local account in `<UserAccounts>` lost, because it puts a password into a
+  file on the drive. WinDiskWriterX lists this as a thing it does not do.
 - **Name the install source.** `<ImageInstall><OSImage><InstallFrom>` points
   Setup at the image on partition 2. **This one is not optional.**
 
