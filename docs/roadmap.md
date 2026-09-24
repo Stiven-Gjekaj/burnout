@@ -1012,8 +1012,10 @@ From v0.3, Burnout reaches people in three ways.
 
 Two rules hold for all of them.
 
-- **Nothing goes out before a person publishes the draft.** The crates go up
-  from the job that the published release starts, and not from the tag.
+- **Nothing goes out before a person publishes the draft.** After that, a
+  person publishes the crates from a clean checkout of the tag, on a machine
+  where `cargo login` holds the token. No token of crates.io is stored on
+  GitHub.
 - **A person writes each commit.** No bot pushes to the tap. After the
   release, a script writes the formula from the `SHA256SUMS` of the release,
   and a person commits it.
