@@ -34,7 +34,7 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 > `write` reads the image first. It copies a hybrid image to a drive, flushes
 > it, reads it back and compares a hash. It lays a Windows ISO out for Windows,
 > and reads each file back against its own hash.
-> There is no release, so build it from the source.
+> Version 0.3.0 is out, and [Install](#install) says how to get it.
 > [docs/roadmap.md](docs/roadmap.md) holds the measurements behind both
 > claims.
 > [docs/roadmap.md](docs/roadmap.md) says what comes next, and
@@ -87,6 +87,29 @@ image decides the rest.
 </td>
 </tr>
 </table>
+
+---
+
+## Install
+
+On macOS or on Linux, with Homebrew:
+
+```bash
+brew install stiven-gjekaj/tap/burnout
+```
+
+With Cargo, on any of the three hosts:
+
+```bash
+cargo install burnout
+```
+
+Or download the binary for your host from the
+[latest release](https://github.com/Stiven-Gjekaj/burnout/releases/latest).
+[docs/releasing.md](docs/releasing.md) says how to check it against
+`SHA256SUMS` and against its build provenance, and how to pass the warning
+that a download in a browser brings. Homebrew and Cargo bring no such
+warning.
 
 ---
 
