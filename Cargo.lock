@@ -64,6 +64,7 @@ version = "0.0.0"
 dependencies = [
  "burnout-core",
  "burnout-iso",
+ "burnout-layout",
  "clap",
  "core-foundation",
  "core-foundation-sys",

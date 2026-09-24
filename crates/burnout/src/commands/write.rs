@@ -20,38 +20,48 @@
 use std::fs::File;
 use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use burnout_core::{
     check_fits, check_same_drive, check_target, describe, force_phrase, has_boot_table,
-    in_list_order, phrase_matches, verify_image, write_image, DriveAccess, DriveInfo, Error, Force,
-    Progress, ProgressEvent, Result, Stage, BOOT_SECTOR_BYTES,
+    in_list_order, phrase_matches, verify_image, write_image, BlockTarget, DriveAccess, DriveInfo,
+    Error, Force, Progress, ProgressEvent, Result, Stage, BOOT_SECTOR_BYTES,
 };
-use burnout_iso::{mode_of_file, Mode};
+use burnout_iso::{mode_of_file, IsoSource, Mode};
+use burnout_layout::{
+    unattend_xml, verify_windows, write_windows, Layout, Serials, Unattend, WindowsDrive,
+    WindowsTree, UNATTEND_FILE,
+};
 
 use crate::cli::{ModeArg, WriteArgs};
 use crate::elevate::{self, Plan, State};
-use crate::format::size_column;
+use crate::format::{human_size, size_column};
 use crate::platform;
 use crate::report::Bar;
 
+/// What the write puts onto the drive.
+enum Job {
+    /// The image, byte for byte.
+    Raw {
+        image: File,
+        bytes: u64,
+        boot_table: bool,
+    },
+    /// The layout of Windows mode, with the files of the ISO on it.
+    Windows(Box<WindowsJob>),
+}
+
+/// A Windows ISO, read and split onto the two partitions.
+struct WindowsJob {
+    source: IsoSource<File>,
+    tree: WindowsTree,
+    unattend: String,
+    iso_bytes: u64,
+}
+
 /// Write an image to a drive.
 pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
-    if args.mode != Some(ModeArg::Raw) {
-        check_mode(mode_of_file(&args.image), &args.image)?;
-    }
-    let mut image = File::open(&args.image).map_err(|e| Error::Image {
-        path: args.image.display().to_string(),
-        detail: e.to_string(),
-    })?;
-    let image_bytes = image.seek(SeekFrom::End(0))?;
-    image.seek(SeekFrom::Start(0))?;
-    if image_bytes == 0 {
-        return Err(Error::Image {
-            path: args.image.display().to_string(),
-            detail: "the file holds no bytes".to_string(),
-        });
-    }
-    let boot_table = first_sector_has_boot_table(&mut image)?;
+    let job = prepare(args)?;
 
     let force = if args.force { Force::Yes } else { Force::No };
     let (drives, chosen) = find_target(args)?;
@@ -60,7 +70,13 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
     // through a loop device, and nothing in between names the drive.
     let system_disk_known = drives.iter().any(|d| d.system);
     check_target(&chosen, force)?;
-    check_fits(image_bytes, chosen.size_bytes)?;
+    let layout = match &job {
+        Job::Raw { bytes, .. } => {
+            check_fits(*bytes, chosen.size_bytes)?;
+            None
+        }
+        Job::Windows(w) => Some(w.tree.plan(chosen.size_bytes, chosen.logical_sector_size)?),
+    };
 
     let state = State {
         privileged: elevate::can_write(&chosen.node),
@@ -82,9 +98,9 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
     if !confirm(
         &chosen,
         force,
-        image_bytes,
         args,
-        boot_table,
+        &job,
+        layout.as_ref(),
         system_disk_known,
     )? {
         return Err(Error::NotConfirmed);
@@ -110,55 +126,296 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
         bytes_done: 0,
     });
 
+    match (job, layout) {
+        (Job::Raw { mut image, .. }, _) => write_raw(&access, &again, &mut image, &mut bar),
+        (Job::Windows(w), Some(layout)) => {
+            write_windows_mode(&access, &again, &w, layout, &mut bar)
+        }
+        (Job::Windows(_), None) => unreachable!("Windows mode plans a layout"),
+    }
+}
+
+/// Read the image and choose the mode, before anything needs privilege.
+fn prepare(args: &WriteArgs) -> Result<Job> {
+    let mode = match args.mode {
+        Some(ModeArg::Raw) => Mode::Raw,
+        Some(ModeArg::Windows) => Mode::Windows,
+        None => decide(mode_of_file(&args.image), &args.image)?,
+    };
+    if mode == Mode::Windows {
+        return Ok(Job::Windows(Box::new(windows_job(args)?)));
+    }
+    refuse_windows_options(args)?;
+
+    let mut image = File::open(&args.image).map_err(|e| Error::Image {
+        path: args.image.display().to_string(),
+        detail: e.to_string(),
+    })?;
+    let bytes = image.seek(SeekFrom::End(0))?;
+    image.seek(SeekFrom::Start(0))?;
+    if bytes == 0 {
+        return Err(Error::Image {
+            path: args.image.display().to_string(),
+            detail: "the file holds no bytes".to_string(),
+        });
+    }
+    let boot_table = first_sector_has_boot_table(&mut image)?;
+    Ok(Job::Raw {
+        image,
+        bytes,
+        boot_table,
+    })
+}
+
+/// Refuse an option of Windows mode for an image that goes in raw mode.
+fn refuse_windows_options(args: &WriteArgs) -> Result<()> {
+    let options = [
+        (args.skip_hardware_checks, "--skip-hardware-checks"),
+        (args.no_microsoft_account, "--no-microsoft-account"),
+    ];
+    match options.iter().find(|(on, _)| *on) {
+        Some((_, option)) => Err(Error::WindowsOption { option }),
+        None => Ok(()),
+    }
+}
+
+/// Read the tree of a Windows ISO, split it, and write its
+/// `autounattend.xml`.
+fn windows_job(args: &WriteArgs) -> Result<WindowsJob> {
+    let name = args.image.display().to_string();
+    let unreadable = |detail: String| Error::Image {
+        path: name.clone(),
+        detail,
+    };
+    let file = File::open(&args.image).map_err(|e| unreadable(e.to_string()))?;
+    let iso_bytes = file.metadata()?.len();
+    let source = IsoSource::new(file, &name)?.ok_or_else(|| {
+        unreadable(
+            "it holds neither UDF nor ISO 9660, so it holds no tree for Windows mode".to_string(),
+        )
+    })?;
+    let tree = WindowsTree::new(&source).map_err(|e| match e {
+        Error::Source { path, detail } => unreadable(format!("{path}: {detail}")),
+        other => other,
+    })?;
+    let unattend = unattend_xml(&Unattend {
+        architecture: tree.architecture,
+        image: tree.image,
+        edition: None,
+        skip_hardware_checks: args.skip_hardware_checks,
+        no_microsoft_account: args.no_microsoft_account,
+    });
+    Ok(WindowsJob {
+        source,
+        tree,
+        unattend,
+        iso_bytes,
+    })
+}
+
+/// Copy the image byte for byte, and read the drive back against it.
+fn write_raw<A: DriveAccess>(
+    access: &A,
+    drive: &DriveInfo,
+    image: &mut File,
+    bar: &mut Bar,
+) -> Result<i32> {
     let report = {
-        let mut target = access.open(&again.id)?;
-        write_image(&mut image, &mut target, &mut bar)?
+        let mut target = access.open(&drive.id)?;
+        write_image(image, &mut target, bar)?
     };
 
     // Open the drive again for the check. A read through the handle that did
     // the writing can come out of the cache of the operating system, and then
     // it proves that the cache holds the image and not that the drive does.
     let proof = {
-        let mut target = access.open(&again.id)?;
-        verify_image(&mut image, &mut target, &mut bar)?
+        let mut target = access.open(&drive.id)?;
+        verify_image(image, &mut target, bar)?
     };
 
     println!();
     println!(
         "Wrote {} to {}.",
         size_column(report.image_bytes),
-        again.name
+        drive.name
     );
     println!(
         "Checked {} of the drive against the image, byte for byte.",
         size_column(proof.bytes)
     );
     println!("SHA-256 {}", proof.digest);
-    // The Windows layer took the drive offline for the write, and a person
-    // who looks for it in Explorer needs to know why it is not there.
-    #[cfg(windows)]
-    println!("Windows now holds the drive offline and read-only, so it changes nothing on it.");
+    offline_note();
     Ok(0)
 }
 
-/// Go on only with an image that asks for raw mode.
+/// Lay out the drive for Windows, copy the files of the ISO onto it, and
+/// read each file back.
+fn write_windows_mode<A: DriveAccess>(
+    access: &A,
+    drive: &DriveInfo,
+    w: &WindowsJob,
+    layout: Layout,
+    bar: &mut Bar,
+) -> Result<i32> {
+    let plan = WindowsDrive {
+        layout,
+        label: w.source.label(),
+        serials: serials(),
+        unattend: w.unattend.as_bytes(),
+    };
+    let written = {
+        let mut target = access.open(&drive.id)?;
+        same_geometry(&target, &layout, drive)?;
+        write_windows(&mut target, &w.tree, &w.source, &plan, bar)?
+    };
+    // Open the drive again for the check, as raw mode does: a read through
+    // the handle that wrote can come out of the cache of the host.
+    {
+        let mut target = access.open(&drive.id)?;
+        verify_windows(&mut target, &plan, &written, bar)?;
+    }
+
+    let (files, bytes) = written.files();
+    println!();
+    println!(
+        "Wrote {files} files of {} to {}: {} onto partition 1, FAT32, and {} onto partition 2, exFAT.",
+        size_column(bytes),
+        drive.name,
+        written.boot.files.len(),
+        written.install.files.len()
+    );
+    println!(
+        "Checked each file through a new mount of its volume against the SHA-256 that it went in \
+         with, and the partition table against the one that Burnout wrote."
+    );
+    offline_note();
+    Ok(0)
+}
+
+/// The Windows layer took the drive offline for the write, and a person who
+/// looks for it in Explorer needs to know why it is not there.
+fn offline_note() {
+    #[cfg(windows)]
+    println!("Windows now holds the drive offline and read-only, so it changes nothing on it.");
+}
+
+/// Refuse a drive whose size or sector size is not what the list said, and
+/// what the confirmed layout is for.
+fn same_geometry<T: BlockTarget>(target: &T, layout: &Layout, drive: &DriveInfo) -> Result<()> {
+    if target.length() == layout.drive_bytes && target.logical_sector_size() == layout.sector_size {
+        return Ok(());
+    }
+    Err(Error::DriveChanged {
+        wanted: describe(drive),
+        found: format!(
+            "a drive of {} bytes with sectors of {} bytes",
+            target.length(),
+            target.logical_sector_size()
+        ),
+    })
+}
+
+/// Numbers of this drive alone, from the clock and the process. Windows
+/// tells disks apart by the signature of the table, and volumes by their
+/// serials.
+fn serials() -> Serials {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let mut x = nanos ^ ((std::process::id() as u64) << 32);
+    let mut next = || {
+        x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = x;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        ((z ^ (z >> 31)) as u32).max(1)
+    };
+    Serials {
+        disk: next(),
+        boot: next(),
+        install: next(),
+    }
+}
+
+/// The mode that the image asks for, or the reason to stop.
 ///
-/// A Windows ISO asks for Windows mode, which a later phase writes. An image
-/// that fits neither mode stops, and so does a file whose contents Burnout
-/// cannot read, and each error says how to copy it anyway. A path that is
-/// not a file gives the fault alone, because no mode copies it.
-fn check_mode(mode: Result<Mode>, image: &Path) -> Result<()> {
+/// An image that fits neither mode stops, and so does a file whose contents
+/// Burnout cannot read, and each error says how to copy it anyway. A path
+/// that is not a file gives the fault alone, because no mode copies it.
+fn decide(mode: Result<Mode>, image: &Path) -> Result<Mode> {
     let path = image.display().to_string();
     match mode {
-        Ok(Mode::Raw) => Ok(()),
-        Ok(Mode::Windows) => Err(Error::WindowsMode { path }),
         Ok(Mode::Neither) => Err(Error::NoMode { path }),
+        Ok(mode) => Ok(mode),
         Err(Error::Image { path, detail }) if image.is_file() => Err(Error::Image {
             path,
             detail: format!("{detail}. To copy it byte for byte anyway, use --mode raw"),
         }),
         Err(e) => Err(e),
     }
+}
+
+/// What the write puts onto the drive, as the confirmation says it.
+fn what_goes_on(job: &Job, layout: Option<&Layout>) -> Vec<String> {
+    let w = match (job, layout) {
+        (Job::Windows(w), Some(layout)) => (w, layout),
+        (
+            Job::Raw {
+                boot_table: true, ..
+            },
+            _,
+        ) => return vec!["The image carries a boot table in its first sector.".to_string()],
+        _ => {
+            return vec![
+            "The image carries no boot table in its first sector, so the drive may start nothing."
+                .to_string(),
+        ]
+        }
+    };
+    let (w, layout) = w;
+    windows_lines(&w.tree, &w.unattend, layout)
+}
+
+/// The lines of the confirmation for Windows mode.
+fn windows_lines(tree: &WindowsTree, unattend: &str, layout: &Layout) -> Vec<String> {
+    let (boot_files, _) = tree.boot_files();
+    let mut does = vec!["tells Setup where the install image is".to_string()];
+    if unattend.contains("LabConfig") {
+        does.push("turns off the hardware checks of Windows 11".to_string());
+    }
+    if unattend.contains("HideOnlineAccountScreens") {
+        does.push("takes away the step of the Microsoft account".to_string());
+    }
+    let does = match does.split_last() {
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{}, and {last}", rest.join(", ")),
+        None => unreachable!("the path is always there"),
+    };
+    let mut lines = vec![
+        "The image is a Windows ISO, so Burnout lays the drive out for Windows:".to_string(),
+        format!(
+            "    partition 1  FAT32, {}, {boot_files} boot files and {UNATTEND_FILE}",
+            human_size(layout.boot.length)
+        ),
+        format!(
+            "    partition 2  exFAT, {}, {}",
+            human_size(layout.install.length),
+            tree.image_path()
+        ),
+        format!("{UNATTEND_FILE} {does}."),
+    ];
+    if tree.replaces_unattend {
+        lines.push(format!(
+            "The ISO holds an {UNATTEND_FILE} of its own, and Burnout puts its own in its place."
+        ));
+    }
+    if layout.beyond_table > 0 {
+        lines.push(format!(
+            "An MBR reaches no further, so {} at the end of the drive stay unused.",
+            human_size(layout.beyond_table)
+        ));
+    }
+    lines
 }
 
 /// Read the first sector and say whether it carries a boot table.
@@ -237,11 +494,15 @@ fn names_drive(drive: &DriveInfo, path: &str) -> bool {
 fn confirm(
     drive: &DriveInfo,
     force: Force,
-    image_bytes: u64,
     args: &WriteArgs,
-    boot_table: bool,
+    job: &Job,
+    layout: Option<&Layout>,
     system_disk_known: bool,
 ) -> Result<bool> {
+    let image_bytes = match job {
+        Job::Raw { bytes, .. } => *bytes,
+        Job::Windows(w) => w.iso_bytes,
+    };
     println!("This erases the drive. Nothing undoes it.");
     println!();
     println!("    image   {}", args.image.display());
@@ -262,13 +523,8 @@ fn confirm(
         println!("            serial {serial}");
     }
     println!();
-    if boot_table {
-        println!("The image carries a boot table in its first sector.");
-    } else {
-        println!(
-            "The image carries no boot table in its first sector, so the drive \
-             may start nothing."
-        );
+    for line in what_goes_on(job, layout) {
+        println!("{line}");
     }
     println!();
 
@@ -308,21 +564,99 @@ mod tests {
     use super::*;
     use burnout_core::DriveId;
 
-    #[test]
-    fn an_image_that_asks_for_raw_mode_goes_on() {
-        assert!(check_mode(Ok(Mode::Raw), Path::new("ubuntu.iso")).is_ok());
+    fn args(image: &str) -> WriteArgs {
+        WriteArgs {
+            image: image.into(),
+            target: Some(1),
+            device: None,
+            force: false,
+            no_elevate: true,
+            mode: None,
+            skip_hardware_checks: false,
+            no_microsoft_account: false,
+        }
     }
 
     #[test]
-    fn a_windows_iso_is_refused_and_the_message_names_the_way_past() {
-        let e = check_mode(Ok(Mode::Windows), Path::new("Win11.iso")).unwrap_err();
-        assert!(matches!(e, Error::WindowsMode { .. }), "{e}");
-        assert!(e.to_string().contains("--mode raw"), "{e}");
+    fn raw_mode_and_windows_mode_go_on() {
+        for mode in [Mode::Raw, Mode::Windows] {
+            assert_eq!(decide(Ok(mode), Path::new("image.iso")).unwrap(), mode);
+        }
+    }
+
+    #[test]
+    fn an_option_of_windows_mode_is_refused_for_raw_mode() {
+        assert!(refuse_windows_options(&args("ubuntu.iso")).is_ok());
+        for (option, flags) in [
+            ("--skip-hardware-checks", (true, false)),
+            ("--no-microsoft-account", (false, true)),
+        ] {
+            let a = WriteArgs {
+                skip_hardware_checks: flags.0,
+                no_microsoft_account: flags.1,
+                ..args("ubuntu.iso")
+            };
+            let e = refuse_windows_options(&a).unwrap_err();
+            assert!(e.to_string().starts_with(option), "{e}");
+        }
+    }
+
+    #[test]
+    fn the_confirmation_names_both_partitions_and_what_the_file_does() {
+        let mut iso = burnout_core::MemorySource::new();
+        iso.add_file("efi/boot/bootaa64.efi", vec![1; 10]).unwrap();
+        iso.add_file("sources/boot.wim", vec![2; 10]).unwrap();
+        iso.add_file("sources/install.wim", vec![3; 10]).unwrap();
+        iso.add_file("autounattend.xml", b"theirs".to_vec())
+            .unwrap();
+        let tree = WindowsTree::new(&iso).unwrap();
+        let layout = tree.plan(16_000_000_000 / 512 * 512, 512).unwrap();
+        let unattend = unattend_xml(&Unattend {
+            architecture: tree.architecture,
+            image: tree.image,
+            edition: None,
+            skip_hardware_checks: true,
+            no_microsoft_account: true,
+        });
+        let lines = windows_lines(&tree, &unattend, &layout);
+        assert!(
+            lines[1]
+                .starts_with("    partition 1  FAT32, 269.5 MB, 2 boot files and autounattend.xml"),
+            "{lines:?}"
+        );
+        assert!(lines[2].ends_with(", sources/install.wim"), "{lines:?}");
+        assert_eq!(
+            lines[3],
+            "autounattend.xml tells Setup where the install image is, turns off the hardware checks \
+             of Windows 11, and takes away the step of the Microsoft account."
+        );
+        assert!(
+            lines[4].contains("an autounattend.xml of its own"),
+            "{lines:?}"
+        );
+        let plain = unattend_xml(&Unattend {
+            architecture: tree.architecture,
+            image: tree.image,
+            edition: None,
+            skip_hardware_checks: false,
+            no_microsoft_account: false,
+        });
+        let lines = windows_lines(&tree, &plain, &layout);
+        assert_eq!(
+            lines[3],
+            "autounattend.xml tells Setup where the install image is."
+        );
+    }
+
+    #[test]
+    fn each_drive_gets_serials_that_are_not_zero() {
+        let s = serials();
+        assert!(s.disk != 0 && s.boot != 0 && s.install != 0);
     }
 
     #[test]
     fn an_image_that_fits_neither_mode_is_refused_and_the_message_names_the_way_past() {
-        let e = check_mode(Ok(Mode::Neither), Path::new("disk.img.xz")).unwrap_err();
+        let e = decide(Ok(Mode::Neither), Path::new("disk.img.xz")).unwrap_err();
         assert!(matches!(e, Error::NoMode { .. }), "{e}");
         let text = e.to_string();
         assert!(text.contains("expanded first"), "{text}");
@@ -340,7 +674,7 @@ mod tests {
     fn a_file_that_cannot_be_read_names_the_way_past() {
         let file = std::env::temp_dir().join(format!("burnout-odd-{}.iso", std::process::id()));
         std::fs::write(&file, b"odd").unwrap();
-        let e = check_mode(Err(fault(&file)), &file).unwrap_err();
+        let e = decide(Err(fault(&file)), &file).unwrap_err();
         std::fs::remove_file(&file).unwrap();
         let text = e.to_string();
         assert!(
@@ -353,9 +687,7 @@ mod tests {
     #[test]
     fn a_path_that_is_not_a_file_gives_its_fault_alone() {
         for path in [std::env::temp_dir(), "no-such-image.iso".into()] {
-            let text = check_mode(Err(fault(&path)), &path)
-                .unwrap_err()
-                .to_string();
+            let text = decide(Err(fault(&path)), &path).unwrap_err().to_string();
             assert!(!text.contains("--mode raw"), "{text}");
         }
     }
@@ -366,7 +698,7 @@ mod tests {
             path: "Install.dmg".to_string(),
             what: "a compressed disk image of macOS",
         };
-        let e = check_mode(Err(media), Path::new("Install.dmg")).unwrap_err();
+        let e = decide(Err(media), Path::new("Install.dmg")).unwrap_err();
         assert!(matches!(e, Error::MacosMedia { .. }), "{e}");
     }
 

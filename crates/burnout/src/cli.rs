@@ -62,12 +62,25 @@ pub struct WriteArgs {
 
     /// Choose the mode, and do not read the image to choose it.
     ///
-    /// Burnout reads the image to choose the mode. It refuses a Windows ISO,
-    /// because a byte copy of one starts nothing on most computers, and it
-    /// refuses macOS media. `raw` copies the image byte for byte, whatever
-    /// it holds.
+    /// Burnout reads the image to choose the mode: a byte copy for a hybrid
+    /// image, and the layout of Windows for a Windows ISO. It refuses macOS
+    /// media, and an image that fits neither mode.
     #[arg(long, value_enum, value_name = "MODE")]
     pub mode: Option<ModeArg>,
+
+    /// Turn off the checks of Windows 11 for TPM, Secure Boot, RAM, CPU and
+    /// storage.
+    ///
+    /// Windows mode only. autounattend.xml then carries the LabConfig keys,
+    /// and Setup installs on a machine that Windows 11 does not support.
+    #[arg(long)]
+    pub skip_hardware_checks: bool,
+
+    /// Take away the step of Setup that asks for a Microsoft account.
+    ///
+    /// Windows mode only. Setup then asks for a local account.
+    #[arg(long)]
+    pub no_microsoft_account: bool,
 }
 
 /// A mode that a person can choose.
@@ -75,4 +88,6 @@ pub struct WriteArgs {
 pub enum ModeArg {
     /// Copy the image byte for byte.
     Raw,
+    /// Lay the drive out for Windows, and copy the files of the ISO onto it.
+    Windows,
 }

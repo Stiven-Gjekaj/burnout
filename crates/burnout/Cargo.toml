@@ -11,6 +11,7 @@ authors.workspace = true
 [dependencies]
 burnout-core = { path = "../burnout-core" }
 burnout-iso = { path = "../burnout-iso" }
+burnout-layout = { path = "../burnout-layout" }
 clap = { version = "4", features = ["derive"] }
 
 # umount2, geteuid and O_EXCL have no equivalent in the standard library.

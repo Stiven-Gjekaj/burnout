@@ -99,11 +99,10 @@ pub enum Error {
         /// What the image is, such as "an installer package".
         what: &'static str,
     },
-    /// The image is a Windows ISO, which needs Windows mode, and Burnout does
-    /// not write Windows mode yet.
-    WindowsMode {
-        /// The path, as the person gave it.
-        path: String,
+    /// An option of Windows mode came with an image that goes in raw mode.
+    WindowsOption {
+        /// The option, as a person types it.
+        option: &'static str,
     },
     /// Neither mode fits the image: its first sector holds no boot table,
     /// and it holds no install image of Windows.
@@ -258,12 +257,10 @@ impl fmt::Display for Error {
                      Use createinstallmedia, which is in Contents/Resources of the installer app"
                 )
             }
-            Error::WindowsMode { path } => {
+            Error::WindowsOption { option } => {
                 write!(
                     f,
-                    "{path} is a Windows ISO. A byte copy of it starts nothing on most computers, \
-                     and Burnout does not write Windows mode yet. \
-                     To make the byte copy anyway, use --mode raw"
+                    "{option} changes the autounattend.xml of Windows mode, and this image goes in raw mode"
                 )
             }
             Error::NoMode { path } => {
