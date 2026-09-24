@@ -10,7 +10,7 @@
 //! ----------------------------------  check the privilege, start again here
 //! confirm the target with the person
 //! list again, and refuse a drive that changed
-//! unmount, write, flush, verify
+//! unmount, write, flush, unmount again, verify
 //! ```
 //!
 //! The privilege comes after the image check, so nobody gives a password and
@@ -20,7 +20,8 @@
 use std::fs::File;
 use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use burnout_core::{
     check_fits, check_same_drive, check_target, describe, force_phrase, has_boot_table,
@@ -38,6 +39,11 @@ use crate::elevate::{self, Plan, State};
 use crate::format::{human_size, size_column};
 use crate::platform;
 use crate::report::Bar;
+
+/// How many times the check opens the drive before it stops, and the pause
+/// between two tries. Ten seconds in all.
+const OPEN_TRIES: u32 = 40;
+const OPEN_PAUSE: Duration = Duration::from_millis(250);
 
 /// What the write puts onto the drive.
 enum Job {
@@ -229,7 +235,7 @@ fn write_raw<A: DriveAccess>(
     // the writing can come out of the cache of the operating system, and then
     // it proves that the cache holds the image and not that the drive does.
     let proof = {
-        let mut target = access.open(&drive.id)?;
+        let mut target = open_again(access, drive, OPEN_TRIES, OPEN_PAUSE)?;
         verify_image(image, &mut target, bar)?
     };
 
@@ -271,7 +277,7 @@ fn write_windows_mode<A: DriveAccess>(
     // Open the drive again for the check, as raw mode does: a read through
     // the handle that wrote can come out of the cache of the host.
     {
-        let mut target = access.open(&drive.id)?;
+        let mut target = open_again(access, drive, OPEN_TRIES, OPEN_PAUSE)?;
         verify_windows(&mut target, &plan, &written, bar)?;
     }
 
@@ -290,6 +296,45 @@ fn write_windows_mode<A: DriveAccess>(
     );
     offline_note();
     Ok(0)
+}
+
+/// Open the drive again for the check.
+///
+/// When the handle that wrote closes, the host reads the new table and can
+/// mount the new volumes. macOS does, and so does a Linux desktop. A mounted
+/// volume holds the drive, and the open then fails as busy. So each try takes
+/// the volumes off first, and a busy drive gets another try while the host
+/// still reads it.
+fn open_again<A: DriveAccess>(
+    access: &A,
+    drive: &DriveInfo,
+    tries: u32,
+    pause: Duration,
+) -> Result<A::Target> {
+    let mut left = tries;
+    loop {
+        access.unmount_volumes(&drive.id)?;
+        match access.open(&drive.id) {
+            Err(e) if busy(&e) && left > 1 => {
+                left -= 1;
+                thread::sleep(pause);
+            }
+            other => return other,
+        }
+    }
+}
+
+/// A drive that a volume or a probe of the host holds answers busy.
+fn busy(e: &Error) -> bool {
+    #[cfg(unix)]
+    {
+        matches!(e, Error::Io(io) if io.raw_os_error() == Some(libc::EBUSY))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = e;
+        false
+    }
 }
 
 /// The Windows layer took the drive offline for the write, and a person who
@@ -719,5 +764,86 @@ mod tests {
         assert!(names_drive(&stick, "/dev/sdb"));
         assert!(names_drive(&stick, "sdb"));
         assert!(!names_drive(&stick, "/dev/sdb1"));
+    }
+
+    /// A drive that answers each open with the next answer of a list, and
+    /// counts the calls.
+    #[cfg(unix)]
+    struct HeldDrive {
+        answers: std::cell::RefCell<Vec<Option<i32>>>,
+        unmounts: std::cell::Cell<u32>,
+        opens: std::cell::Cell<u32>,
+    }
+
+    #[cfg(unix)]
+    impl HeldDrive {
+        /// `None` opens the drive, and `Some(errno)` fails with that error.
+        fn new(answers: &[Option<i32>]) -> Self {
+            HeldDrive {
+                answers: std::cell::RefCell::new(answers.iter().rev().copied().collect()),
+                unmounts: std::cell::Cell::new(0),
+                opens: std::cell::Cell::new(0),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl DriveAccess for HeldDrive {
+        type Target = burnout_core::MemoryTarget;
+
+        fn unmount_volumes(&self, _id: &DriveId) -> Result<()> {
+            self.unmounts.set(self.unmounts.get() + 1);
+            Ok(())
+        }
+
+        fn open(&self, _id: &DriveId) -> Result<Self::Target> {
+            self.opens.set(self.opens.get() + 1);
+            match self.answers.borrow_mut().pop().flatten() {
+                Some(errno) => Err(Error::Io(std::io::Error::from_raw_os_error(errno))),
+                None => burnout_core::MemoryTarget::new(4096, 512),
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn stick() -> DriveInfo {
+        DriveInfo::new(DriveId::new("disk5"), "/dev/rdisk5", "Flash Drive")
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn the_check_takes_the_volumes_off_again_before_it_opens_the_drive() {
+        let drive = HeldDrive::new(&[None]);
+        open_again(&drive, &stick(), 40, Duration::ZERO).unwrap();
+        assert_eq!((drive.unmounts.get(), drive.opens.get()), (1, 1));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_drive_that_the_host_still_holds_gets_another_try() {
+        let busy = Some(libc::EBUSY);
+        let drive = HeldDrive::new(&[busy, busy, busy, None]);
+        open_again(&drive, &stick(), 40, Duration::ZERO).unwrap();
+        // Each try takes the volumes off first, because the host can mount
+        // them between two tries.
+        assert_eq!((drive.unmounts.get(), drive.opens.get()), (4, 4));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_drive_that_stays_busy_gives_its_error_after_the_last_try() {
+        let drive = HeldDrive::new(&[Some(libc::EBUSY); 10]);
+        let e = open_again(&drive, &stick(), 5, Duration::ZERO).unwrap_err();
+        assert!(busy(&e), "{e}");
+        assert_eq!(drive.opens.get(), 5);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn another_fault_of_the_open_gets_no_second_try() {
+        let drive = HeldDrive::new(&[Some(libc::EACCES), None]);
+        let e = open_again(&drive, &stick(), 40, Duration::ZERO).unwrap_err();
+        assert!(!busy(&e), "{e}");
+        assert_eq!(drive.opens.get(), 1);
     }
 }
