@@ -7,8 +7,11 @@
 //!
 //! A piece that covers part of a sector is read, changed and kept in a small
 //! cache, and the whole sector goes back to the device later. A run of whole
-//! sectors at a sector boundary goes straight through, so the data of a large
-//! file is never copied twice.
+//! sectors at a sector boundary skips the cache. Runs that follow one another
+//! wait, and go to the device together in one write: `fatfs` writes a file one
+//! cluster at a time, and one write for each cluster of 4 KiB is slow on any
+//! path where each write waits for the device. A run of the size of that
+//! write or more goes straight through, so a large write is not copied twice.
 //!
 //! Every access that this makes to the target underneath is whole sectors. A
 //! test proves that by putting a [`crate::StrictTarget`] underneath, which
@@ -25,6 +28,11 @@ use crate::{BlockTarget, Result};
 /// directory and the directory of the file being written. A thousand sectors
 /// holds all of those at once on either sector size.
 const DEFAULT_CACHE_SECTORS: usize = 1024;
+
+/// The most bytes that runs of whole sectors wait for before they go out.
+///
+/// A mebibyte is a whole number of sectors at 512 and at 4096 bytes.
+const MERGE_BYTES: usize = 1024 * 1024;
 
 /// One sector in the cache.
 #[derive(Debug)]
@@ -45,6 +53,10 @@ pub struct SectorIo<T: BlockTarget> {
     position: u64,
     cache: BTreeMap<u64, Slot>,
     capacity: usize,
+    /// Whole sectors that wait to go out in one write, and the byte of the
+    /// target where they start. No sector is here and in the cache at once.
+    waiting: Vec<u8>,
+    waiting_at: u64,
 }
 
 impl<T: BlockTarget> SectorIo<T> {
@@ -63,7 +75,55 @@ impl<T: BlockTarget> SectorIo<T> {
             position: 0,
             cache: BTreeMap::new(),
             capacity: sectors.max(1),
+            waiting: Vec::new(),
+            waiting_at: 0,
         }
+    }
+
+    /// Send a run of whole sectors at byte `at` of the target.
+    ///
+    /// A short run waits for the run that follows it. A run that does not
+    /// follow the waiting bytes sends those first, so each byte reaches the
+    /// target in the order it was written.
+    fn send_run(&mut self, at: u64, bytes: &[u8]) -> io::Result<()> {
+        let follows = at == self.waiting_at + self.waiting.len() as u64;
+        if !self.waiting.is_empty() && !follows {
+            self.send_waiting()?;
+        }
+        if bytes.len() >= MERGE_BYTES {
+            self.send_waiting()?;
+            self.inner.seek(SeekFrom::Start(at))?;
+            return self.inner.write_all(bytes);
+        }
+        if self.waiting.is_empty() {
+            self.waiting_at = at;
+        }
+        self.waiting.extend_from_slice(bytes);
+        if self.waiting.len() >= MERGE_BYTES {
+            self.send_waiting()?;
+        }
+        Ok(())
+    }
+
+    /// Write the waiting sectors to the target, in one write.
+    fn send_waiting(&mut self) -> io::Result<()> {
+        if self.waiting.is_empty() {
+            return Ok(());
+        }
+        self.inner.seek(SeekFrom::Start(self.waiting_at))?;
+        self.inner.write_all(&self.waiting)?;
+        self.waiting.clear();
+        Ok(())
+    }
+
+    /// Send the waiting sectors if a read of `bytes` at byte `at` of the
+    /// target covers any of them, so the read gets the new bytes.
+    fn send_waiting_under(&mut self, at: u64, bytes: u64) -> io::Result<()> {
+        let end = self.waiting_at + self.waiting.len() as u64;
+        if at < end && self.waiting_at < at + bytes {
+            self.send_waiting()?;
+        }
+        Ok(())
     }
 
     /// Put one sector of the target into the cache, if it is not there.
@@ -75,6 +135,7 @@ impl<T: BlockTarget> SectorIo<T> {
             self.write_back()?;
             self.cache.clear();
         }
+        self.send_waiting_under(index * self.sector, self.sector)?;
         let mut bytes = vec![0u8; self.sector as usize];
         self.inner.seek(SeekFrom::Start(index * self.sector))?;
         self.inner.read_exact(&mut bytes)?;
@@ -149,6 +210,7 @@ impl<T: BlockTarget> Read for SectorIo<T> {
                 let run = self.uncached_run(index, left / self.sector);
                 if run > 0 {
                     let bytes = (run * self.sector) as usize;
+                    self.send_waiting_under(index * self.sector, bytes as u64)?;
                     self.inner.seek(SeekFrom::Start(index * self.sector))?;
                     self.inner.read_exact(&mut buf[done..done + bytes])?;
                     done += bytes;
@@ -189,16 +251,15 @@ impl<T: BlockTarget> Write for SectorIo<T> {
             let left = (want - done) as u64;
 
             if offset == 0 && left >= self.sector {
-                // Whole sectors go straight through. A cached copy of any of
-                // them is now older than what goes out, so it leaves the
-                // cache rather than be written back over the new bytes.
+                // Whole sectors skip the cache. A cached copy of any of them
+                // is now older than what goes out, so it leaves the cache
+                // rather than be written back over the new bytes.
                 let run = left / self.sector;
                 for i in index..index + run {
                     self.cache.remove(&i);
                 }
                 let bytes = (run * self.sector) as usize;
-                self.inner.seek(SeekFrom::Start(index * self.sector))?;
-                self.inner.write_all(&buf[done..done + bytes])?;
+                self.send_run(index * self.sector, &buf[done..done + bytes])?;
                 done += bytes;
                 self.position += bytes as u64;
                 continue;
@@ -217,6 +278,7 @@ impl<T: BlockTarget> Write for SectorIo<T> {
     }
 
     fn flush(&mut self) -> io::Result<()> {
+        self.send_waiting()?;
         self.write_back()?;
         self.inner.flush()
     }
@@ -259,9 +321,10 @@ impl<T: BlockTarget> BlockTarget for SectorIo<T> {
 
 impl<T: BlockTarget> Drop for SectorIo<T> {
     fn drop(&mut self) {
-        if self.cache.values().any(|slot| slot.dirty) {
+        if !self.waiting.is_empty() || self.cache.values().any(|slot| slot.dirty) {
             // Write back rather than lose the bytes. Nothing can report an
             // error from here, which is why the caller flushes first.
+            let _ = self.send_waiting();
             let _ = self.write_back();
             debug_assert!(
                 std::thread::panicking(),
@@ -380,11 +443,125 @@ mod tests {
     }
 
     #[test]
-    fn whole_sectors_go_straight_through_and_leave_the_cache_empty() {
+    fn whole_sectors_skip_the_cache_and_reach_the_target_at_the_flush() {
         let mut io = SectorIo::new(strict(8, 512));
         io.write_all(&[7; 4 * 512]).unwrap();
         assert!(io.cache.is_empty());
+        io.flush().unwrap();
         assert_eq!(&io.inner.inner().contents()[..2048], &[7; 2048][..]);
+    }
+
+    /// A target that counts the writes that reach it.
+    struct Counted {
+        inner: MemoryTarget,
+        writes: usize,
+    }
+
+    impl Read for Counted {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            self.inner.read(buf)
+        }
+    }
+
+    impl Write for Counted {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.writes += 1;
+            self.inner.write(buf)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.inner.flush()
+        }
+    }
+
+    impl Seek for Counted {
+        fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+
+    impl BlockTarget for Counted {
+        fn logical_sector_size(&self) -> u32 {
+            self.inner.logical_sector_size()
+        }
+
+        fn length(&self) -> u64 {
+            self.inner.length()
+        }
+
+        fn sync(&mut self) -> Result<()> {
+            self.inner.sync()
+        }
+    }
+
+    fn counted(bytes: u64) -> SectorIo<Counted> {
+        SectorIo::new(Counted {
+            inner: MemoryTarget::new(bytes, 512).unwrap(),
+            writes: 0,
+        })
+    }
+
+    #[test]
+    fn clusters_that_follow_one_another_reach_the_target_as_few_writes() {
+        // Three hundred clusters of 4 KiB, one after another, the way fatfs
+        // writes a file. They go out as one mebibyte and then the rest.
+        let mut io = counted(2 * MERGE_BYTES as u64);
+        for cluster in 0..300u32 {
+            io.write_all(&[cluster as u8; 4096]).unwrap();
+        }
+        io.flush().unwrap();
+        assert_eq!(io.inner.writes, 2);
+        for cluster in 0..300usize {
+            let at = cluster * 4096;
+            assert!(io.inner.inner.contents()[at..at + 4096]
+                .iter()
+                .all(|b| *b == cluster as u8));
+        }
+    }
+
+    #[test]
+    fn a_gap_sends_the_waiting_sectors_first() {
+        let mut io = counted(64 * 512);
+        io.write_all(&[1; 1024]).unwrap();
+        io.seek(SeekFrom::Start(8 * 512)).unwrap();
+        io.write_all(&[2; 1024]).unwrap();
+        io.flush().unwrap();
+        assert_eq!(io.inner.writes, 2);
+        let contents = io.inner.inner.contents();
+        assert!(contents[..1024].iter().all(|b| *b == 1));
+        assert!(contents[1024..8 * 512].iter().all(|b| *b == 0));
+        assert!(contents[8 * 512..9 * 512 + 512].iter().all(|b| *b == 2));
+    }
+
+    #[test]
+    fn a_write_of_a_mebibyte_or_more_goes_straight_through() {
+        let mut io = counted(4 * MERGE_BYTES as u64);
+        io.write_all(&vec![3; 2 * MERGE_BYTES]).unwrap();
+        assert_eq!(io.inner.writes, 1);
+        assert!(io.waiting.is_empty());
+        io.flush().unwrap();
+        assert_eq!(io.inner.writes, 1);
+    }
+
+    #[test]
+    fn a_read_of_waiting_sectors_gets_the_new_bytes() {
+        let mut io = SectorIo::new(strict(8, 512));
+        io.write_all(&[5; 2 * 512]).unwrap();
+        io.seek(SeekFrom::Start(0)).unwrap();
+        let mut whole = [0u8; 2 * 512];
+        io.read_exact(&mut whole).unwrap();
+        assert_eq!(whole, [5; 2 * 512]);
+
+        // And a small write into a waiting sector reads the sector back
+        // first, so it must find the new bytes there too.
+        io.write_all(&[6; 512]).unwrap();
+        io.seek(SeekFrom::Start(2 * 512 + 10)).unwrap();
+        io.write_all(&[9; 4]).unwrap();
+        io.flush().unwrap();
+        let contents = io.inner.inner().contents();
+        assert!(contents[1024..1034].iter().all(|b| *b == 6));
+        assert_eq!(&contents[1034..1038], &[9; 4]);
+        assert!(contents[1038..1536].iter().all(|b| *b == 6));
     }
 
     #[test]
