@@ -23,6 +23,7 @@ mod plan;
 mod stream;
 #[cfg(test)]
 mod testing;
+mod unattend;
 mod verify;
 
 pub use burnout_core::{DirSource, Entry, FileSource, MemorySource, TreePath};
@@ -32,4 +33,5 @@ pub use fat32::{format_fat32, Fat32Options};
 pub use manifest::{CopiedFile, Manifest};
 pub use mbr::{mbr_bytes, write_table, TYPE_EXFAT, TYPE_FAT32};
 pub use plan::{plan, Extent, Layout, ALIGN, MBR_SECTORS};
+pub use unattend::{unattend_xml, Architecture, InstallImage, Unattend};
 pub use verify::{verify_fat32, verify_fat32_with};
