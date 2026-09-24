@@ -29,11 +29,11 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 ---
 
 > [!NOTE]
-> **Raw mode is built. Windows mode is not.**
+> **Both modes are built.**
 > `burnout list` and `burnout write` run on Windows, on macOS and on Linux.
 > `write` reads the image first. It copies a hybrid image to a drive, flushes
-> it, reads it back and compares a hash. It refuses a Windows ISO, which needs
-> Windows mode, and that is phase P6.
+> it, reads it back and compares a hash. It lays a Windows ISO out for Windows,
+> and reads each file back against its own hash.
 > There is no release, so build it from the source.
 > [docs/roadmap.md](docs/roadmap.md) holds the measurements behind both
 > claims.
@@ -135,9 +135,9 @@ Without them, it looks inside for `sources/install.wim` or
 `sources/install.esd` and builds the installer.
 If it finds neither, it stops and says what it found.
 
-`--mode raw` overrides the result, and `--mode windows` comes with Windows
-mode.
-It exists for the day the guess is wrong, and a normal person never types it.
+`--mode raw` and `--mode windows` override the result.
+They exist for the day the guess is wrong, and a normal person never types
+them.
 
 > [!NOTE]
 > **Burnout runs on macOS. It does not make macOS install media.**
@@ -185,10 +185,6 @@ record the reason for each.
 ---
 
 ## The shape of the command
-
-> [!IMPORTANT]
-> `list` and `write` run. The Windows options below do not, because Windows
-> mode is phase P6.
 
 A device path cannot be the same on three operating systems.
 `/dev/disk4`, `/dev/sdb` and `\\.\PhysicalDrive2` have nothing in common.
@@ -250,23 +246,45 @@ Checked 2.1 GB (2,109,796,352 bytes) of the drive against the image, byte for by
 SHA-256 162ba3c552a2d241c7c63ec26777af0255ee1b5a135adc0be986ceed999933ef
 ```
 
+A Windows ISO takes the same command. Two options change what Setup does, and
+Burnout writes nothing else into `autounattend.xml`:
+
+- `--skip-hardware-checks` turns off the checks of Windows 11 for TPM, Secure
+  Boot, RAM, CPU and storage.
+- `--no-microsoft-account` takes away the step of the Microsoft account. Setup
+  then asks for a local account and its password, so Burnout holds no
+  password.
+
+```bash
+burnout write Win11_25H2_English_Arm64_v2.iso 3 --skip-hardware-checks --no-microsoft-account
+```
+
+Setup shows the editions in the image, and you choose one there.
+The report counts the files, and names the check:
+
+```
+Wrote 963 files of 8.0 GB (7,988,543,418 bytes) to Samsung Flash Drive: 962 onto partition 1, FAT32, and 1 onto partition 2, exFAT.
+Checked each file through a new mount of its volume against the SHA-256 that it went in with, and the partition table against the one that Burnout wrote.
+```
+
 <details>
 <summary><b>What happens inside a Windows write</b></summary>
 
 ```
-burnout write Win11_24H2.iso 2
+burnout write Win11_25H2.iso 2
   -> reads the first 512 bytes, finds no hybrid table
   -> finds sources/install.wim, and selects Windows mode
+  -> plans both partitions, and refuses a drive that is too small
   -> checks the privilege, and starts itself again through sudo if it must
   -> names the target drive, and waits for you to confirm it
   -> unmounts every volume on the drive
   -> writes an MBR with two partitions
-  -> formats partition 1 as FAT32, and partition 2 as exFAT
-  -> copies every boot file to partition 1
-  -> copies the install image to partition 2, whole
-  -> writes autounattend.xml for the options that you asked for
-  -> reads each file back, and compares its hash
-  -> flushes, and reports what it verified
+  -> formats partition 1 as FAT32, and copies every boot file to it
+  -> writes autounattend.xml onto partition 1
+  -> writes partition 2 as exFAT, with the install image whole
+  -> flushes the drive
+  -> opens the drive again, and reads each file back against its hash
+  -> reports what it checked
 ```
 
 Burnout calls no tool of the host at any step above.
