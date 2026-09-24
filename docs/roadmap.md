@@ -14,6 +14,8 @@ the one that needs a plan of its own.
 
 P0 to P6 are done. Raw mode and Windows mode write a drive on all three
 hosts, and a drive from each host installs Windows 11.
+v0.3.0 is the first release, and it holds P0 to P6. v0.1 and v0.2 were
+planned, and nobody cut them.
 Burnout reads an ISO itself, and `burnout write` uses the reader to choose the
 mode.
 
@@ -54,11 +56,11 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | --- | --- | --- | --- |
 | P0 | Prove the layout | S | **done** |
 | P1 | The skeleton and the device layer | L | **done** |
-| P2 | Raw mode | M | **v0.1** |
+| P2 | Raw mode | M | **done** |
 | P3 | The partition table and FAT32 | M | **done** |
-| P4 | The exFAT writer | XL | **v0.2** |
-| P5 | Reading an ISO | L | |
-| P6 | Windows mode | L | **v0.3** |
+| P4 | The exFAT writer | XL | **done** |
+| P5 | Reading an ISO | L | **done** |
+| P6 | Windows mode | L | **v0.3.0** |
 | P7 | The edges | M | **v1.0** |
 
 ---
@@ -186,7 +188,7 @@ this also shows the list needs no privilege on Linux.
 
 ## P2. Raw mode
 
-**Size M. Depends on P1. Done. Ships as v0.1.**
+**Size M. Depends on P1. Done. Planned for v0.1, and shipped in v0.3.0.**
 
 **v0.1 needs the release workflow, so that work moves here from P7.**
 The decision below puts build provenance on every release artifact, and P7
@@ -470,7 +472,7 @@ P6 writes the layout to a device, and that is where the device half closes.
 
 ## P4. The exFAT writer
 
-**Size XL. Depends on P3. Done. Ships as v0.2.**
+**Size XL. Depends on P3. Done. Planned for v0.2, and shipped in v0.3.0.**
 
 The one piece with no crate behind it, and the reason macOS can take part at
 all.
@@ -746,7 +748,7 @@ files onto a drive, and that is where the tree meets a device.
 
 ## P6. Windows mode
 
-**Size L. Depends on P0, P4 and P5. Done. Ships as v0.3.**
+**Size L. Depends on P0, P4 and P5. Done. Shipped as v0.3.0.**
 
 Put the four pieces together.
 
