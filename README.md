@@ -244,7 +244,13 @@ When it finishes it names the check that it ran:
 Wrote 2.1 GB (2,109,796,352 bytes) to SanDisk Ultra.
 Checked 2.1 GB (2,109,796,352 bytes) of the drive against the image, byte for byte.
 SHA-256 162ba3c552a2d241c7c63ec26777af0255ee1b5a135adc0be986ceed999933ef
+macOS ejected the drive, so nothing mounts it or writes to it until you connect it again.
 ```
+
+The last line comes on macOS only. macOS mounts a drive as soon as nothing
+holds it, and Spotlight then writes to it, so Burnout ejects the drive when
+the check ends. Windows holds the drive offline after the write, so the same
+place says that on Windows.
 
 A Windows ISO takes the same command. Two options change what Setup does, and
 Burnout writes nothing else into `autounattend.xml`:
@@ -265,6 +271,7 @@ The report counts the files, and names the check:
 ```
 Wrote 963 files of 8.0 GB (7,988,543,418 bytes) to Samsung Flash Drive: 962 onto partition 1, FAT32, and 1 onto partition 2, exFAT.
 Checked each file through a new mount of its volume against the SHA-256 that it went in with, and the partition table against the one that Burnout wrote.
+macOS ejected the drive, so nothing mounts it or writes to it until you connect it again.
 ```
 
 <details>
@@ -284,6 +291,7 @@ burnout write Win11_25H2.iso 2
   -> writes partition 2 as exFAT, with the install image whole
   -> flushes the drive
   -> opens the drive again, and reads each file back against its hash
+  -> ejects the drive on macOS
   -> reports what it checked
 ```
 
