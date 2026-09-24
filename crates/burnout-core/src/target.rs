@@ -61,6 +61,16 @@ pub trait DriveAccess {
     /// volume handles, and it holds them for the whole write.
     fn unmount_volumes(&self, id: &DriveId) -> Result<()>;
 
+    /// Keep the host from mounting a volume of the drive for as long as the
+    /// returned value lives.
+    ///
+    /// macOS mounts the volumes of a new table when the handle that wrote it
+    /// closes, and Spotlight then writes to them before the check reads them.
+    /// A host that does not do this keeps the default, which holds nothing.
+    fn keep_unmounted(&self, _id: &DriveId) -> Result<Box<dyn std::any::Any>> {
+        Ok(Box::new(()))
+    }
+
     /// Open the drive for the write.
     ///
     /// The drop of the handle closes the device. Call

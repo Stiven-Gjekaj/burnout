@@ -7,12 +7,16 @@
 //!
 //! Nothing here is covered by a test, and nothing here may grow a rule.
 
+use std::any::Any;
 use std::collections::BTreeMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use core_foundation::array::CFArray;
@@ -229,6 +233,10 @@ impl DriveAccess for MacosAccess {
         unmount_whole(id.as_str())
     }
 
+    fn keep_unmounted(&self, id: &DriveId) -> Result<Box<dyn Any>> {
+        Ok(Box::new(MountRefusal::start(id.as_str())?))
+    }
+
     fn open(&self, id: &DriveId) -> Result<MacosDisk> {
         let info = one_drive(id)?;
         // The raw node, and never /dev/diskN. The raw node skips the buffer
@@ -355,6 +363,108 @@ extern "C" fn answered(_disk: DADiskRef, dissenter: DADissenterRef, context: *mu
     };
 }
 
+/// Refuses each mount of a volume of one disk, for as long as it lives.
+///
+/// Disk Arbitration asks each session that registered an approval callback
+/// before it mounts a volume, and a dissenter refuses the mount. The session
+/// runs on a thread of its own, because the write holds this thread for
+/// minutes and Disk Arbitration waits for the answer.
+struct MountRefusal {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl MountRefusal {
+    /// Start to refuse, and return when Disk Arbitration has the callback.
+    fn start(bsd_name: &str) -> Result<Self> {
+        let name = CString::new(bsd_name).map_err(|_| Error::Host {
+            source: bsd_name.to_string(),
+            detail: "the name holds a zero byte".to_string(),
+        })?;
+        let stop = Arc::new(AtomicBool::new(false));
+        let (ready, registered) = mpsc::channel();
+        let flag = Arc::clone(&stop);
+        let thread = thread::spawn(move || refuse_mounts(name, &flag, &ready));
+        match registered.recv() {
+            Ok(Ok(())) => Ok(MountRefusal {
+                stop,
+                thread: Some(thread),
+            }),
+            Ok(Err(e)) => {
+                let _ = thread.join();
+                Err(e)
+            }
+            Err(_) => Err(Error::Host {
+                source: "DARegisterDiskMountApprovalCallback".to_string(),
+                detail: "the thread of the session stopped".to_string(),
+            }),
+        }
+    }
+}
+
+impl Drop for MountRefusal {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The thread of a [`MountRefusal`]: register, answer until told to stop,
+/// then unregister.
+fn refuse_mounts(name: CString, stop: &AtomicBool, ready: &mpsc::Sender<Result<()>>) {
+    // SAFETY: the session is checked before use and released once, the run
+    // loop belongs to this thread, and the context is the name, which lives
+    // until the callback is unregistered.
+    unsafe {
+        let session = DASessionCreate(std::ptr::null());
+        if session.is_null() {
+            let _ = ready.send(Err(Error::Host {
+                source: "DASessionCreate".to_string(),
+                detail: "the session is null".to_string(),
+            }));
+            return;
+        }
+        let run_loop = CFRunLoopGetCurrent();
+        DASessionScheduleWithRunLoop(session, run_loop, kCFRunLoopDefaultMode);
+        let context = name.as_ptr() as *mut c_void;
+        DARegisterDiskMountApprovalCallback(session, std::ptr::null(), refuse, context);
+        let _ = ready.send(Ok(()));
+
+        while !stop.load(Ordering::SeqCst) {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, 1);
+        }
+
+        DAUnregisterApprovalCallback(session, refuse as *mut c_void, context);
+        DASessionUnscheduleFromRunLoop(session, run_loop, kCFRunLoopDefaultMode);
+        CFRelease(session as CFTypeRef);
+    }
+    drop(name);
+}
+
+/// The approval callback: a dissenter for a volume of the disk that the
+/// context names, and no answer for any other disk.
+extern "C" fn refuse(disk: DADiskRef, context: *mut c_void) -> DADissenterRef {
+    // SAFETY: the context is the name that refuse_mounts owns, and the whole
+    // disk is checked before use and released once.
+    unsafe {
+        let wanted = CStr::from_ptr(context as *const c_char);
+        let whole = DADiskCopyWholeDisk(disk);
+        if whole.is_null() {
+            return std::ptr::null();
+        }
+        let name = DADiskGetBSDName(whole);
+        let ours = !name.is_null() && CStr::from_ptr(name) == wanted;
+        CFRelease(whole as CFTypeRef);
+        if ours {
+            DADissenterCreate(std::ptr::null(), EXCLUSIVE_ACCESS, std::ptr::null())
+        } else {
+            std::ptr::null()
+        }
+    }
+}
+
 /// One open macOS drive.
 #[derive(Debug)]
 pub struct MacosDisk {
@@ -420,14 +530,18 @@ const DKIOCSYNCHRONIZECACHE: libc::c_ulong = 0x2000_6416;
 /// `kDADiskUnmountOptionWhole`, which takes every volume of the disk.
 const UNMOUNT_WHOLE: u32 = 0x0000_0001;
 
+/// `kDAReturnExclusiveAccess`, the reason that a refused mount gives.
+const EXCLUSIVE_ACCESS: i32 = 0xF8DA_0004_u32 as i32;
+
 type DASessionRef = *const c_void;
 type DADiskRef = *const c_void;
 type DADissenterRef = *const c_void;
 type DADiskUnmountCallback = extern "C" fn(DADiskRef, DADissenterRef, *mut c_void);
+type DADiskMountApprovalCallback = extern "C" fn(DADiskRef, *mut c_void) -> DADissenterRef;
 
 // Disk Arbitration has no binding crate that this project would depend on, so
-// declare the six functions it uses. This is the fallback that the plan named
-// for IOKit, and it is the whole of the interface.
+// declare the functions it uses. This is the fallback that the plan named for
+// IOKit, and it is the whole of the interface.
 #[link(name = "DiskArbitration", kind = "framework")]
 extern "C" {
     fn DASessionCreate(allocator: CFAllocatorRef) -> DASessionRef;
@@ -453,4 +567,22 @@ extern "C" {
         context: *mut c_void,
     );
     fn DADissenterGetStatus(dissenter: DADissenterRef) -> i32;
+    fn DADissenterCreate(
+        allocator: CFAllocatorRef,
+        status: i32,
+        string: CFStringRef,
+    ) -> DADissenterRef;
+    fn DARegisterDiskMountApprovalCallback(
+        session: DASessionRef,
+        matching: CFTypeRef,
+        callback: DADiskMountApprovalCallback,
+        context: *mut c_void,
+    );
+    fn DAUnregisterApprovalCallback(
+        session: DASessionRef,
+        callback: *mut c_void,
+        context: *mut c_void,
+    );
+    fn DADiskCopyWholeDisk(disk: DADiskRef) -> DADiskRef;
+    fn DADiskGetBSDName(disk: DADiskRef) -> *const c_char;
 }

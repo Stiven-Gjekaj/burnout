@@ -122,6 +122,9 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
     let access = platform::drive_access()?;
     let mut bar = Bar::new();
 
+    // Before the unmount, and until the check ends. A host that mounts the
+    // new volumes can write to them before the check reads them.
+    let _unmounted = access.keep_unmounted(&again.id)?;
     bar.report(ProgressEvent::Start {
         stage: Stage::Unmount,
         total_bytes: None,
