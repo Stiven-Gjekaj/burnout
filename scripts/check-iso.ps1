@@ -20,36 +20,10 @@ $source = (Resolve-Path -LiteralPath $Tree).Path
 $work = Join-Path ([System.IO.Path]::GetTempPath()) "burnout-iso-$PID"
 New-Item -ItemType Directory -Path $work | Out-Null
 
-# IMAPI2 gives the image as a stream of COM, and this copies it into a file.
-Add-Type -TypeDefinition @'
-using System.IO;
-using System.Runtime.InteropServices.ComTypes;
-public static class ImageFile {
-    public static void Save(object image, string path, int blockSize, int blocks) {
-        IStream stream = (IStream)image;
-        byte[] block = new byte[blockSize];
-        using (FileStream file = File.Create(path)) {
-            for (int n = 0; n < blocks; n++) {
-                stream.Read(block, blockSize, System.IntPtr.Zero);
-                file.Write(block, 0, blockSize);
-            }
-        }
-    }
-}
-'@
-
-# Make an ISO of the tree. The file systems add up: 1 is ISO 9660, 2 is
-# Joliet and 4 is UDF.
+# Make an ISO of the tree with the script that the gate of Windows mode uses
+# too.
 function New-Iso([string] $Path, [int] $FileSystems, [int] $Revision) {
-    $image = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
-    $image.FileSystemsToCreate = $FileSystems
-    if ($FileSystems -band 4) {
-        $image.UDFRevision = $Revision
-    }
-    $image.VolumeName = 'SAMPLE'
-    $image.Root.AddTree($source, $false)
-    $result = $image.CreateResultImage()
-    [ImageFile]::Save($result.ImageStream, $Path, $result.BlockSize, $result.TotalBlocks)
+    & (Join-Path $PSScriptRoot 'make-iso.ps1') $source $Path $FileSystems $Revision
 }
 
 # Read one ISO and compare it with the tree.
