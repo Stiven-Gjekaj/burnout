@@ -799,11 +799,14 @@ is Arm64.
   the image, because Setup ignores a component for another one. The options
   add the rest, and nothing else: `--skip-hardware-checks` adds the five
   `LabConfig` keys, and `--no-microsoft-account` takes away the step of the
-  Microsoft account. The empty product key stays out, because Setup is to ask
-  for the key.
+  Microsoft account. That option writes two things: `HideOnlineAccountScreens`,
+  and the `BypassNRO` key in the specialize pass, which lets the first-run
+  setup go on with no network. The empty product key stays out, because Setup
+  is to ask for the key.
 - **Burnout does not choose the edition.** Index 1 is Home on each ISO above.
-  The spike gave index 1, and a person who wanted Pro got Home. How the
-  edition gets chosen waits for a measurement, below.
+  The spike gave index 1, and a person who wanted Pro got Home. With the
+  `InstallFrom` path and no index, Setup shows the list of editions, and the
+  person chooses one. So Burnout writes no index.
 - **The check reads the drive again through a new handle.** The write ends
   with a flush, the drive opens again, and each file is read back through a
   new mount of its volume, as raw mode reads the drive again. The report says
@@ -817,20 +820,25 @@ is Arm64.
   any target, so an example writes an image file with it, and CI checks that
   image on each host with the tools of the host.
 
-**What is open, and how it gets measured.** Two questions decide the options,
-and a VM answers both before the command line changes:
+**What the VM measured.** Two questions decided the options, and a VM
+answered both before the command line changed. The VM is aarch64 with UEFI,
+no TPM, a blank NVMe disk, no network adapter, and a drive image from the
+example as a USB disk. It ran Windows 11 25H2, build 26200.8037.
 
-1. **Does Setup take `InstallFrom` with no index?** With the path alone, Setup
-   either shows the list of editions, or stops. If it stops, Burnout reads the
-   editions out of the image, shows them, and the person chooses one.
-   `--edition` names one for a script.
+1. **Does Setup take `InstallFrom` with no index?** Yes. Setup shows "Select
+   Image" with the three editions of the Arm64 image: Home, Home Single
+   Language and Pro. So `burnout write` has no `--edition`, and Burnout does
+   not read the editions out of the image. The library can still write an
+   index, and the example takes `--edition` for it.
 2. **Does `HideOnlineAccountScreens` alone skip the Microsoft account on
-   25H2?** If it does, Setup asks for a local account and its password, and
-   Burnout holds no password. If it does not, `<LocalAccounts>` names the
-   account.
+   25H2?** No. With no network, the first-run setup stops at "Let's connect
+   you to a network", and that page has no way on. With the `BypassNRO` key
+   from the file too, the page shows "I don't have internet". The next page
+   asks for the name of a local account, and the page after it asks for its
+   password. So Burnout holds no password. This ran on Home.
 
-The VM is made for this: aarch64, UEFI, no TPM, a blank NVMe disk, no network
-adapter, and a drive image from the example as a USB disk.
+The five `LabConfig` keys work too: Setup shows no refusal on the VM with no
+TPM.
 
 **The exit test.** A drive made on each of the three hosts installs Windows 11
 on a machine with no TPM, with no Microsoft account step, from an ISO whose
