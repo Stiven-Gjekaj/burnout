@@ -7,6 +7,7 @@ pub mod cli;
 pub mod commands;
 pub mod elevate;
 pub mod format;
+pub mod json;
 pub mod platform;
 pub mod report;
 pub mod stop;
