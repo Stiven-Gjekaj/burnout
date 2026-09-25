@@ -281,6 +281,7 @@ pub fn drive_from_raw(raw: &RawDisk, system: &BTreeSet<u32>) -> Result<DriveInfo
     };
     info.removable_media = descriptor.removable_media;
     info.system = system.contains(&raw.device_number);
+    info.read_only = raw.write_protected;
     Ok(info)
 }
 
@@ -544,6 +545,7 @@ mod tests {
             alignment: None,
             friendly_name: None,
             removal_policy: None,
+            write_protected: false,
         }
     }
 
@@ -616,6 +618,16 @@ mod tests {
         .unwrap();
         assert!(!d.removable());
         assert_eq!(d.bus, Bus::Nvme);
+    }
+
+    #[test]
+    fn a_write_protected_disk_reads_as_read_only() {
+        let mut disk = raw(2, "Generic", "SD Card", true, 0x07, 1024);
+        let d = drive_from_raw(&disk, &BTreeSet::new()).unwrap();
+        assert!(!d.read_only);
+        disk.write_protected = true;
+        let d = drive_from_raw(&disk, &BTreeSet::new()).unwrap();
+        assert!(d.read_only);
     }
 
     #[test]

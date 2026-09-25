@@ -14,6 +14,7 @@
 //! | `IOCTL_STORAGE_QUERY_PROPERTY` | `0x002D1400` | `FILE_ANY_ACCESS` |
 //! | `IOCTL_DISK_GET_DRIVE_GEOMETRY_EX` | `0x000700A0` | `FILE_ANY_ACCESS` |
 //! | `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS` | `0x00560000` | `FILE_ANY_ACCESS` |
+//! | `IOCTL_DISK_IS_WRITABLE` | `0x00070024` | `FILE_ANY_ACCESS` |
 //!
 //! `IOCTL_DISK_GET_LENGTH_INFO` would give the size in one call, and it is
 //! declared `FILE_READ_ACCESS`. That needs a handle opened with
@@ -36,7 +37,8 @@ use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
     SP_DEVINFO_DATA,
 };
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_ACCESS_DENIED, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    CloseHandle, ERROR_ACCESS_DENIED, ERROR_WRITE_PROTECT, GENERIC_READ, GENERIC_WRITE, HANDLE,
+    INVALID_HANDLE_VALUE,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, FindFirstVolumeW, FindNextVolumeW, FindVolumeClose, FlushFileBuffers, ReadFile,
@@ -66,6 +68,7 @@ const IOCTL_STORAGE_GET_DEVICE_NUMBER: u32 = 0x002D_1080;
 const IOCTL_STORAGE_QUERY_PROPERTY: u32 = 0x002D_1400;
 const IOCTL_DISK_GET_DRIVE_GEOMETRY_EX: u32 = 0x0007_00A0;
 const IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS: u32 = 0x0056_0000;
+const IOCTL_DISK_IS_WRITABLE: u32 = 0x0007_0024;
 
 const STORAGE_DEVICE_PROPERTY: u32 = 0;
 const STORAGE_ACCESS_ALIGNMENT_PROPERTY: u32 = 6;
@@ -294,7 +297,31 @@ fn one_disk(set: HDEVINFO, interface: &mut SP_DEVICE_INTERFACE_DATA) -> Option<R
         alignment: storage_property(&handle, STORAGE_ACCESS_ALIGNMENT_PROPERTY),
         friendly_name: registry_text(set, &mut info, SPDRP_FRIENDLYNAME),
         removal_policy: registry_u32(set, &mut info, SPDRP_REMOVAL_POLICY),
+        write_protected: write_protected(&handle),
     })
+}
+
+/// Whether the disk refuses each write.
+///
+/// `IOCTL_DISK_IS_WRITABLE` succeeds for a disk that takes a write, and fails
+/// with `ERROR_WRITE_PROTECT` for one that does not. Any other failure says
+/// nothing, and the disk then counts as one that takes a write.
+fn write_protected(handle: &Handle) -> bool {
+    let mut written: u32 = 0;
+    // SAFETY: the control takes no buffer in and gives none out.
+    let ok = unsafe {
+        DeviceIoControl(
+            handle.0,
+            IOCTL_DISK_IS_WRITABLE,
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+            0,
+            &mut written,
+            std::ptr::null_mut(),
+        )
+    };
+    ok == 0 && std::io::Error::last_os_error().raw_os_error() == Some(ERROR_WRITE_PROTECT as i32)
 }
 
 fn registry_text(set: HDEVINFO, info: &mut SP_DEVINFO_DATA, property: u32) -> Option<String> {

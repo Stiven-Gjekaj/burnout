@@ -21,6 +21,8 @@ pub struct RawDisk {
     pub friendly_name: Option<String>,
     /// `SPDRP_REMOVAL_POLICY`.
     pub removal_policy: Option<u32>,
+    /// `IOCTL_DISK_IS_WRITABLE` failed with `ERROR_WRITE_PROTECT`.
+    pub write_protected: bool,
 }
 
 /// One volume, as the host answered about it.
