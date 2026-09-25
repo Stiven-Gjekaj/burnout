@@ -227,6 +227,8 @@ burnout list
 The size comes twice. The rounded figure is what a person recognises from the
 box, and the exact count is the number that the code can prove.
 A drive is sold in powers of ten, so the rounded figure uses them too.
+A drive that takes no write, such as an SD card with its lock switch on,
+carries the mark `(read only)`, and `write` refuses it.
 
 ```bash
 burnout write ubuntu-24.04.iso 2

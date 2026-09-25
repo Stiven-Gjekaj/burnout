@@ -966,13 +966,14 @@ The work that turns a program that works into one somebody else can use.
   Measured on the twelve ISOs of the test set: each file is exactly as long as
   its volume.
 
-**What is open.**
-
-- A drive that refuses each write, such as an SD card with its lock switch
-  on. Measured with a disk image attached read only: macOS gives the node no
-  write bit, the probe for a write answers `EACCES`, and Burnout asks for a
-  password that cannot help. The list has to read the write protection of
-  each drive, and the write has to refuse the drive with the fix.
+- A drive that takes no write, such as an SD card with its lock switch on,
+  is marked `(read only)` in the list, and the write refuses it before the
+  privilege, with the lock switch as the fix. Before this, macOS answered the
+  probe for a write with `EACCES`, and Burnout asked for a password that
+  cannot help. macOS reads `Writable` from the registry, Linux reads
+  `/sys/block/<drive>/ro`, and Windows asks `IOCTL_DISK_IS_WRITABLE`.
+  Measured on macOS with a disk image attached read only. Linux and Windows
+  are not measured yet.
 
 **The exit test.** Somebody who has never seen the project writes a Windows
 drive and a Linux drive, on a host you did not choose, without asking you a
