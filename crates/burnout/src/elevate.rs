@@ -80,17 +80,17 @@ pub fn plan(state: State) -> Plan {
 pub fn refusal(state: State) -> Error {
     let remedy = if !state.can_restart {
         "Close this window. Open Command Prompt or PowerShell with \"Run as \
-         administrator\", and run the same command there."
+         administrator\", and run the same command there"
             .to_string()
     } else if state.already_elevated {
         "The restart through sudo did not give root. Run the same command \
-         under sudo yourself."
+         under sudo yourself"
             .to_string()
     } else if state.no_elevate {
-        "Take --no-elevate off, or run the same command under sudo.".to_string()
+        "Remove --no-elevate, or run the same command under sudo".to_string()
     } else {
         "There is no terminal to ask a password on. Run the same command \
-         under sudo."
+         under sudo"
             .to_string()
     };
     Error::NeedsPrivilege { remedy }
@@ -177,7 +177,7 @@ pub fn start_again(arguments: &[String]) -> Result<std::convert::Infallible> {
     }
     Err(Error::NeedsPrivilege {
         remedy: format!(
-            "Neither sudo nor doas is here ({}), so run the same command as root yourself.",
+            "Neither sudo nor doas is on this system ({}). Run the same command as root",
             last.map(|e| e.to_string()).unwrap_or_default()
         ),
     })

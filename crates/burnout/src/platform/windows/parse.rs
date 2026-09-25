@@ -61,7 +61,7 @@ fn u64_at(bytes: &[u8], offset: usize) -> Result<u64> {
 
 fn short(offset: usize, want: usize, have: usize) -> Error {
     Error::Host {
-        source: "a Windows device answer".to_string(),
+        source: "Windows".to_string(),
         detail: format!("{want} bytes at {offset} are not in a buffer of {have}"),
     }
 }

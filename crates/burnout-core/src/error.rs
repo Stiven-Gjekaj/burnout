@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use crate::{grouped, size_column};
+
 /// What went wrong.
 ///
 /// Each variant names one cause. A message says what the code can prove, and
@@ -175,24 +177,43 @@ pub enum Error {
     },
 }
 
+/// Where a person reports a fault of Burnout.
+const ISSUES: &str = concat!(env!("CARGO_PKG_REPOSITORY"), "/issues");
+
 impl fmt::Display for Error {
+    /// The message says what went wrong, and then what to do about it.
+    ///
+    /// A message starts in lower case and ends with no full stop, because
+    /// the command line puts `burnout: ` before it.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Io(e) => write!(f, "{e}"),
             Error::Unsupported { target } => {
-                write!(f, "Burnout does not support {target}")
+                write!(
+                    f,
+                    "Burnout does not support {target}. Use Burnout on macOS, Linux or Windows"
+                )
             }
             Error::Host { source, detail } => {
                 write!(
                     f,
-                    "{source} gave an answer that Burnout cannot read: {detail}"
+                    "{source} gave no answer that Burnout can use: {detail}. \
+                     Report this message at {ISSUES}"
                 )
             }
             Error::NoSuchDrive { wanted } => {
-                write!(f, "no drive carries the name {wanted}")
+                write!(
+                    f,
+                    "Burnout finds no drive {wanted}. Run burnout list, and give the number that \
+                     it shows beside the drive"
+                )
             }
             Error::SectorSize { got } => {
-                write!(f, "a sector size of {got} bytes is not 512 and not 4096")
+                write!(
+                    f,
+                    "the drive has sectors of {got} bytes, and Burnout writes only sectors of 512 \
+                     or 4096 bytes. Use a different drive"
+                )
             }
             Error::Unaligned {
                 length,
@@ -200,7 +221,9 @@ impl fmt::Display for Error {
             } => {
                 write!(
                     f,
-                    "a length of {length} bytes does not divide by a sector of {sector_size} bytes"
+                    "a length of {} bytes is not a whole number of sectors of {sector_size} \
+                     bytes. Report this message at {ISSUES}",
+                    grouped(*length)
                 )
             }
             Error::TooSmall {
@@ -209,13 +232,16 @@ impl fmt::Display for Error {
             } => {
                 write!(
                     f,
-                    "the image holds {image_bytes} bytes and the drive holds {drive_bytes}"
+                    "the image holds {}, and the drive holds {}. Use a larger drive",
+                    size_column(*image_bytes),
+                    size_column(*drive_bytes)
                 )
             }
             Error::SystemDisk { name } => {
                 write!(
                     f,
-                    "{name} is the drive that this system starts from, and no option allows a write to it"
+                    "{name} is the drive that this system starts from, and no option allows a \
+                     write to it. Choose a different drive"
                 )
             }
             Error::NotRemovable { name } => {
@@ -227,7 +253,8 @@ impl fmt::Display for Error {
             Error::DriveChanged { wanted, found } => {
                 write!(
                     f,
-                    "that number named {wanted} and it now names {found}. Run burnout list again"
+                    "the drive changed after you confirmed it: it was {wanted}, and it is now \
+                     {found}. Run burnout list again, and give the number of the drive"
                 )
             }
             Error::NotConfirmed => {
@@ -238,14 +265,18 @@ impl fmt::Display for Error {
                 got,
                 at_byte,
             } => {
+                write!(f, "the drive does not hold the image")?;
+                if let Some(at) = at_byte {
+                    write!(
+                        f,
+                        ". The first byte that differs is at offset {}",
+                        grouped(*at)
+                    )?;
+                }
                 write!(
                     f,
-                    "the drive holds {got} and the image holds {expected}, so the write did not arrive"
-                )?;
-                match at_byte {
-                    Some(at) => write!(f, ". The first byte that differs is at {at}"),
-                    None => Ok(()),
-                }
+                    ". The drive gives the SHA-256 {got}, and the image gives {expected}. {AGAIN}"
+                )
             }
             Error::Image { path, detail } => {
                 write!(f, "cannot read {path}: {detail}")
@@ -260,7 +291,8 @@ impl fmt::Display for Error {
             Error::WindowsOption { option } => {
                 write!(
                     f,
-                    "{option} changes the autounattend.xml of Windows mode, and this image goes in raw mode"
+                    "{option} changes only the autounattend.xml of Windows mode, and this image \
+                     goes in raw mode. Remove {option}"
                 )
             }
             Error::NoMode { path } => {
@@ -272,7 +304,7 @@ impl fmt::Display for Error {
                 )
             }
             Error::NeedsPrivilege { remedy } => {
-                write!(f, "this needs more privilege than it has. {remedy}")
+                write!(f, "Burnout needs more privilege to write a drive. {remedy}")
             }
             Error::Source { path, detail } => {
                 write!(f, "cannot use {path}: {detail}")
@@ -285,14 +317,19 @@ impl fmt::Display for Error {
             } => {
                 write!(
                     f,
-                    "{path} holds {bytes} bytes, and {file_system} holds a file of {limit} bytes or fewer"
+                    "{path} holds {}, and {file_system} holds a file of {} bytes or fewer",
+                    size_column(*bytes),
+                    grouped(*limit)
                 )
             }
             Error::CannotCopy { path, detail } => {
                 write!(f, "cannot copy {path} onto the volume: {detail}")
             }
             Error::VolumeDiffers { path, detail } => {
-                write!(f, "the volume and the source differ at {path}: {detail}")
+                write!(
+                    f,
+                    "the drive does not hold what Burnout wrote in {path}: {detail}. {AGAIN}"
+                )
             }
             Error::PartitionTooSmall {
                 file_system,
@@ -301,7 +338,9 @@ impl fmt::Display for Error {
             } => {
                 write!(
                     f,
-                    "{file_system} needs a partition of {needed_bytes} bytes or more, and this one holds {partition_bytes}"
+                    "{file_system} needs a partition of {} or more, and this one holds {}",
+                    size_column(*needed_bytes),
+                    size_column(*partition_bytes)
                 )
             }
             Error::NeedsLargerDrive {
@@ -310,8 +349,10 @@ impl fmt::Display for Error {
             } => {
                 write!(
                     f,
-                    "the layout of Windows mode needs a drive of {needed_bytes} bytes or more, \
-                     and this drive holds {drive_bytes}"
+                    "the layout of Windows mode needs a drive of {} or more, and this drive \
+                     holds {}. Use a larger drive",
+                    size_column(*needed_bytes),
+                    size_column(*drive_bytes)
                 )
             }
             Error::VolumeFull {
@@ -321,12 +362,18 @@ impl fmt::Display for Error {
             } => {
                 write!(
                     f,
-                    "the files take {needed_bytes} bytes of the {file_system} volume, and it holds {free_bytes} bytes for files"
+                    "the files take {} of the {file_system} volume, and it holds {} for files",
+                    size_column(*needed_bytes),
+                    size_column(*free_bytes)
                 )
             }
         }
     }
 }
+
+/// The fix for a check that found a drive that does not hold what went onto
+/// it. One more fault on a second write is a fault of the drive.
+const AGAIN: &str = "Write the image again. If the check fails again, use a different drive";
 
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
@@ -355,18 +402,40 @@ mod tests {
         let e = Error::SectorSize { got: 1024 };
         assert_eq!(
             e.to_string(),
-            "a sector size of 1024 bytes is not 512 and not 4096"
+            "the drive has sectors of 1024 bytes, and Burnout writes only sectors of 512 or 4096 \
+             bytes. Use a different drive"
         );
     }
 
     #[test]
-    fn an_unaligned_message_gives_both_numbers() {
-        let e = Error::Unaligned {
+    fn an_unaligned_message_gives_both_numbers_and_asks_for_a_report() {
+        // Each length that this check sees comes from the host or from a
+        // plan of Burnout. A length that fails it is a fault of Burnout.
+        let text = Error::Unaligned {
             length: 1000,
             sector_size: 512,
+        }
+        .to_string();
+        assert!(
+            text.starts_with(
+                "a length of 1,000 bytes is not a whole number of sectors of 512 bytes"
+            ),
+            "{text}"
+        );
+        assert!(text.ends_with(ISSUES), "{text}");
+    }
+
+    #[test]
+    fn a_host_message_names_the_source_and_asks_for_a_report() {
+        let e = Error::Host {
+            source: "sysfs size".to_string(),
+            detail: "\"abc\" is not a count of sectors".to_string(),
         };
-        assert!(e.to_string().contains("1000"));
-        assert!(e.to_string().contains("512"));
+        assert_eq!(
+            e.to_string(),
+            "sysfs size gave no answer that Burnout can use: \"abc\" is not a count of sectors. \
+             Report this message at https://github.com/Stiven-Gjekaj/burnout/issues"
+        );
     }
 
     #[test]
@@ -377,6 +446,19 @@ mod tests {
             name: "disk0".to_string(),
         };
         assert!(e.to_string().contains("no option"));
+        assert!(e.to_string().ends_with("Choose a different drive"));
+    }
+
+    #[test]
+    fn a_missing_drive_message_says_where_the_numbers_are() {
+        let e = Error::NoSuchDrive {
+            wanted: "7".to_string(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "Burnout finds no drive 7. Run burnout list, and give the number that it shows \
+             beside the drive"
+        );
     }
 
     #[test]
@@ -393,9 +475,44 @@ mod tests {
             wanted: "Samsung T7".to_string(),
             found: "SanDisk Ultra".to_string(),
         };
+        assert_eq!(
+            e.to_string(),
+            "the drive changed after you confirmed it: it was Samsung T7, and it is now SanDisk \
+             Ultra. Run burnout list again, and give the number of the drive"
+        );
+    }
+
+    #[test]
+    fn a_windows_option_message_names_the_option_to_remove() {
+        let e = Error::WindowsOption {
+            option: "--skip-hardware-checks",
+        };
         let text = e.to_string();
-        assert!(text.contains("Samsung T7"));
-        assert!(text.contains("SanDisk Ultra"));
+        assert!(
+            text.starts_with("--skip-hardware-checks changes only"),
+            "{text}"
+        );
+        assert!(text.ends_with("Remove --skip-hardware-checks"), "{text}");
+    }
+
+    #[test]
+    fn a_privilege_message_ends_with_the_remedy() {
+        let e = Error::NeedsPrivilege {
+            remedy: "Run the same command under sudo".to_string(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "Burnout needs more privilege to write a drive. Run the same command under sudo"
+        );
+    }
+
+    #[test]
+    fn an_unsupported_host_message_names_the_hosts_that_work() {
+        let e = Error::Unsupported { target: "freebsd" };
+        assert_eq!(
+            e.to_string(),
+            "Burnout does not support freebsd. Use Burnout on macOS, Linux or Windows"
+        );
     }
 
     #[test]
@@ -429,10 +546,11 @@ mod tests {
             file_system: "FAT32",
             limit: 4_294_967_295,
         };
-        let text = e.to_string();
-        assert!(text.contains("sources/install.wim"));
-        assert!(text.contains("5000000000"));
-        assert!(text.contains("4294967295"));
+        assert_eq!(
+            e.to_string(),
+            "sources/install.wim holds 5.0 GB (5,000,000,000 bytes), and FAT32 holds a file of \
+             4,294,967,295 bytes or fewer"
+        );
     }
 
     #[test]
@@ -443,7 +561,9 @@ mod tests {
         };
         assert_eq!(
             e.to_string(),
-            "the volume and the source differ at efi/boot/bootx64.efi: the volume holds 10 bytes and the source 12"
+            "the drive does not hold what Burnout wrote in efi/boot/bootx64.efi: the volume \
+             holds 10 bytes and the source 12. Write the image again. If the check fails again, \
+             use a different drive"
         );
     }
 
@@ -454,10 +574,24 @@ mod tests {
             partition_bytes: 1_048_576,
             needed_bytes: 34_077_184,
         };
-        let text = e.to_string();
-        assert!(text.contains("FAT32"));
-        assert!(text.contains("1048576"));
-        assert!(text.contains("34077184"));
+        assert_eq!(
+            e.to_string(),
+            "FAT32 needs a partition of 34.1 MB (34,077,184 bytes) or more, and this one holds \
+             1.0 MB (1,048,576 bytes)"
+        );
+    }
+
+    #[test]
+    fn a_larger_drive_message_gives_both_sizes_and_the_fix() {
+        let e = Error::NeedsLargerDrive {
+            needed_bytes: 7_000_000_000,
+            drive_bytes: 4_000_000_000,
+        };
+        assert_eq!(
+            e.to_string(),
+            "the layout of Windows mode needs a drive of 7.0 GB (7,000,000,000 bytes) or more, \
+             and this drive holds 4.0 GB (4,000,000,000 bytes). Use a larger drive"
+        );
     }
 
     #[test]
@@ -469,7 +603,8 @@ mod tests {
         };
         assert_eq!(
             e.to_string(),
-            "the files take 7000000000 bytes of the exFAT volume, and it holds 6000000000 bytes for files"
+            "the files take 7.0 GB (7,000,000,000 bytes) of the exFAT volume, and it holds \
+             6.0 GB (6,000,000,000 bytes) for files"
         );
     }
 
@@ -480,10 +615,12 @@ mod tests {
             got: "bb".to_string(),
             at_byte: Some(4096),
         };
-        let text = e.to_string();
-        assert!(text.contains("aa"));
-        assert!(text.contains("bb"));
-        assert!(text.ends_with("at 4096"));
+        assert_eq!(
+            e.to_string(),
+            "the drive does not hold the image. The first byte that differs is at offset 4,096. \
+             The drive gives the SHA-256 bb, and the image gives aa. Write the image again. If \
+             the check fails again, use a different drive"
+        );
     }
 
     #[test]
@@ -502,9 +639,11 @@ mod tests {
             image_bytes: 8_000_000_000,
             drive_bytes: 4_000_000_000,
         };
-        let text = e.to_string();
-        assert!(text.contains("8000000000"));
-        assert!(text.contains("4000000000"));
+        assert_eq!(
+            e.to_string(),
+            "the image holds 8.0 GB (8,000,000,000 bytes), and the drive holds 4.0 GB \
+             (4,000,000,000 bytes). Use a larger drive"
+        );
     }
 
     #[test]
@@ -517,6 +656,129 @@ mod tests {
             e.to_string(),
             "cannot read /tmp/ubuntu.iso: No such file or directory"
         );
+    }
+
+    /// One error of each kind.
+    fn one_of_each() -> Vec<Error> {
+        let text = || "x".to_string();
+        let all = vec![
+            Error::Io(std::io::Error::other("x")),
+            Error::Unsupported { target: "x" },
+            Error::Host {
+                source: text(),
+                detail: text(),
+            },
+            Error::NoSuchDrive { wanted: text() },
+            Error::SectorSize { got: 1 },
+            Error::Unaligned {
+                length: 1,
+                sector_size: 512,
+            },
+            Error::TooSmall {
+                image_bytes: 2,
+                drive_bytes: 1,
+            },
+            Error::SystemDisk { name: text() },
+            Error::NotRemovable { name: text() },
+            Error::DriveChanged {
+                wanted: text(),
+                found: text(),
+            },
+            Error::NotConfirmed,
+            Error::VerifyFailed {
+                expected: text(),
+                got: text(),
+                at_byte: Some(1),
+            },
+            Error::Image {
+                path: text(),
+                detail: text(),
+            },
+            Error::MacosMedia {
+                path: text(),
+                what: "x",
+            },
+            Error::WindowsOption { option: "x" },
+            Error::NoMode { path: text() },
+            Error::NeedsPrivilege { remedy: text() },
+            Error::Source {
+                path: text(),
+                detail: text(),
+            },
+            Error::FileTooLarge {
+                path: text(),
+                bytes: 2,
+                file_system: "x",
+                limit: 1,
+            },
+            Error::CannotCopy {
+                path: text(),
+                detail: text(),
+            },
+            Error::VolumeDiffers {
+                path: text(),
+                detail: text(),
+            },
+            Error::PartitionTooSmall {
+                file_system: "x",
+                partition_bytes: 1,
+                needed_bytes: 2,
+            },
+            Error::NeedsLargerDrive {
+                needed_bytes: 2,
+                drive_bytes: 1,
+            },
+            Error::VolumeFull {
+                file_system: "x",
+                needed_bytes: 2,
+                free_bytes: 1,
+            },
+        ];
+        // A new kind of error does not compile here until it is in the list
+        // above, so it cannot miss the test below.
+        for e in &all {
+            match e {
+                Error::Io(_)
+                | Error::Unsupported { .. }
+                | Error::Host { .. }
+                | Error::NoSuchDrive { .. }
+                | Error::SectorSize { .. }
+                | Error::Unaligned { .. }
+                | Error::TooSmall { .. }
+                | Error::SystemDisk { .. }
+                | Error::NotRemovable { .. }
+                | Error::DriveChanged { .. }
+                | Error::NotConfirmed
+                | Error::VerifyFailed { .. }
+                | Error::Image { .. }
+                | Error::MacosMedia { .. }
+                | Error::WindowsOption { .. }
+                | Error::NoMode { .. }
+                | Error::NeedsPrivilege { .. }
+                | Error::Source { .. }
+                | Error::FileTooLarge { .. }
+                | Error::CannotCopy { .. }
+                | Error::VolumeDiffers { .. }
+                | Error::PartitionTooSmall { .. }
+                | Error::NeedsLargerDrive { .. }
+                | Error::VolumeFull { .. } => {}
+            }
+        }
+        all
+    }
+
+    #[test]
+    fn each_message_ends_with_no_full_stop_and_holds_no_dash_of_prose() {
+        // The command line prints `burnout: ` and then the message. A full
+        // stop at the end of one message and none at the end of the next
+        // would read as two programs.
+        for e in one_of_each() {
+            let text = e.to_string();
+            assert!(!text.ends_with('.'), "{text}");
+            assert!(!text.contains(".."), "{text}");
+            assert!(!text.contains('\u{2014}'), "{text}");
+            assert!(!text.contains("  "), "{text}");
+        }
     }
 
     #[test]

@@ -323,9 +323,8 @@ fn settle(
         let disk = DADiskCreateFromBSDName(std::ptr::null(), session, name.as_ptr());
         if disk.is_null() {
             CFRelease(session as CFTypeRef);
-            return Err(Error::Host {
-                source: "DADiskCreateFromBSDName".to_string(),
-                detail: format!("{bsd_name} names no disk"),
+            return Err(Error::NoSuchDrive {
+                wanted: bsd_name.to_string(),
             });
         }
 
@@ -352,7 +351,7 @@ fn settle(
         if !outcome.answered {
             return Err(Error::Host {
                 source: source.to_string(),
-                detail: format!("{bsd_name} did not answer in thirty seconds"),
+                detail: format!("no answer came for {bsd_name} in thirty seconds"),
             });
         }
         if outcome.status != 0 {

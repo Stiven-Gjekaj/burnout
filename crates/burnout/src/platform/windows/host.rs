@@ -187,7 +187,7 @@ fn enumerate() -> Result<Vec<RawDisk>> {
     if set == INVALID_DEVICE_SET {
         return Err(Error::Host {
             source: "SetupDiGetClassDevsW".to_string(),
-            detail: "the device set could not be opened".to_string(),
+            detail: "it gave no set of devices".to_string(),
         });
     }
 
@@ -537,7 +537,7 @@ fn open_for_write(path: &[u16]) -> Result<Handle> {
         if error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) {
             return Err(Error::NeedsPrivilege {
                 remedy: "Start a Command Prompt or PowerShell with \"Run as administrator\", \
-                         and run the same command there."
+                         and run the same command there"
                     .to_string(),
             });
         }

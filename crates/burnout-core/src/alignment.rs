@@ -96,9 +96,16 @@ mod tests {
     #[test]
     fn an_unaligned_length_is_refused_and_the_error_carries_both_numbers() {
         let e = check_aligned(1000, 512).unwrap_err();
-        let text = e.to_string();
-        assert!(text.contains("1000"));
-        assert!(text.contains("512"));
+        assert!(
+            matches!(
+                e,
+                Error::Unaligned {
+                    length: 1000,
+                    sector_size: 512
+                }
+            ),
+            "{e}"
+        );
     }
 
     #[test]

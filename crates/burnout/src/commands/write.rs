@@ -527,7 +527,7 @@ fn find_target(args: &WriteArgs) -> Result<(Vec<DriveInfo>, DriveInfo)> {
     // took that rule away.
     let Some(index) = args.target else {
         return Err(Error::NoSuchDrive {
-            wanted: "nothing. Give the number that burnout list printed".to_string(),
+            wanted: "that the command names".to_string(),
         });
     };
     let found = burnout_core::by_index(&drives, index)
