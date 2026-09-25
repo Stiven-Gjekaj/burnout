@@ -339,7 +339,8 @@ fn eject_note(ejected: &Result<()>) {
 /// mount the new volumes. macOS does, and so does a Linux desktop. A mounted
 /// volume holds the drive, and the open then fails as busy. So each try takes
 /// the volumes off first, and a busy drive gets another try while the host
-/// still reads it.
+/// still reads it. A volume that a program of the host already reads stops
+/// the unmount as busy, and it gets another try too.
 fn open_again<A: DriveAccess>(
     access: &A,
     drive: &DriveInfo,
@@ -348,8 +349,10 @@ fn open_again<A: DriveAccess>(
 ) -> Result<A::Target> {
     let mut left = tries;
     loop {
-        access.unmount_volumes(&drive.id)?;
-        match access.open(&drive.id) {
+        let opened = access
+            .unmount_volumes(&drive.id)
+            .and_then(|()| access.open(&drive.id));
+        match opened {
             Err(e) if busy(&e) && left > 1 => {
                 left -= 1;
                 thread::sleep(pause);
@@ -798,9 +801,11 @@ mod tests {
     }
 
     /// A drive that answers each open with the next answer of a list, and
-    /// counts the calls.
+    /// counts the calls. An unmount answers from a list of its own, and
+    /// takes the volumes off when that list is empty.
     struct HeldDrive {
         answers: std::cell::RefCell<Vec<Answer>>,
+        unmount_answers: std::cell::RefCell<Vec<Answer>>,
         unmounts: std::cell::Cell<u32>,
         opens: std::cell::Cell<u32>,
     }
@@ -809,9 +814,24 @@ mod tests {
         fn new(answers: &[Answer]) -> Self {
             HeldDrive {
                 answers: std::cell::RefCell::new(answers.iter().rev().copied().collect()),
+                unmount_answers: std::cell::RefCell::new(Vec::new()),
                 unmounts: std::cell::Cell::new(0),
                 opens: std::cell::Cell::new(0),
             }
+        }
+
+        fn with_unmounts(self, answers: &[Answer]) -> Self {
+            *self.unmount_answers.borrow_mut() = answers.iter().rev().copied().collect();
+            self
+        }
+    }
+
+    fn fail(answer: Answer) -> Error {
+        match answer {
+            Answer::Busy => Error::InUse {
+                what: "/dev/rdisk5".to_string(),
+            },
+            _ => Error::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
         }
     }
 
@@ -820,19 +840,17 @@ mod tests {
 
         fn unmount_volumes(&self, _id: &DriveId) -> Result<()> {
             self.unmounts.set(self.unmounts.get() + 1);
-            Ok(())
+            match self.unmount_answers.borrow_mut().pop() {
+                Some(Answer::Opens) | None => Ok(()),
+                Some(answer) => Err(fail(answer)),
+            }
         }
 
         fn open(&self, _id: &DriveId) -> Result<Self::Target> {
             self.opens.set(self.opens.get() + 1);
             match self.answers.borrow_mut().pop() {
-                Some(Answer::Busy) => Err(Error::InUse {
-                    what: "/dev/rdisk5".to_string(),
-                }),
-                Some(Answer::Refuses) => Err(Error::Io(std::io::Error::from(
-                    std::io::ErrorKind::PermissionDenied,
-                ))),
                 Some(Answer::Opens) | None => burnout_core::MemoryTarget::new(4096, 512),
+                Some(answer) => Err(fail(answer)),
             }
         }
     }
@@ -856,6 +874,23 @@ mod tests {
         // Each try takes the volumes off first, because the host can mount
         // them between two tries.
         assert_eq!((drive.unmounts.get(), drive.opens.get()), (4, 4));
+    }
+
+    #[test]
+    fn a_volume_that_a_program_still_reads_gets_another_try() {
+        let busy = Answer::Busy;
+        let drive = HeldDrive::new(&[Answer::Opens]).with_unmounts(&[busy, busy]);
+        open_again(&drive, &stick(), 40, Duration::ZERO).unwrap();
+        // The open waits for the unmount, so it runs once.
+        assert_eq!((drive.unmounts.get(), drive.opens.get()), (3, 1));
+    }
+
+    #[test]
+    fn another_fault_of_the_unmount_gets_no_second_try() {
+        let drive = HeldDrive::new(&[Answer::Opens]).with_unmounts(&[Answer::Refuses]);
+        let e = open_again(&drive, &stick(), 40, Duration::ZERO).unwrap_err();
+        assert!(!busy(&e), "{e}");
+        assert_eq!((drive.unmounts.get(), drive.opens.get()), (1, 0));
     }
 
     #[test]
