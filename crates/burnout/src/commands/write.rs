@@ -29,7 +29,7 @@ use burnout_core::{
     DriveAccess, DriveInfo, Error, Force, Progress, ProgressEvent, Result, Stage,
     BOOT_SECTOR_BYTES,
 };
-use burnout_iso::{mode_of_file, IsoSource, Mode};
+use burnout_iso::{check_whole, mode_of_file, IsoSource, Mode};
 use burnout_layout::{
     unattend_xml, verify_windows, write_windows, Layout, Serials, Unattend, WindowsDrive,
     WindowsTree, UNATTEND_FILE,
@@ -148,6 +148,7 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
 
 /// Read the image and choose the mode, before anything needs privilege.
 fn prepare(args: &WriteArgs) -> Result<Job> {
+    refuse_incomplete(&args.image)?;
     let mode = match args.mode {
         Some(ModeArg::Raw) => Mode::Raw,
         Some(ModeArg::Windows) => Mode::Windows,
@@ -176,6 +177,22 @@ fn prepare(args: &WriteArgs) -> Result<Job> {
         bytes,
         boot_table,
     })
+}
+
+/// Refuse an image that ends before its own volume does, in either mode and
+/// before the mode check reads its tree.
+///
+/// A path that is not a file goes on, and the mode check names what it is.
+fn refuse_incomplete(image: &Path) -> Result<()> {
+    if !image.is_file() {
+        return Ok(());
+    }
+    let name = image.display().to_string();
+    let mut file = File::open(image).map_err(|e| Error::Image {
+        path: name.clone(),
+        detail: e.to_string(),
+    })?;
+    check_whole(&mut file, &name)
 }
 
 /// Refuse an option of Windows mode for an image that goes in raw mode.

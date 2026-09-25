@@ -113,6 +113,19 @@ pub enum Error {
         /// The size that the drive reports, in bytes.
         drive_bytes: u64,
     },
+    /// The image ends before the end that its own file system records.
+    ///
+    /// A download that stopped early gives this. A raw write of such a file
+    /// would pass its check, because the check compares the drive with the
+    /// same short file.
+    Incomplete {
+        /// The path, as the person gave it.
+        path: String,
+        /// The length of the file.
+        image_bytes: u64,
+        /// The length that the file system of the image records.
+        needed_bytes: u64,
+    },
     /// The image file cannot be read, or holds nothing to write.
     Image {
         /// The path, as the person gave it.
@@ -336,6 +349,20 @@ impl fmt::Display for Error {
                      drive again, and write the image again",
                     grouped(*at_byte),
                     size_column(*drive_bytes)
+                )
+            }
+            Error::Incomplete {
+                path,
+                image_bytes,
+                needed_bytes,
+            } => {
+                write!(
+                    f,
+                    "{path} holds {} bytes, and its file system says that it holds {}. The image \
+                     is incomplete. Download it again, and compare its SHA-256 with the one that \
+                     its publisher gives",
+                    grouped(*image_bytes),
+                    grouped(*needed_bytes)
                 )
             }
             Error::Image { path, detail } => {
@@ -801,6 +828,21 @@ mod tests {
     }
 
     #[test]
+    fn an_incomplete_image_message_gives_both_lengths_and_the_fix() {
+        let e = Error::Incomplete {
+            path: "Win11.iso".to_string(),
+            image_bytes: 3_000_000_000,
+            needed_bytes: 7_994_415_104,
+        };
+        assert_eq!(
+            e.to_string(),
+            "Win11.iso holds 3,000,000,000 bytes, and its file system says that it holds \
+             7,994,415,104. The image is incomplete. Download it again, and compare its SHA-256 \
+             with the one that its publisher gives"
+        );
+    }
+
+    #[test]
     fn a_size_message_gives_both_sizes() {
         let e = Error::TooSmall {
             image_bytes: 8_000_000_000,
@@ -866,6 +908,11 @@ mod tests {
                 at_byte: 1,
                 drive_bytes: 2,
             },
+            Error::Incomplete {
+                path: text(),
+                image_bytes: 1,
+                needed_bytes: 2,
+            },
             Error::Image {
                 path: text(),
                 detail: text(),
@@ -929,6 +976,7 @@ mod tests {
                 | Error::VerifyFailed { .. }
                 | Error::ImageEnded { .. }
                 | Error::DriveEnded { .. }
+                | Error::Incomplete { .. }
                 | Error::Image { .. }
                 | Error::MacosMedia { .. }
                 | Error::WindowsOption { .. }

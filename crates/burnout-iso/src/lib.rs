@@ -19,6 +19,8 @@ mod source;
 #[cfg(test)]
 mod testing;
 mod udf;
+mod whole;
 
 pub use mode::{mode_of, mode_of_file, Mode};
 pub use source::{FileSystem, IsoSource, Link};
+pub use whole::{check_whole, volume_bytes};
