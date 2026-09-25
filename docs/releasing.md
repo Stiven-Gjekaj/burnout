@@ -55,6 +55,21 @@ Every item has to be true, and not only probably true.
        brew install stiven-gjekaj/tap/burnout
        burnout --version
 
+At version 1, two more channels open, and [the roadmap](roadmap.md) says why
+they wait. The scripts are ready, and nothing publishes what they write before
+then.
+
+8. Write the Scoop manifest, and commit it to a bucket:
+
+       scripts/scoop-manifest.sh 1.0.0 release/SHA256SUMS > burnout.json
+
+9. Write the winget manifest into a clone of
+   [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs), check it
+   on Windows, and open a pull request with it:
+
+       scripts/winget-manifest.sh 1.0.0 release/SHA256SUMS ../winget-pkgs
+       winget validate --manifest ..\winget-pkgs\manifests\s\Stiven-Gjekaj\Burnout\1.0.0
+
 The draft is the last point where nobody outside the project has the files.
 This tool erases drives, so a person looks before anybody can download it.
 The crates and the tap come after it for the same reason.

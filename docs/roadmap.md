@@ -982,6 +982,10 @@ The work that turns a program that works into one somebody else can use.
   write, and during the check. Linux and Windows are not measured yet.
 - The warning of a download, and the way past it, is in the README, for
   macOS and for Windows.
+- winget and Scoop. `scripts/winget-manifest.sh` and `scripts/scoop-manifest.sh`
+  write each manifest from the `SHA256SUMS` of a release, and
+  [releasing.md](releasing.md) says when to run them. Nothing publishes them
+  before version 1. Both manifests parse. `winget validate` is not run yet.
 - `--json`. `list` prints one object, and `write` prints one object on a line
   for the confirmation, each step, the result, an error and a stop. Each kind
   of error has a name that a script tests. Measured on macOS: a raw write of a
