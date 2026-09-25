@@ -80,3 +80,44 @@ pub fn drive_list() -> Result<Box<dyn DriveList>> {
         })
     }
 }
+
+/// The error of a call that the host refused, with a busy drive as its own
+/// error.
+///
+/// Linux and macOS answer `EBUSY` when a mounted volume or another program
+/// holds what the call asks for. `what` names that, as a person knows it.
+#[cfg(unix)]
+pub fn busy_or(e: std::io::Error, what: &str) -> burnout_core::Error {
+    if e.raw_os_error() == Some(libc::EBUSY) {
+        burnout_core::Error::InUse {
+            what: what.to_string(),
+        }
+    } else {
+        burnout_core::Error::Io(e)
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use burnout_core::Error;
+    use std::io;
+
+    #[test]
+    fn a_busy_answer_names_what_is_busy() {
+        let e = busy_or(io::Error::from_raw_os_error(libc::EBUSY), "/dev/sdb");
+        assert!(
+            matches!(&e, Error::InUse { what } if what == "/dev/sdb"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn another_answer_stays_as_it_came() {
+        let e = busy_or(io::Error::from_raw_os_error(libc::EACCES), "/dev/sdb");
+        assert!(
+            matches!(&e, Error::Io(io) if io.raw_os_error() == Some(libc::EACCES)),
+            "{e}"
+        );
+    }
+}

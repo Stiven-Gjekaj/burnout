@@ -72,6 +72,15 @@ pub enum Error {
         /// What is there now.
         found: String,
     },
+    /// A program or the host holds the drive, so the host does not give it
+    /// to Burnout.
+    ///
+    /// A mounted volume that a program reads is the usual cause, and a host
+    /// that is still busy with a new volume is the other one.
+    InUse {
+        /// What is in use: a volume, a mount point or the node of the drive.
+        what: String,
+    },
     /// The person did not confirm the drive.
     NotConfirmed {
         /// The drive, as a message names it.
@@ -258,6 +267,12 @@ impl fmt::Display for Error {
                     f,
                     "the drive changed after you confirmed it: it was {wanted}, and it is now \
                      {found}. Run burnout list again, and give the number of the drive"
+                )
+            }
+            Error::InUse { what } => {
+                write!(
+                    f,
+                    "{what} is in use. Close each program that uses the drive, and try again"
                 )
             }
             Error::NotConfirmed { drive } => {
@@ -489,6 +504,18 @@ mod tests {
     }
 
     #[test]
+    fn a_busy_drive_message_names_what_is_busy_and_the_fix() {
+        let e = Error::InUse {
+            what: "/run/media/liveuser/FEDORA".to_string(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "/run/media/liveuser/FEDORA is in use. Close each program that uses the drive, and \
+             try again"
+        );
+    }
+
+    #[test]
     fn a_declined_write_names_the_drive_that_it_left_alone() {
         let e = Error::NotConfirmed {
             drive: "Flash Drive (disk5, 128,320,801,792 bytes)".to_string(),
@@ -702,6 +729,7 @@ mod tests {
                 wanted: text(),
                 found: text(),
             },
+            Error::InUse { what: text() },
             Error::NotConfirmed { drive: text() },
             Error::VerifyFailed {
                 expected: text(),
@@ -766,6 +794,7 @@ mod tests {
                 | Error::SystemDisk { .. }
                 | Error::NotRemovable { .. }
                 | Error::DriveChanged { .. }
+                | Error::InUse { .. }
                 | Error::NotConfirmed { .. }
                 | Error::VerifyFailed { .. }
                 | Error::Image { .. }

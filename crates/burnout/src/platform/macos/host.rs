@@ -246,7 +246,11 @@ impl DriveAccess for MacosAccess {
         // The raw node, and never /dev/diskN. The raw node skips the buffer
         // cache, so what is written is on the medium and a read back is a
         // read of the medium.
-        let file = OpenOptions::new().read(true).write(true).open(&info.node)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&info.node)
+            .map_err(|e| super::super::busy_or(e, &info.node))?;
         Ok(MacosDisk {
             file,
             sector_size: info.logical_sector_size,
@@ -354,11 +358,19 @@ fn settle(
                 detail: format!("no answer came for {bsd_name} in thirty seconds"),
             });
         }
-        if outcome.status != 0 {
-            return Err(Error::Host {
-                source: source.to_string(),
-                detail: format!("{bsd_name} refused with status {:#010x}", outcome.status),
-            });
+        match outcome.status {
+            0 => {}
+            DA_UNIX_BUSY | DA_RETURN_BUSY | EXCLUSIVE_ACCESS => {
+                return Err(Error::InUse {
+                    what: bsd_name.to_string(),
+                });
+            }
+            status => {
+                return Err(Error::Host {
+                    source: source.to_string(),
+                    detail: format!("{bsd_name} refused with status {status:#010x}"),
+                });
+            }
         }
     }
     Ok(())
@@ -551,13 +563,22 @@ impl BlockTarget for MacosDisk {
 /// carry it.
 const DKIOCSYNCHRONIZECACHE: libc::c_ulong = 0x2000_6416;
 
+/// `unix_err(EBUSY)` of `<mach/error.h>`, the answer to a request for a
+/// volume that a program uses. Measured: the unmount of a disk image with a
+/// file open on its volume answers this.
+const DA_UNIX_BUSY: i32 = 0x0000_C000 | libc::EBUSY;
+
+/// `kDAReturnBusy` of Disk Arbitration.
+const DA_RETURN_BUSY: i32 = 0xF8DA_0002_u32 as i32;
+
 /// `kDADiskUnmountOptionWhole`, which takes every volume of the disk.
 const UNMOUNT_WHOLE: u32 = 0x0000_0001;
 
 /// `kDADiskEjectOptionDefault`.
 const EJECT_DEFAULT: u32 = 0;
 
-/// `kDAReturnExclusiveAccess`, the reason that a refused mount gives.
+/// `kDAReturnExclusiveAccess`, the reason that a refused mount gives. A
+/// request for a disk that another program holds for itself answers it too.
 const EXCLUSIVE_ACCESS: i32 = 0xF8DA_0004_u32 as i32;
 
 type DASessionRef = *const c_void;

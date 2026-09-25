@@ -502,9 +502,10 @@ fn from_wide(buffer: &[u16]) -> String {
 fn lock_volume(path: &str) -> Result<Handle> {
     let handle = open_for_write(&wide(path))?;
     if control(&handle, FSCTL_LOCK_VOLUME, &[], 0).is_none() {
-        return Err(Error::Host {
-            source: "FSCTL_LOCK_VOLUME".to_string(),
-            detail: format!("{path} is in use, so close what is reading it and try again"),
+        // The path names the volume by its GUID, which a person does not
+        // know. Explorer shows the volume by its letter.
+        return Err(Error::InUse {
+            what: "a volume of the drive".to_string(),
         });
     }
     if control(&handle, FSCTL_DISMOUNT_VOLUME, &[], 0).is_none() {

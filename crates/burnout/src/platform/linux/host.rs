@@ -80,11 +80,13 @@ impl DriveAccess for LinuxAccess {
         // for a file of that name. The kernel refuses while a file system
         // holds the drive, so this cannot start a write over a mounted
         // volume. It comes after the unmount for that reason.
+        let node = format!("/dev/{name}");
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .custom_flags(libc::O_EXCL)
-            .open(format!("/dev/{name}"))?;
+            .open(&node)
+            .map_err(|e| super::super::busy_or(e, &node))?;
 
         Ok(LinuxDisk {
             file,
@@ -117,7 +119,7 @@ fn umount(point: &str) -> Result<()> {
     // flags are zero, which is the plain unmount.
     let code = unsafe { libc::umount2(path.as_ptr(), 0) };
     if code != 0 {
-        return Err(Error::Io(io::Error::last_os_error()));
+        return Err(super::super::busy_or(io::Error::last_os_error(), point));
     }
     Ok(())
 }

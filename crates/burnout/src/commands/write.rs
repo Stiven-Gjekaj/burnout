@@ -320,6 +320,12 @@ fn eject_note(ejected: &Result<()>) {
                  it again."
             );
         }
+        // A busy drive gets no fix of its own here. The fix of a busy drive
+        // is to try again, and the eject does not get another try.
+        Err(Error::InUse { .. }) => println!(
+            "The eject failed, because a program uses the drive. The host can mount the drive \
+             and write to it, so eject it before you remove it."
+        ),
         Err(e) => println!(
             "The eject failed: {e}. The host can mount the drive and write to it, so eject it \
              before you remove it."
@@ -355,15 +361,7 @@ fn open_again<A: DriveAccess>(
 
 /// A drive that a volume or a probe of the host holds answers busy.
 fn busy(e: &Error) -> bool {
-    #[cfg(unix)]
-    {
-        matches!(e, Error::Io(io) if io.raw_os_error() == Some(libc::EBUSY))
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = e;
-        false
-    }
+    matches!(e, Error::InUse { .. })
 }
 
 /// The Windows layer took the drive offline for the write, and a person who
@@ -791,19 +789,24 @@ mod tests {
         assert!(!names_drive(&stick, "/dev/sdb1"));
     }
 
+    /// What one open of a [`HeldDrive`] answers.
+    #[derive(Clone, Copy)]
+    enum Answer {
+        Opens,
+        Busy,
+        Refuses,
+    }
+
     /// A drive that answers each open with the next answer of a list, and
     /// counts the calls.
-    #[cfg(unix)]
     struct HeldDrive {
-        answers: std::cell::RefCell<Vec<Option<i32>>>,
+        answers: std::cell::RefCell<Vec<Answer>>,
         unmounts: std::cell::Cell<u32>,
         opens: std::cell::Cell<u32>,
     }
 
-    #[cfg(unix)]
     impl HeldDrive {
-        /// `None` opens the drive, and `Some(errno)` fails with that error.
-        fn new(answers: &[Option<i32>]) -> Self {
+        fn new(answers: &[Answer]) -> Self {
             HeldDrive {
                 answers: std::cell::RefCell::new(answers.iter().rev().copied().collect()),
                 unmounts: std::cell::Cell::new(0),
@@ -812,7 +815,6 @@ mod tests {
         }
     }
 
-    #[cfg(unix)]
     impl DriveAccess for HeldDrive {
         type Target = burnout_core::MemoryTarget;
 
@@ -823,31 +825,33 @@ mod tests {
 
         fn open(&self, _id: &DriveId) -> Result<Self::Target> {
             self.opens.set(self.opens.get() + 1);
-            match self.answers.borrow_mut().pop().flatten() {
-                Some(errno) => Err(Error::Io(std::io::Error::from_raw_os_error(errno))),
-                None => burnout_core::MemoryTarget::new(4096, 512),
+            match self.answers.borrow_mut().pop() {
+                Some(Answer::Busy) => Err(Error::InUse {
+                    what: "/dev/rdisk5".to_string(),
+                }),
+                Some(Answer::Refuses) => Err(Error::Io(std::io::Error::from(
+                    std::io::ErrorKind::PermissionDenied,
+                ))),
+                Some(Answer::Opens) | None => burnout_core::MemoryTarget::new(4096, 512),
             }
         }
     }
 
-    #[cfg(unix)]
     fn stick() -> DriveInfo {
         DriveInfo::new(DriveId::new("disk5"), "/dev/rdisk5", "Flash Drive")
     }
 
     #[test]
-    #[cfg(unix)]
     fn the_check_takes_the_volumes_off_again_before_it_opens_the_drive() {
-        let drive = HeldDrive::new(&[None]);
+        let drive = HeldDrive::new(&[Answer::Opens]);
         open_again(&drive, &stick(), 40, Duration::ZERO).unwrap();
         assert_eq!((drive.unmounts.get(), drive.opens.get()), (1, 1));
     }
 
     #[test]
-    #[cfg(unix)]
     fn a_drive_that_the_host_still_holds_gets_another_try() {
-        let busy = Some(libc::EBUSY);
-        let drive = HeldDrive::new(&[busy, busy, busy, None]);
+        let busy = Answer::Busy;
+        let drive = HeldDrive::new(&[busy, busy, busy, Answer::Opens]);
         open_again(&drive, &stick(), 40, Duration::ZERO).unwrap();
         // Each try takes the volumes off first, because the host can mount
         // them between two tries.
@@ -855,18 +859,16 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn a_drive_that_stays_busy_gives_its_error_after_the_last_try() {
-        let drive = HeldDrive::new(&[Some(libc::EBUSY); 10]);
+        let drive = HeldDrive::new(&[Answer::Busy; 10]);
         let e = open_again(&drive, &stick(), 5, Duration::ZERO).unwrap_err();
         assert!(busy(&e), "{e}");
         assert_eq!(drive.opens.get(), 5);
     }
 
     #[test]
-    #[cfg(unix)]
     fn another_fault_of_the_open_gets_no_second_try() {
-        let drive = HeldDrive::new(&[Some(libc::EACCES), None]);
+        let drive = HeldDrive::new(&[Answer::Refuses, Answer::Opens]);
         let e = open_again(&drive, &stick(), 40, Duration::ZERO).unwrap_err();
         assert!(!busy(&e), "{e}");
         assert_eq!(drive.opens.get(), 1);
