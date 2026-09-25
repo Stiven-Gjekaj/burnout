@@ -8,7 +8,7 @@
 //! work on the drive got. The error path of the command reads it back, and so
 //! does the handler that [`on_stop`] puts in place for Ctrl-C.
 
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use burnout_core::{Error, Progress, ProgressEvent, Stage};
 
@@ -129,24 +129,70 @@ pub fn note(reached: Reached, e: &Error) -> Option<&'static str> {
     }
 }
 
+/// What a stop says, by how far the work got, as literals that `concat!`
+/// takes. The line for a person and the JSON for a script say the same.
+macro_rules! nothing_text {
+    () => {
+        "Burnout wrote nothing to the drive"
+    };
+}
+macro_rules! writing_text {
+    () => {
+        concat!(part!(), ". Write the image again")
+    };
+}
+macro_rules! unchecked_text {
+    () => {
+        concat!(unchecked!(), ". Write the image again to check it")
+    };
+}
+macro_rules! checked_text {
+    () => {
+        "The drive holds the image, and the check proved it"
+    };
+}
+
 /// The line that a stop by a signal prints, by how far the work got.
 ///
 /// Each line starts with a line break, which ends a progress line that the
 /// stop leaves open, and it ends with one.
 pub fn stopped(reached: Reached) -> &'static str {
     match reached {
-        Reached::Nothing => "\nburnout: stopped. Burnout wrote nothing to the drive\n",
-        Reached::Writing => concat!("\nburnout: stopped. ", part!(), ". Write the image again\n"),
-        Reached::Written | Reached::Checking => concat!(
-            "\nburnout: stopped. ",
-            unchecked!(),
-            ". Write the image again to check it\n"
-        ),
-        Reached::Checked => {
-            "\nburnout: stopped. The drive holds the image, and the check proved it\n"
+        Reached::Nothing => concat!("\nburnout: stopped. ", nothing_text!(), "\n"),
+        Reached::Writing => concat!("\nburnout: stopped. ", writing_text!(), "\n"),
+        Reached::Written | Reached::Checking => {
+            concat!("\nburnout: stopped. ", unchecked_text!(), "\n")
         }
+        Reached::Checked => concat!("\nburnout: stopped. ", checked_text!(), "\n"),
     }
 }
+
+/// The JSON line that a stop by a signal prints with `--json`, by how far
+/// the work got. No text in it holds a quote or a backslash, so each one is
+/// JSON as it stands.
+pub fn stopped_json(reached: Reached) -> &'static str {
+    macro_rules! line {
+        ($reached:literal, $text:expr) => {
+            concat!(
+                r#"{"event":"stopped","reached":""#,
+                $reached,
+                r#"","message":""#,
+                $text,
+                "\"}\n"
+            )
+        };
+    }
+    match reached {
+        Reached::Nothing => line!("nothing", nothing_text!()),
+        Reached::Writing => line!("writing", writing_text!()),
+        Reached::Written => line!("written", unchecked_text!()),
+        Reached::Checking => line!("checking", unchecked_text!()),
+        Reached::Checked => line!("checked", checked_text!()),
+    }
+}
+
+/// Whether a stop prints its JSON line too.
+static JSON: AtomicBool = AtomicBool::new(false);
 
 /// Say what the drive holds when a signal stops the write, and end.
 ///
@@ -155,20 +201,29 @@ pub fn stopped(reached: Reached) -> &'static str {
 /// the drive now starts nothing. The handler does only what a signal allows:
 /// it reads one atomic, writes one static line, and ends the process with
 /// 128 and the number of the signal, as a shell does.
+///
+/// With `json`, the handler writes the JSON line of the stop to the output
+/// stream as well.
 #[cfg(unix)]
-pub fn on_stop() {
+pub fn on_stop(json: bool) {
+    JSON.store(json, Ordering::SeqCst);
     extern "C" fn stop(signal: libc::c_int) {
-        let text = stopped(reached());
-        // SAFETY: `write` and `_exit` are safe in a signal handler, and the
+        let now = reached();
+        let text = stopped(now);
+        // SAFETY: `write` and `_exit` are safe in a signal handler, and each
         // text is static.
         unsafe {
             libc::write(libc::STDERR_FILENO, text.as_ptr().cast(), text.len());
+            if JSON.load(Ordering::SeqCst) {
+                let line = stopped_json(now);
+                libc::write(libc::STDOUT_FILENO, line.as_ptr().cast(), line.len());
+            }
             libc::_exit(128 + signal);
         }
     }
     let handler = stop as extern "C" fn(libc::c_int);
     for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
-        // SAFETY: the handler touches one atomic, `write` and `_exit`, and
+        // SAFETY: the handler touches two atomics, `write` and `_exit`, and
         // nothing else.
         unsafe { libc::signal(signal, handler as libc::sighandler_t) };
     }
@@ -180,7 +235,8 @@ pub fn on_stop() {
 /// Windows calls the handler on a thread of its own, and not as a signal, so
 /// the handler writes through the error stream of the program.
 #[cfg(windows)]
-pub fn on_stop() {
+pub fn on_stop(json: bool) {
+    JSON.store(json, Ordering::SeqCst);
     use windows_sys::Win32::Foundation::BOOL;
     use windows_sys::Win32::System::Console::{
         SetConsoleCtrlHandler, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT,
@@ -189,8 +245,12 @@ pub fn on_stop() {
     unsafe extern "system" fn stop(event: u32) -> BOOL {
         match event {
             CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT => {
-                let text = stopped(reached());
-                let _ = std::io::Write::write_all(&mut std::io::stderr(), text.as_bytes());
+                let now = reached();
+                let _ = std::io::Write::write_all(&mut std::io::stderr(), stopped(now).as_bytes());
+                if JSON.load(Ordering::SeqCst) {
+                    let line = stopped_json(now);
+                    let _ = std::io::Write::write_all(&mut std::io::stdout(), line.as_bytes());
+                }
                 std::process::exit(130)
             }
             // A log off or a shut down goes to the next handler.
@@ -205,7 +265,9 @@ pub fn on_stop() {
 /// Say what the drive holds when a signal stops the write. This host has no
 /// handler, and a stop ends the process with no word.
 #[cfg(not(any(unix, windows)))]
-pub fn on_stop() {}
+pub fn on_stop(json: bool) {
+    JSON.store(json, Ordering::SeqCst);
+}
 
 #[cfg(test)]
 mod tests {
@@ -301,6 +363,28 @@ mod tests {
             );
         }
         assert!(stopped(Reached::Checked).contains("the check proved it"));
+    }
+
+    #[test]
+    fn a_stop_as_json_says_the_same_as_the_line_for_a_person() {
+        for (r, name) in [
+            (Reached::Nothing, "nothing"),
+            (Reached::Writing, "writing"),
+            (Reached::Written, "written"),
+            (Reached::Checking, "checking"),
+            (Reached::Checked, "checked"),
+        ] {
+            let text = stopped(r)
+                .strip_prefix("\nburnout: stopped. ")
+                .and_then(|t| t.strip_suffix('\n'))
+                .unwrap();
+            let expected = crate::json::Json::Object(vec![
+                ("event", crate::json::Json::text("stopped")),
+                ("reached", crate::json::Json::text(name)),
+                ("message", crate::json::Json::text(text)),
+            ]);
+            assert_eq!(stopped_json(r), format!("{expected}\n"));
+        }
     }
 
     #[test]

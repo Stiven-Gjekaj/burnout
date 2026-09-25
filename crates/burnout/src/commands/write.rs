@@ -94,7 +94,7 @@ struct WindowsJob {
 /// With `json`, each step prints as one JSON object on a line of the output
 /// stream, and no progress line is drawn.
 pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
-    crate::stop::on_stop();
+    crate::stop::on_stop(json);
     let job = prepare(args)?;
 
     let force = if args.force { Force::Yes } else { Force::No };

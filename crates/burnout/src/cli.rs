@@ -22,7 +22,10 @@ pub struct Cli {
 
     /// Print JSON for a script to read, and not the text for a person.
     ///
-    /// `list` prints one object, which holds the drives.
+    /// `list` prints one object, which holds the drives. `write` prints one
+    /// object on a line for each event: the confirmation, the start, the
+    /// progress and the end of each step, the result, an error, and a stop.
+    /// The text for a person then goes to the error stream.
     #[arg(long, global = true)]
     pub json: bool,
 }
