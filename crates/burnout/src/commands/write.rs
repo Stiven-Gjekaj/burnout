@@ -68,6 +68,7 @@ struct WindowsJob {
 
 /// Write an image to a drive.
 pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
+    crate::stop::on_stop();
     let job = prepare(args)?;
 
     let force = if args.force { Force::Yes } else { Force::No };
