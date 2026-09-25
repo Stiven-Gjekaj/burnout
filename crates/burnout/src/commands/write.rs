@@ -39,6 +39,7 @@ use crate::cli::{ModeArg, WriteArgs};
 use crate::elevate::{self, Plan, State};
 use crate::platform;
 use crate::report::Bar;
+use crate::stop::Tracked;
 
 /// How many times the check opens the drive before it stops, and the pause
 /// between two tries. Ten seconds in all.
@@ -122,7 +123,7 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
     check_target(&again, force)?;
 
     let access = platform::drive_access()?;
-    let mut bar = Bar::new();
+    let mut bar = Tracked(Bar::new());
 
     // Before the unmount, and until the check ends. A host that mounts the
     // new volumes can write to them before the check reads them.
@@ -246,7 +247,7 @@ fn write_raw<A: DriveAccess>(
     access: &A,
     drive: &DriveInfo,
     image: &mut File,
-    bar: &mut Bar,
+    bar: &mut impl Progress,
 ) -> Result<i32> {
     let report = {
         let mut target = access.open(&drive.id)?;
@@ -285,7 +286,7 @@ fn write_windows_mode<A: DriveAccess>(
     drive: &DriveInfo,
     w: &WindowsJob,
     layout: Layout,
-    bar: &mut Bar,
+    bar: &mut impl Progress,
 ) -> Result<i32> {
     let plan = WindowsDrive {
         layout,

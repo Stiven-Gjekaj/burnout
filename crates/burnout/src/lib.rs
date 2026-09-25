@@ -9,6 +9,7 @@ pub mod elevate;
 pub mod format;
 pub mod platform;
 pub mod report;
+pub mod stop;
 
 use clap::Parser;
 
@@ -23,6 +24,9 @@ pub fn run() -> i32 {
         Ok(code) => code,
         Err(e) => {
             eprintln!("burnout: {e}");
+            if let Some(note) = stop::note(stop::reached(), &e) {
+                eprintln!("{note}");
+            }
             1
         }
     }
