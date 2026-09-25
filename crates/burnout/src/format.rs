@@ -47,10 +47,21 @@ pub fn table(drives: &[DriveInfo]) -> Vec<String> {
                 }
             }
         }
-        // The mark goes after the row, where it reads as a warning and not as
+        // A mark goes after the row, where it reads as a warning and not as
         // a column that somebody has to look up.
-        if index > 0 && drives[index - 1].system {
-            line.push_str("   (system disk)");
+        if index > 0 {
+            let drive = &drives[index - 1];
+            let marks: Vec<&str> = [
+                (drive.system, "system disk"),
+                (drive.read_only, "read only"),
+            ]
+            .iter()
+            .filter(|(on, _)| *on)
+            .map(|(_, mark)| *mark)
+            .collect();
+            if !marks.is_empty() {
+                line.push_str(&format!("   ({})", marks.join(", ")));
+            }
         }
         lines.push(line);
     }
@@ -89,6 +100,21 @@ mod tests {
     fn the_system_disk_is_marked_where_a_person_reads_it() {
         let rows = table(&[drive("sda", 1024, Bus::Nvme, true)]);
         assert!(rows[1].contains("(system disk)"), "{}", rows[1]);
+    }
+
+    #[test]
+    fn a_read_only_drive_is_marked_where_a_person_reads_it() {
+        let mut card = drive("mmcblk0", 1024, Bus::Sd, false);
+        card.read_only = true;
+        let rows = table(&[card.clone()]);
+        assert!(rows[1].ends_with("   (read only)"), "{}", rows[1]);
+        card.system = true;
+        let rows = table(&[card]);
+        assert!(
+            rows[1].ends_with("   (system disk, read only)"),
+            "{}",
+            rows[1]
+        );
     }
 
     #[test]
