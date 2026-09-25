@@ -155,6 +155,12 @@ pub fn removable_media(fs: &dyn SysfsSource, name: &str) -> bool {
     attribute(fs, &format!("{BLOCK}/{name}/removable")).as_deref() == Some("1")
 }
 
+/// Whether the kernel says the drive takes no write, as it says for an SD
+/// card with its lock switch on.
+pub fn read_only(fs: &dyn SysfsSource, name: &str) -> bool {
+    attribute(fs, &format!("{BLOCK}/{name}/ro")).as_deref() == Some("1")
+}
+
 /// The vendor, the model and the serial number, when the drive carries them.
 pub fn identity(
     fs: &dyn SysfsSource,
@@ -498,6 +504,7 @@ pub fn drive(fs: &dyn SysfsSource, name: &str, system: &BTreeSet<String>) -> Opt
     info.connection = connection;
     info.removable_media = removable_media(fs, name);
     info.system = system.contains(name);
+    info.read_only = read_only(fs, name);
     Some(info)
 }
 
@@ -1114,6 +1121,15 @@ mod tests {
         assert!(removable_media(&yes, "sdb"));
         assert!(!removable_media(&no, "sda"));
         assert!(!removable_media(&MapSysfs::new(), "sdc"));
+    }
+
+    #[test]
+    fn the_read_only_flag_is_the_digit_one_and_nothing_else() {
+        let yes = MapSysfs::new().file("/sys/block/mmcblk0/ro", "1\n");
+        let no = MapSysfs::new().file("/sys/block/sdb/ro", "0\n");
+        assert!(read_only(&yes, "mmcblk0"));
+        assert!(!read_only(&no, "sdb"));
+        assert!(!read_only(&MapSysfs::new(), "sdc"));
     }
 
     #[test]
