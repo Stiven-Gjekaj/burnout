@@ -965,32 +965,43 @@ The work that turns a program that works into one somebody else can use.
   passed, because the check compares the drive with the same short file.
   Measured on the twelve ISOs of the test set: each file is exactly as long as
   its volume.
-
 - A drive that takes no write, such as an SD card with its lock switch on,
   is marked `(read only)` in the list, and the write refuses it before the
   privilege, with the lock switch as the fix. Before this, macOS answered the
   probe for a write with `EACCES`, and Burnout asked for a password that
   cannot help. macOS reads `Writable` from the registry, Linux reads
   `/sys/block/<drive>/ro`, and Windows asks `IOCTL_DISK_IS_WRITABLE`.
-  Measured on macOS with a disk image attached read only. Linux and Windows
-  are not measured yet.
+  Measured on macOS with a disk image attached read only.
 - A write that stops says what the drive holds. After an error, one line
-  follows the error. Ctrl-C, SIGTERM and SIGHUP on Linux and macOS, and
-  Ctrl-C, Ctrl-Break and the close of the console on Windows, print the line
-  and end with 128 and the number of the signal. Burnout resumes nothing.
-  Measured on macOS with a disk image: a stop at the confirmation, during the
-  write, and during the check. Linux and Windows are not measured yet.
-- The warning of a download, and the way past it, is in the README, for
-  macOS and for Windows.
-- winget and Scoop. `scripts/winget-manifest.sh` and `scripts/scoop-manifest.sh`
-  write each manifest from the `SHA256SUMS` of a release, and
-  [releasing.md](releasing.md) says when to run them. Nothing publishes them
-  before version 1. Both manifests parse. `winget validate` is not run yet.
+  follows the error. Ctrl-C, SIGTERM and SIGHUP on Linux and macOS end with
+  128 and the number of the signal, and a signal that the parent ignores
+  stays ignored, so `nohup` still works. Ctrl-C, Ctrl-Break and the close of
+  the console on Windows end with 130. Burnout resumes nothing. Measured on
+  macOS with a disk image: a stop at the confirmation, during the write, and
+  during the check.
 - `--json`. `list` prints one object, and `write` prints one object on a line
   for the confirmation, each step, the result, an error and a stop. Each kind
   of error has a name that a script tests. Measured on macOS: a raw write of a
   disk image, and a Windows write of the Windows 11 Arm64 ISO onto a 16 GB
   disk image.
+- The warning of a download, and the way past it, is in the README, for
+  macOS and for Windows.
+- winget and Scoop. `scripts/winget-manifest.sh` and `scripts/scoop-manifest.sh`
+  write each manifest from the `SHA256SUMS` of a release, and
+  [releasing.md](releasing.md) says when to run them. Nothing publishes them
+  before version 1. Both manifests parse.
+- The README says that both modes are built, and its release badge reads the
+  latest release.
+
+**What is open.**
+
+- Measure on Linux and on Windows what is measured on macOS alone: the
+  refusal of a read-only drive, the error of a busy drive, and a stop by
+  Ctrl-C.
+- Run `winget validate` on the manifest that the script writes.
+- Write a Windows ISO whose install image is `install.esd`, and install from
+  it.
+- Check the build provenance of each artifact of the next release.
 
 **The exit test.** Somebody who has never seen the project writes a Windows
 drive and a Linux drive, on a host you did not choose, without asking you a
