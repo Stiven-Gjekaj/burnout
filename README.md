@@ -108,9 +108,31 @@ cargo install burnout
 Or download the binary for your host from the
 [latest release](https://github.com/Stiven-Gjekaj/burnout/releases/latest).
 [docs/releasing.md](docs/releasing.md) says how to check it against
-`SHA256SUMS` and against its build provenance, and how to pass the warning
-that a download in a browser brings. Homebrew and Cargo bring no such
-warning.
+`SHA256SUMS` and against its build provenance.
+
+### The warning of a download
+
+A browser marks each file that it downloads, and macOS and Windows then warn
+before they start it. The warning is about how the file arrived, and not about
+what the file holds. Check the file first, and then take the mark off.
+
+- **macOS** does not start the binary, because no paid certificate signed it.
+  Take the mark off, and it starts:
+
+  ```bash
+  xattr -d com.apple.quarantine burnout-0.3.0-aarch64-apple-darwin
+  ```
+
+- **Windows** SmartScreen can show "Windows protected your PC". Select
+  **More info**, and then **Run anyway**. In PowerShell, `Unblock-File` takes
+  the mark off:
+
+  ```powershell
+  Unblock-File .\burnout-0.3.0-x86_64-pc-windows-msvc.exe
+  ```
+
+Homebrew, Cargo, `curl` and `gh release download` set no mark, so they bring
+no warning.
 
 ---
 

@@ -980,6 +980,8 @@ The work that turns a program that works into one somebody else can use.
   and end with 128 and the number of the signal. Burnout resumes nothing.
   Measured on macOS with a disk image: a stop at the confirmation, during the
   write, and during the check. Linux and Windows are not measured yet.
+- The warning of a download, and the way past it, is in the README, for
+  macOS and for Windows.
 - `--json`. `list` prints one object, and `write` prints one object on a line
   for the confirmation, each step, the result, an error and a stop. Each kind
   of error has a name that a script tests. Measured on macOS: a raw write of a
