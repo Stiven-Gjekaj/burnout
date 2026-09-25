@@ -15,6 +15,7 @@
 //! | `IOCTL_DISK_GET_DRIVE_GEOMETRY_EX` | `0x000700A0` | `FILE_ANY_ACCESS` |
 //! | `IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS` | `0x00560000` | `FILE_ANY_ACCESS` |
 //! | `IOCTL_DISK_IS_WRITABLE` | `0x00070024` | `FILE_ANY_ACCESS` |
+//! | `IOCTL_DISK_GET_DISK_ATTRIBUTES` | `0x000700F0` | `FILE_ANY_ACCESS` |
 //!
 //! `IOCTL_DISK_GET_LENGTH_INFO` would give the size in one call, and it is
 //! declared `FILE_READ_ACCESS`. That needs a handle opened with
@@ -69,6 +70,7 @@ const IOCTL_STORAGE_QUERY_PROPERTY: u32 = 0x002D_1400;
 const IOCTL_DISK_GET_DRIVE_GEOMETRY_EX: u32 = 0x0007_00A0;
 const IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS: u32 = 0x0056_0000;
 const IOCTL_DISK_IS_WRITABLE: u32 = 0x0007_0024;
+const IOCTL_DISK_GET_DISK_ATTRIBUTES: u32 = 0x0007_00F0;
 
 const STORAGE_DEVICE_PROPERTY: u32 = 0;
 const STORAGE_ACCESS_ALIGNMENT_PROPERTY: u32 = 6;
@@ -298,6 +300,7 @@ fn one_disk(set: HDEVINFO, interface: &mut SP_DEVICE_INTERFACE_DATA) -> Option<R
         friendly_name: registry_text(set, &mut info, SPDRP_FRIENDLYNAME),
         removal_policy: registry_u32(set, &mut info, SPDRP_REMOVAL_POLICY),
         write_protected: write_protected(&handle),
+        attributes: control(&handle, IOCTL_DISK_GET_DISK_ATTRIBUTES, &[], 16),
     })
 }
 

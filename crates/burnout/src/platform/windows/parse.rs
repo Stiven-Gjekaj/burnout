@@ -237,6 +237,32 @@ fn is_external(bus: Bus, policy: Option<u32>) -> bool {
 }
 
 /// Build one drive from the answers about it.
+/// `DISK_ATTRIBUTE_READ_ONLY`, the mark that `diskpart` sets, and that a
+/// write of Burnout leaves on the drive when it ends.
+const READ_ONLY_MARK: u64 = 0x2;
+
+/// Whether the drive carries the read-only mark, from the answer to
+/// `IOCTL_DISK_GET_DISK_ATTRIBUTES`: a version, four reserved bytes, and the
+/// attributes at byte 8.
+pub fn read_only_mark(bytes: &[u8]) -> Result<bool> {
+    Ok(u64_at(bytes, 8)? & READ_ONLY_MARK != 0)
+}
+
+/// Whether a drive refuses each write for a cause that no write of Burnout
+/// can take away.
+///
+/// Windows answers write-protected for a medium that refuses each write, and
+/// for a drive that carries the read-only mark. The write takes the mark off
+/// before it writes, so only the first cause refuses the drive. Measured with
+/// diskpart: a medium that QEMU gives read only says "Current Read-only
+/// State: Yes" and "Read-only: No", and a drive that Burnout wrote says yes
+/// to both. With no answer about the mark, the drive is not refused, because
+/// a refusal of a drive that takes a write costs more than an error later.
+fn refuses_writes(raw: &RawDisk) -> bool {
+    let mark = raw.attributes.as_deref().map(read_only_mark);
+    raw.write_protected && matches!(mark, Some(Ok(false)))
+}
+
 pub fn drive_from_raw(raw: &RawDisk, system: &BTreeSet<u32>) -> Result<DriveInfo> {
     let descriptor = device_descriptor(&raw.device_descriptor)?;
     let geometry = disk_geometry_ex(&raw.geometry)?;
@@ -281,7 +307,7 @@ pub fn drive_from_raw(raw: &RawDisk, system: &BTreeSet<u32>) -> Result<DriveInfo
     };
     info.removable_media = descriptor.removable_media;
     info.system = system.contains(&raw.device_number);
-    info.read_only = raw.write_protected;
+    info.read_only = refuses_writes(raw);
     Ok(info)
 }
 
@@ -546,7 +572,16 @@ mod tests {
             friendly_name: None,
             removal_policy: None,
             write_protected: false,
+            attributes: None,
         }
+    }
+
+    /// The answer to `IOCTL_DISK_GET_DISK_ATTRIBUTES` with these attributes.
+    fn attributes(attributes: u64) -> Option<Vec<u8>> {
+        let mut bytes = vec![0u8; 16];
+        bytes[0..4].copy_from_slice(&16u32.to_le_bytes());
+        bytes[8..16].copy_from_slice(&attributes.to_le_bytes());
+        Some(bytes)
     }
 
     #[test]
@@ -621,13 +656,45 @@ mod tests {
     }
 
     #[test]
-    fn a_write_protected_disk_reads_as_read_only() {
+    fn a_write_protected_medium_with_no_read_only_mark_reads_as_read_only() {
         let mut disk = raw(2, "Generic", "SD Card", true, 0x07, 1024);
+        disk.attributes = attributes(0);
         let d = drive_from_raw(&disk, &BTreeSet::new()).unwrap();
         assert!(!d.read_only);
         disk.write_protected = true;
         let d = drive_from_raw(&disk, &BTreeSet::new()).unwrap();
         assert!(d.read_only);
+    }
+
+    #[test]
+    fn a_drive_that_burnout_wrote_can_be_written_again() {
+        // The write leaves the drive offline with the read-only mark, and
+        // Windows then answers write-protected. The next write takes the
+        // mark off, so the drive is no refusal.
+        let mut disk = raw(4, "QEMU", "QEMU HARDDISK", true, 0x07, 1024);
+        disk.write_protected = true;
+        disk.attributes = attributes(0x1 | READ_ONLY_MARK);
+        let d = drive_from_raw(&disk, &BTreeSet::new()).unwrap();
+        assert!(!d.read_only);
+    }
+
+    #[test]
+    fn a_drive_whose_marks_the_host_does_not_give_is_no_refusal() {
+        let mut disk = raw(4, "QEMU", "QEMU HARDDISK", true, 0x07, 1024);
+        disk.write_protected = true;
+        for answer in [None, Some(vec![0u8; 8])] {
+            disk.attributes = answer;
+            let d = drive_from_raw(&disk, &BTreeSet::new()).unwrap();
+            assert!(!d.read_only);
+        }
+    }
+
+    #[test]
+    fn the_read_only_mark_is_bit_two_of_the_attributes() {
+        assert!(!read_only_mark(&attributes(0).unwrap()).unwrap());
+        assert!(!read_only_mark(&attributes(0x1).unwrap()).unwrap());
+        assert!(read_only_mark(&attributes(0x2).unwrap()).unwrap());
+        assert!(read_only_mark(&[0u8; 12]).is_err());
     }
 
     #[test]

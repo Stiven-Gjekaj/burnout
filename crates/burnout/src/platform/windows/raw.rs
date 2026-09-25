@@ -23,6 +23,9 @@ pub struct RawDisk {
     pub removal_policy: Option<u32>,
     /// `IOCTL_DISK_IS_WRITABLE` failed with `ERROR_WRITE_PROTECT`.
     pub write_protected: bool,
+    /// The answer to `IOCTL_DISK_GET_DISK_ATTRIBUTES`, which some drivers
+    /// refuse.
+    pub attributes: Option<Vec<u8>>,
 }
 
 /// One volume, as the host answered about it.
