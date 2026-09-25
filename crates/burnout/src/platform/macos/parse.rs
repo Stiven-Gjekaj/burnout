@@ -184,6 +184,9 @@ pub fn drive_from_media(
             .and_then(Value::as_bool)
             .unwrap_or(false);
     info.system = system.contains(name);
+    // Measured with a disk image attached read only: its medium says No. A
+    // medium that says nothing takes a write, as every medium did before.
+    info.read_only = snapshot.get(index, "Writable").and_then(Value::as_bool) == Some(false);
     Some(info)
 }
 
@@ -435,6 +438,20 @@ mod tests {
         let d = drive_from_media(&t, 1, &BTreeSet::new()).unwrap();
         assert!(!d.removable_media);
         assert!(d.removable());
+    }
+
+    #[test]
+    fn a_medium_that_says_it_is_not_writable_reads_as_read_only() {
+        let mut t = one_drive("disk6", 1024, "USB", "External");
+        let d = drive_from_media(&t, 1, &BTreeSet::new()).unwrap();
+        assert!(!d.read_only, "a medium that says nothing takes a write");
+        for (writable, read_only) in [(true, false), (false, true)] {
+            t.nodes[1]
+                .properties
+                .insert("Writable".to_string(), Value::Bool(writable));
+            let d = drive_from_media(&t, 1, &BTreeSet::new()).unwrap();
+            assert_eq!(d.read_only, read_only, "Writable = {writable}");
+        }
     }
 
     #[test]
