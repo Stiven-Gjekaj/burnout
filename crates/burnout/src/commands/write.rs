@@ -109,7 +109,9 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
         layout.as_ref(),
         system_disk_known,
     )? {
-        return Err(Error::NotConfirmed);
+        return Err(Error::NotConfirmed {
+            drive: describe(&chosen),
+        });
     }
 
     // The confirmation takes a person's time, and a drive can leave in it.
@@ -621,14 +623,10 @@ fn confirm(
     let mut typed = String::new();
     std::io::stdin().read_line(&mut typed)?;
 
-    let agreed = match wanted {
+    Ok(match wanted {
         Some(word) => typed.trim().eq_ignore_ascii_case(word),
         None => phrase_matches(&typed, drive),
-    };
-    if !agreed {
-        println!("Nothing was written to {}.", describe(drive));
-    }
-    Ok(agreed)
+    })
 }
 
 #[cfg(test)]

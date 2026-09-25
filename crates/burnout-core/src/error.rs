@@ -73,7 +73,10 @@ pub enum Error {
         found: String,
     },
     /// The person did not confirm the drive.
-    NotConfirmed,
+    NotConfirmed {
+        /// The drive, as a message names it.
+        drive: String,
+    },
     /// The drive holds something other than the image that went onto it.
     VerifyFailed {
         /// The digest of the source.
@@ -257,8 +260,11 @@ impl fmt::Display for Error {
                      {found}. Run burnout list again, and give the number of the drive"
                 )
             }
-            Error::NotConfirmed => {
-                write!(f, "the drive was not confirmed, so nothing was written")
+            Error::NotConfirmed { drive } => {
+                write!(
+                    f,
+                    "the answer does not match, so Burnout wrote nothing to {drive}"
+                )
             }
             Error::VerifyFailed {
                 expected,
@@ -483,6 +489,18 @@ mod tests {
     }
 
     #[test]
+    fn a_declined_write_names_the_drive_that_it_left_alone() {
+        let e = Error::NotConfirmed {
+            drive: "Flash Drive (disk5, 128320801792 bytes)".to_string(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "the answer does not match, so Burnout wrote nothing to Flash Drive (disk5, \
+             128320801792 bytes)"
+        );
+    }
+
+    #[test]
     fn a_windows_option_message_names_the_option_to_remove() {
         let e = Error::WindowsOption {
             option: "--skip-hardware-checks",
@@ -684,7 +702,7 @@ mod tests {
                 wanted: text(),
                 found: text(),
             },
-            Error::NotConfirmed,
+            Error::NotConfirmed { drive: text() },
             Error::VerifyFailed {
                 expected: text(),
                 got: text(),
@@ -748,7 +766,7 @@ mod tests {
                 | Error::SystemDisk { .. }
                 | Error::NotRemovable { .. }
                 | Error::DriveChanged { .. }
-                | Error::NotConfirmed
+                | Error::NotConfirmed { .. }
                 | Error::VerifyFailed { .. }
                 | Error::Image { .. }
                 | Error::MacosMedia { .. }
