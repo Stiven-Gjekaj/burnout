@@ -37,6 +37,8 @@ use burnout_layout::{
 
 use crate::cli::{ModeArg, WriteArgs};
 use crate::elevate::{self, Plan, State};
+use crate::format::drive_json;
+use crate::json::Json;
 use crate::platform;
 use crate::report::{Bar, JsonProgress, Listener};
 use crate::stop::Tracked;
@@ -127,8 +129,13 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
         }
     }
 
+    let number = drives
+        .iter()
+        .position(|d| d.id == chosen.id)
+        .map_or(0, |at| at + 1);
     if !confirm(
         &chosen,
+        number,
         force,
         args,
         &job,
@@ -308,6 +315,21 @@ fn write_raw<A: DriveAccess>(
     say!(json, "SHA-256 {}", proof.digest);
     offline_note(json);
     eject_note(&ejected, json);
+    if json {
+        println!(
+            "{}",
+            Json::Object(vec![
+                ("event", Json::text("result")),
+                ("mode", Json::text("raw")),
+                ("image_bytes", Json::Number(report.image_bytes)),
+                ("written_bytes", Json::Number(report.written_bytes)),
+                ("checked_bytes", Json::Number(proof.bytes)),
+                ("sha256", Json::text(proof.digest.to_string())),
+                ("ejected", Json::Bool(let_go(&ejected))),
+                ("offline", Json::Bool(cfg!(windows))),
+            ])
+        );
+    }
     Ok(0)
 }
 
@@ -356,6 +378,24 @@ fn write_windows_mode<A: DriveAccess>(
     );
     offline_note(json);
     eject_note(&ejected, json);
+    if json {
+        println!(
+            "{}",
+            Json::Object(vec![
+                ("event", Json::text("result")),
+                ("mode", Json::text("windows")),
+                ("files", Json::Number(files as u64)),
+                ("bytes", Json::Number(bytes)),
+                ("boot_files", Json::Number(written.boot.files.len() as u64)),
+                (
+                    "install_files",
+                    Json::Number(written.install.files.len() as u64)
+                ),
+                ("ejected", Json::Bool(let_go(&ejected))),
+                ("offline", Json::Bool(cfg!(windows))),
+            ])
+        );
+    }
     Ok(0)
 }
 
@@ -487,6 +527,19 @@ fn decide(mode: Result<Mode>, image: &Path) -> Result<Mode> {
         }),
         Err(e) => Err(e),
     }
+}
+
+/// The name of the mode of a job, as JSON gives it.
+fn mode_name(job: &Job) -> &'static str {
+    match job {
+        Job::Raw { .. } => "raw",
+        Job::Windows(_) => "windows",
+    }
+}
+
+/// Whether the host let go of the drive at the end. Only macOS ejects it.
+fn let_go(ejected: &Result<()>) -> bool {
+    cfg!(target_os = "macos") && ejected.is_ok()
 }
 
 /// What the write puts onto the drive, as the confirmation says it.
@@ -625,8 +678,10 @@ fn names_drive(drive: &DriveInfo, path: &str) -> bool {
 ///
 /// An ordinary drive on a host that named its system disk asks for the whole
 /// word `yes`, because the person already named the drive by number.
+#[allow(clippy::too_many_arguments)]
 fn confirm(
     drive: &DriveInfo,
+    number: usize,
     force: Force,
     args: &WriteArgs,
     job: &Job,
@@ -689,6 +744,26 @@ fn confirm(
         Some("yes")
     };
     if json {
+        // The script reads what the drive is and what to type before it
+        // answers, as a person reads the lines above.
+        let phrase = force_phrase(drive);
+        println!(
+            "{}",
+            Json::Object(vec![
+                ("event", Json::text("confirm")),
+                (
+                    "image",
+                    Json::Object(vec![
+                        ("path", Json::text(args.image.display().to_string())),
+                        ("size_bytes", Json::Number(image_bytes)),
+                    ]),
+                ),
+                ("mode", Json::text(mode_name(job))),
+                ("drive", drive_json(number, drive)),
+                ("expects", Json::text(wanted.unwrap_or(&phrase))),
+            ])
+        );
+        std::io::stdout().flush()?;
         eprint!("> ");
         std::io::stderr().flush()?;
     } else {
