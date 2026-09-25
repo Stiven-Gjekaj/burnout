@@ -213,7 +213,13 @@ impl fmt::Display for Error {
     /// the command line puts `burnout: ` before it.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Io(e) => write!(f, "{e}"),
+            Error::Io(e) => {
+                write!(f, "{e}")?;
+                match io_fix(e) {
+                    Some(fix) => write!(f, ". {fix}"),
+                    None => Ok(()),
+                }
+            }
             Error::Unsupported { target } => {
                 write!(
                     f,
@@ -283,12 +289,7 @@ impl fmt::Display for Error {
                      {found}. Run burnout list again, and give the number of the drive"
                 )
             }
-            Error::InUse { what } => {
-                write!(
-                    f,
-                    "{what} is in use. Close each program that uses the drive, and try again"
-                )
-            }
+            Error::InUse { what } => write!(f, "{what} is in use. {IN_USE}"),
             Error::NotConfirmed { drive } => {
                 write!(
                     f,
@@ -429,6 +430,63 @@ impl fmt::Display for Error {
         }
     }
 }
+
+/// The fix for an error of the operating system, when its code names one
+/// cause.
+///
+/// An error of the operating system carries no word of what Burnout did when
+/// it came, so each fix here holds for the drive and for the disk that holds
+/// the image. A code with more than one cause gets no fix, because a wrong
+/// fix costs a person more than none.
+fn io_fix(e: &std::io::Error) -> Option<&'static str> {
+    let code = e.raw_os_error()?;
+    // Linux and macOS give these codes the same numbers.
+    #[cfg(unix)]
+    let fix = match code {
+        // EBUSY.
+        16 => IN_USE,
+        // ENXIO and ENODEV.
+        6 | 19 => GONE,
+        // EIO.
+        5 => FAULTY,
+        // EROFS.
+        30 => LOCKED,
+        _ => return None,
+    };
+    #[cfg(windows)]
+    let fix = match code {
+        // ERROR_SHARING_VIOLATION and ERROR_LOCK_VIOLATION.
+        32 | 33 => IN_USE,
+        // ERROR_NOT_READY, ERROR_NO_SUCH_DEVICE and ERROR_DEVICE_NOT_CONNECTED.
+        21 | 433 | 1167 => GONE,
+        // ERROR_CRC, ERROR_GEN_FAILURE and ERROR_IO_DEVICE.
+        23 | 31 | 1117 => FAULTY,
+        // ERROR_WRITE_PROTECT.
+        19 => LOCKED,
+        _ => return None,
+    };
+    #[cfg(not(any(unix, windows)))]
+    let fix = {
+        let _ = code;
+        return None;
+    };
+    Some(fix)
+}
+
+/// The fix for a drive or a volume that a program holds.
+const IN_USE: &str = "Close each program that uses the drive, and try again";
+
+/// The fix for a drive that left during the work.
+const GONE: &str =
+    "The drive is not connected now. Connect it again, run burnout list, and write the image again";
+
+/// The fix for a fault of the hardware.
+const FAULTY: &str = "The drive, the disk that holds the image, or a cable can be faulty. \
+     Connect the drive again, to a different port if you can, and write the image again";
+
+/// The fix for a drive that refuses each write.
+const LOCKED: &str = "The drive does not accept a write. If the drive or its card has a lock \
+     switch, unlock it, and connect the drive again";
 
 /// The fix for a check that found a drive that does not hold what went onto
 /// it. One more fault on a second write is a fault of the drive.
@@ -900,6 +958,57 @@ mod tests {
             assert!(!text.contains('\u{2014}'), "{text}");
             assert!(!text.contains("  "), "{text}");
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn an_error_of_the_system_with_one_cause_names_the_fix() {
+        for (code, fix) in [
+            (16, IN_USE),
+            (6, GONE),
+            (19, GONE),
+            (5, FAULTY),
+            (30, LOCKED),
+        ] {
+            let io = std::io::Error::from_raw_os_error(code);
+            let text = Error::Io(io).to_string();
+            let io = std::io::Error::from_raw_os_error(code);
+            assert_eq!(text, format!("{io}. {fix}"));
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn an_error_of_windows_with_one_cause_names_the_fix() {
+        for (code, fix) in [
+            (32, IN_USE),
+            (33, IN_USE),
+            (21, GONE),
+            (433, GONE),
+            (1167, GONE),
+            (23, FAULTY),
+            (31, FAULTY),
+            (1117, FAULTY),
+            (19, LOCKED),
+        ] {
+            let io = std::io::Error::from_raw_os_error(code);
+            let text = Error::Io(io).to_string();
+            let io = std::io::Error::from_raw_os_error(code);
+            assert_eq!(text, format!("{io}. {fix}"));
+        }
+    }
+
+    #[test]
+    fn an_error_of_the_system_with_more_than_one_cause_stays_as_it_came() {
+        // A missing file, and a refused permission: each has more than one
+        // cause, so no fix fits all of them.
+        for code in [2, 13] {
+            let io = std::io::Error::from_raw_os_error(code);
+            let text = Error::Io(io).to_string();
+            assert_eq!(text, std::io::Error::from_raw_os_error(code).to_string());
+        }
+        let text = Error::Io(std::io::Error::other("gone")).to_string();
+        assert_eq!(text, "gone");
     }
 
     #[test]
