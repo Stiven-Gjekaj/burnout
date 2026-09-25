@@ -56,6 +56,14 @@ pub enum Error {
         /// The drive, as the list names it.
         name: String,
     },
+    /// The host says that the drive refuses each write.
+    ///
+    /// No option allows a write to it, because no option makes the drive
+    /// take one.
+    ReadOnly {
+        /// The drive, as the list names it.
+        name: String,
+    },
     /// The drive is not one that Burnout can prove is removable.
     NotRemovable {
         /// The drive, as the list names it.
@@ -216,6 +224,13 @@ pub enum Error {
     },
 }
 
+/// The way past a lock switch, as a literal that `concat!` takes.
+macro_rules! unlock {
+    () => {
+        "If the drive or its card has a lock switch, unlock it, and connect the drive again"
+    };
+}
+
 /// Where a person reports a fault of Burnout.
 const ISSUES: &str = concat!(env!("CARGO_PKG_REPOSITORY"), "/issues");
 
@@ -288,6 +303,9 @@ impl fmt::Display for Error {
                     "{name} is the drive that this system starts from, and no option allows a \
                      write to it. Choose a different drive"
                 )
+            }
+            Error::ReadOnly { name } => {
+                write!(f, "{name} does not accept a write. {UNLOCK}")
             }
             Error::NotRemovable { name } => {
                 write!(
@@ -512,8 +530,10 @@ const FAULTY: &str = "The drive, the disk that holds the image, or a cable can b
      Connect the drive again, to a different port if you can, and write the image again";
 
 /// The fix for a drive that refuses each write.
-const LOCKED: &str = "The drive does not accept a write. If the drive or its card has a lock \
-     switch, unlock it, and connect the drive again";
+const LOCKED: &str = concat!("The drive does not accept a write. ", unlock!());
+
+/// The way past a lock switch.
+const UNLOCK: &str = unlock!();
 
 /// The fix for a check that found a drive that does not hold what went onto
 /// it. One more fault on a second write is a fault of the drive.
@@ -602,6 +622,18 @@ mod tests {
             e.to_string(),
             "Burnout finds no drive 7. Run burnout list, and give the number that it shows \
              beside the drive"
+        );
+    }
+
+    #[test]
+    fn a_read_only_drive_message_names_the_lock_switch() {
+        let e = Error::ReadOnly {
+            name: "SD Card Reader".to_string(),
+        };
+        assert_eq!(
+            e.to_string(),
+            "SD Card Reader does not accept a write. If the drive or its card has a lock switch, \
+             unlock it, and connect the drive again"
         );
     }
 
@@ -888,6 +920,7 @@ mod tests {
                 drive_bytes: 1,
             },
             Error::SystemDisk { name: text() },
+            Error::ReadOnly { name: text() },
             Error::NotRemovable { name: text() },
             Error::DriveChanged {
                 wanted: text(),
@@ -969,6 +1002,7 @@ mod tests {
                 | Error::Unaligned { .. }
                 | Error::TooSmall { .. }
                 | Error::SystemDisk { .. }
+                | Error::ReadOnly { .. }
                 | Error::NotRemovable { .. }
                 | Error::DriveChanged { .. }
                 | Error::InUse { .. }

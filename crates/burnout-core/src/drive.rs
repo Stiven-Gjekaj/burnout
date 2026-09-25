@@ -127,6 +127,9 @@ pub struct DriveInfo {
     pub removable_media: bool,
     /// The running system starts from this drive.
     pub system: bool,
+    /// The host says that the drive refuses each write, as an SD card does
+    /// with its lock switch on.
+    pub read_only: bool,
 }
 
 impl DriveInfo {
@@ -161,6 +164,7 @@ impl DriveInfo {
             connection: Connection::Unknown,
             removable_media: false,
             system: false,
+            read_only: false,
         }
     }
 }

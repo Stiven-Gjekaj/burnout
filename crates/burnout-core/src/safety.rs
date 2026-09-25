@@ -24,10 +24,14 @@ pub enum Force {
 
 /// Refuse a drive that Burnout must not write to.
 ///
-/// Two rules, and they are not the same rule.
+/// Three rules, and they are not the same rule.
 ///
 /// The system disk is refused always. `--force` does not reach it, and
 /// `CONTRIBUTING.md` says no flag allows it.
+///
+/// A drive that the host says refuses each write is refused always too, and
+/// before the privilege. A password does not unlock a lock switch, and on
+/// macOS the refusal of such a drive looks like a refusal of permission.
 ///
 /// A drive that Burnout cannot prove is removable is refused unless the
 /// person forced it, because an internal disk full of somebody's work looks
@@ -35,6 +39,11 @@ pub enum Force {
 pub fn check_target(drive: &DriveInfo, force: Force) -> Result<()> {
     if drive.system {
         return Err(Error::SystemDisk {
+            name: drive.name.clone(),
+        });
+    }
+    if drive.read_only {
+        return Err(Error::ReadOnly {
             name: drive.name.clone(),
         });
     }
@@ -160,6 +169,18 @@ mod tests {
             check_target(&d, Force::Yes),
             Err(Error::SystemDisk { .. })
         ));
+    }
+
+    #[test]
+    fn a_read_only_drive_is_refused_even_when_it_is_forced() {
+        let mut d = drive();
+        d.read_only = true;
+        for force in [Force::No, Force::Yes] {
+            assert!(
+                matches!(check_target(&d, force), Err(Error::ReadOnly { .. })),
+                "{force:?}"
+            );
+        }
     }
 
     #[test]
