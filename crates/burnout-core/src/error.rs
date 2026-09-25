@@ -99,6 +99,20 @@ pub enum Error {
         /// helped by knowing which one happened.
         at_byte: Option<u64>,
     },
+    /// The image gave fewer bytes than it held when Burnout opened it.
+    ImageEnded {
+        /// The bytes that came before the end.
+        read_bytes: u64,
+        /// The length of the image when Burnout opened it.
+        image_bytes: u64,
+    },
+    /// The drive gave no more bytes before the end of the size it reports.
+    DriveEnded {
+        /// The offset where the drive gave no more bytes.
+        at_byte: u64,
+        /// The size that the drive reports, in bytes.
+        drive_bytes: u64,
+    },
     /// The image file cannot be read, or holds nothing to write.
     Image {
         /// The path, as the person gave it.
@@ -297,6 +311,30 @@ impl fmt::Display for Error {
                 write!(
                     f,
                     ". The drive gives the SHA-256 {got}, and the image gives {expected}. {AGAIN}"
+                )
+            }
+            Error::ImageEnded {
+                read_bytes,
+                image_bytes,
+            } => {
+                write!(
+                    f,
+                    "the image ended after {} bytes, and it held {} bytes when Burnout opened \
+                     it. Make sure that no program changes the image, and write it again",
+                    grouped(*read_bytes),
+                    grouped(*image_bytes)
+                )
+            }
+            Error::DriveEnded {
+                at_byte,
+                drive_bytes,
+            } => {
+                write!(
+                    f,
+                    "the drive gave no bytes after offset {}, and it reports {}. Connect the \
+                     drive again, and write the image again",
+                    grouped(*at_byte),
+                    size_column(*drive_bytes)
                 )
             }
             Error::Image { path, detail } => {
@@ -679,6 +717,32 @@ mod tests {
     }
 
     #[test]
+    fn a_short_image_message_says_that_the_image_changed_and_the_fix() {
+        let e = Error::ImageEnded {
+            read_bytes: 4_194_304,
+            image_bytes: 5_000_000,
+        };
+        assert_eq!(
+            e.to_string(),
+            "the image ended after 4,194,304 bytes, and it held 5,000,000 bytes when Burnout \
+             opened it. Make sure that no program changes the image, and write it again"
+        );
+    }
+
+    #[test]
+    fn a_short_drive_message_gives_the_offset_and_the_fix() {
+        let e = Error::DriveEnded {
+            at_byte: 1024,
+            drive_bytes: 8_000_000_000,
+        };
+        assert_eq!(
+            e.to_string(),
+            "the drive gave no bytes after offset 1,024, and it reports 8.0 GB (8,000,000,000 \
+             bytes). Connect the drive again, and write the image again"
+        );
+    }
+
+    #[test]
     fn a_size_message_gives_both_sizes() {
         let e = Error::TooSmall {
             image_bytes: 8_000_000_000,
@@ -735,6 +799,14 @@ mod tests {
                 expected: text(),
                 got: text(),
                 at_byte: Some(1),
+            },
+            Error::ImageEnded {
+                read_bytes: 1,
+                image_bytes: 2,
+            },
+            Error::DriveEnded {
+                at_byte: 1,
+                drive_bytes: 2,
             },
             Error::Image {
                 path: text(),
@@ -797,6 +869,8 @@ mod tests {
                 | Error::InUse { .. }
                 | Error::NotConfirmed { .. }
                 | Error::VerifyFailed { .. }
+                | Error::ImageEnded { .. }
+                | Error::DriveEnded { .. }
                 | Error::Image { .. }
                 | Error::MacosMedia { .. }
                 | Error::WindowsOption { .. }

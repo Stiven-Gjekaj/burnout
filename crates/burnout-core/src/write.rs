@@ -177,15 +177,15 @@ where
         let want = ((image_bytes - done) as usize).min(from_image.len());
         let got = fill(source, &mut from_image[..want])?;
         if got == 0 {
-            return Err(Error::Host {
-                source: "the image".to_string(),
-                detail: format!("it ended after {done} bytes and it reported {image_bytes}"),
+            return Err(Error::ImageEnded {
+                read_bytes: done,
+                image_bytes,
             });
         }
         // A device answers in whole sectors, so ask for whole sectors and
         // look at the part that belongs to the image.
         let read = round_up(got as u64, sector) as usize;
-        fill_exact(target, &mut from_drive[..read])?;
+        fill_exact(target, &mut from_drive[..read], done)?;
 
         if first_difference.is_none() {
             if let Some(at) = differs_at(&from_image[..got], &from_drive[..got]) {
@@ -238,9 +238,9 @@ fn next_block<S: Read>(
         // The file ended earlier than its own length said. Report what the
         // code can prove rather than pad the difference with zero and call it
         // a copy.
-        return Err(Error::Host {
-            source: "the image".to_string(),
-            detail: format!("it ended after {read} bytes and it reported {image_bytes}"),
+        return Err(Error::ImageEnded {
+            read_bytes: read,
+            image_bytes,
         });
     }
     hash.update(&block[..got]);
@@ -281,20 +281,17 @@ fn fill<S: Read>(source: &mut S, buffer: &mut [u8]) -> Result<usize> {
     Ok(filled)
 }
 
-/// Read exactly as much as the buffer holds, or fail.
+/// Read exactly as much as the buffer holds from byte `at`, or fail.
 ///
 /// A short answer from a device is not an end of file. It is a device that
 /// did not give what it was asked for, and carrying on would compare the
 /// image against whatever the buffer held before.
-fn fill_exact<T: Read>(target: &mut T, buffer: &mut [u8]) -> Result<()> {
+fn fill_exact<T: BlockTarget>(target: &mut T, buffer: &mut [u8], at: u64) -> Result<()> {
     let filled = fill(target, buffer)?;
     if filled != buffer.len() {
-        return Err(Error::Host {
-            source: "the drive".to_string(),
-            detail: format!(
-                "it gave {filled} bytes where {} were asked for",
-                buffer.len()
-            ),
+        return Err(Error::DriveEnded {
+            at_byte: at + filled as u64,
+            drive_bytes: target.length(),
         });
     }
     Ok(())
@@ -579,6 +576,121 @@ mod tests {
         target.write_all(&[0xAB; 100]).unwrap();
 
         assert!(verify_image(&mut source, &mut target, &mut Silent).is_ok());
+    }
+
+    /// An image that says it is longer than the bytes it gives, as a file
+    /// does when another program cuts it during the write.
+    struct Shrunk {
+        bytes: Cursor<Vec<u8>>,
+        claims: u64,
+    }
+
+    impl Read for Shrunk {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.bytes.read(buf)
+        }
+    }
+
+    impl Seek for Shrunk {
+        fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+            match pos {
+                SeekFrom::End(0) => Ok(self.claims),
+                other => self.bytes.seek(other),
+            }
+        }
+    }
+
+    #[test]
+    fn an_image_that_ends_early_is_refused_and_not_padded() {
+        let mut source = Shrunk {
+            bytes: image(3000),
+            claims: 5000,
+        };
+        let mut target = MemoryTarget::new(8192, 512).unwrap();
+        match write_image(&mut source, &mut target, &mut Silent) {
+            Err(Error::ImageEnded {
+                read_bytes,
+                image_bytes,
+            }) => assert_eq!((read_bytes, image_bytes), (3000, 5000)),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_check_of_an_image_that_ends_early_says_so() {
+        let mut target = MemoryTarget::new(8192, 512).unwrap();
+        write_image(&mut image(5000), &mut target, &mut Silent).unwrap();
+        let mut source = Shrunk {
+            bytes: image(3000),
+            claims: 5000,
+        };
+        match verify_image(&mut source, &mut target, &mut Silent) {
+            Err(Error::ImageEnded {
+                read_bytes,
+                image_bytes,
+            }) => assert_eq!((read_bytes, image_bytes), (3000, 5000)),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// A drive that gives no bytes past `ends_at`, as a reader does when its
+    /// card comes out.
+    struct Ending {
+        inner: MemoryTarget,
+        ends_at: u64,
+    }
+
+    impl Read for Ending {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let at = self.inner.stream_position()?;
+            let left = self.ends_at.saturating_sub(at).min(buf.len() as u64) as usize;
+            self.inner.read(&mut buf[..left])
+        }
+    }
+
+    impl Write for Ending {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.inner.write(buf)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.inner.flush()
+        }
+    }
+
+    impl Seek for Ending {
+        fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+            self.inner.seek(pos)
+        }
+    }
+
+    impl BlockTarget for Ending {
+        fn logical_sector_size(&self) -> u32 {
+            self.inner.logical_sector_size()
+        }
+        fn length(&self) -> u64 {
+            self.inner.length()
+        }
+        fn sync(&mut self) -> Result<()> {
+            self.inner.sync()
+        }
+    }
+
+    #[test]
+    fn a_drive_that_ends_early_gives_the_offset_where_it_ended() {
+        let mut inner = MemoryTarget::new(8192, 512).unwrap();
+        let mut source = image(5000);
+        write_image(&mut source, &mut inner, &mut Silent).unwrap();
+        let mut target = Ending {
+            inner,
+            ends_at: 1024,
+        };
+        match verify_image(&mut source, &mut target, &mut Silent) {
+            Err(Error::DriveEnded {
+                at_byte,
+                drive_bytes,
+            }) => assert_eq!((at_byte, drive_bytes), (1024, 8192)),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
