@@ -539,6 +539,47 @@ const UNLOCK: &str = unlock!();
 /// it. One more fault on a second write is a fault of the drive.
 const AGAIN: &str = "Write the image again. If the check fails again, use a different drive";
 
+impl Error {
+    /// The name of the kind of error, for a script to test.
+    ///
+    /// The message is for a person and it can change. The name stays, so a
+    /// script that tries a busy drive again tests for `in_use`, and not for
+    /// words.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Error::Io(_) => "io",
+            Error::Unsupported { .. } => "unsupported",
+            Error::Host { .. } => "host",
+            Error::NoSuchDrive { .. } => "no_such_drive",
+            Error::SectorSize { .. } => "sector_size",
+            Error::Unaligned { .. } => "unaligned",
+            Error::TooSmall { .. } => "too_small",
+            Error::SystemDisk { .. } => "system_disk",
+            Error::ReadOnly { .. } => "read_only",
+            Error::NotRemovable { .. } => "not_removable",
+            Error::DriveChanged { .. } => "drive_changed",
+            Error::InUse { .. } => "in_use",
+            Error::NotConfirmed { .. } => "not_confirmed",
+            Error::VerifyFailed { .. } => "verify_failed",
+            Error::ImageEnded { .. } => "image_ended",
+            Error::DriveEnded { .. } => "drive_ended",
+            Error::Incomplete { .. } => "incomplete",
+            Error::Image { .. } => "image",
+            Error::MacosMedia { .. } => "macos_media",
+            Error::WindowsOption { .. } => "windows_option",
+            Error::NoMode { .. } => "no_mode",
+            Error::NeedsPrivilege { .. } => "needs_privilege",
+            Error::Source { .. } => "source",
+            Error::FileTooLarge { .. } => "file_too_large",
+            Error::CannotCopy { .. } => "cannot_copy",
+            Error::VolumeDiffers { .. } => "volume_differs",
+            Error::PartitionTooSmall { .. } => "partition_too_small",
+            Error::NeedsLargerDrive { .. } => "needs_larger_drive",
+            Error::VolumeFull { .. } => "volume_full",
+        }
+    }
+}
+
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
@@ -1026,6 +1067,23 @@ mod tests {
             }
         }
         all
+    }
+
+    #[test]
+    fn each_kind_of_error_has_a_name_of_its_own_in_snake_case() {
+        let all = one_of_each();
+        let names: std::collections::BTreeSet<&str> = all.iter().map(Error::kind).collect();
+        assert_eq!(names.len(), all.len(), "two kinds share a name");
+        for name in names {
+            assert!(
+                name.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{name}"
+            );
+        }
+        let busy = Error::InUse {
+            what: "disk5".to_string(),
+        };
+        assert_eq!(busy.kind(), "in_use");
     }
 
     #[test]
