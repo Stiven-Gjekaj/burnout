@@ -336,6 +336,55 @@ reason the steps are identical on three operating systems.
 
 </details>
 
+### A write that stops
+
+Burnout resumes nothing, and it promises nothing about a write that stops.
+It says what the drive holds, after an error and after Ctrl-C alike:
+
+```
+burnout: stopped. The write did not end, so the drive holds part of the image, and it is not usable now. Write the image again
+```
+
+A stop during the check says that the drive holds the whole image and that
+Burnout did not complete the check. A stop before the write says that Burnout
+wrote nothing. After a signal, the exit code is 128 and the number of the
+signal, as a shell gives it.
+
+### For a script
+
+`--json` prints JSON on the output stream, and the text for a person goes to
+the error stream. `list` prints one object:
+
+```bash
+burnout list --json
+```
+
+```
+{"drives":[{"number":1,"id":"disk0","node":"/dev/rdisk0","name":"APPLE SSD AP0512Z",...,"system":true,"read_only":false},...],"system_disk_known":true}
+```
+
+`write` prints one object on each line. The confirmation still reads its
+answer, so a script gives the answer that the confirm event names:
+
+```bash
+printf 'yes\n' | burnout write ubuntu-24.04.iso --device /dev/sdb --json
+```
+
+```
+{"event":"confirm","image":{"path":"ubuntu-24.04.iso","size_bytes":2109796352},"mode":"raw","drive":{...},"expects":"yes"}
+{"event":"start","stage":"unmount","total_bytes":null}
+{"event":"done","stage":"unmount","bytes_done":0}
+{"event":"start","stage":"write","total_bytes":2109796352}
+{"event":"progress","stage":"write","bytes_done":536870912,"total_bytes":2109796352}
+...
+{"event":"result","mode":"raw","image_bytes":2109796352,"written_bytes":2109796352,"checked_bytes":2109796352,"sha256":"162ba3c5...","ejected":true,"offline":false}
+```
+
+An error prints `{"event":"error","kind":"in_use","message":"...","note":null}`,
+and a stop prints `{"event":"stopped","reached":"writing","message":"..."}`.
+Test the `kind`, and not the message: the message is for a person, and it can
+change.
+
 ---
 
 ## Safety
