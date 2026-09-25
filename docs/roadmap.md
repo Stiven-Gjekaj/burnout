@@ -951,6 +951,29 @@ The work that turns a program that works into one somebody else can use.
 - winget and Scoop, with a manifest for each release. The decision on
   distribution below says why they wait until here.
 
+**What is done.**
+
+- The error messages. Each one says what went wrong, and then what to do
+  about it, and a test holds every kind of error to one form. A busy drive
+  gives one error on every host. Measured on macOS with a disk image: the
+  unmount of a volume with a file open on it answers `0x0000c010`, which is
+  `unix_err(EBUSY)`, and an eject while a program reads the raw node answers
+  busy too. A code of the system with one cause, such as `EIO`, carries its
+  fix.
+- An image that ends before its own ISO 9660 volume is refused in each mode,
+  before the mode check reads it. Raw mode wrote such a file, and the check
+  passed, because the check compares the drive with the same short file.
+  Measured on the twelve ISOs of the test set: each file is exactly as long as
+  its volume.
+
+**What is open.**
+
+- A drive that refuses each write, such as an SD card with its lock switch
+  on. Measured with a disk image attached read only: macOS gives the node no
+  write bit, the probe for a write answers `EACCES`, and Burnout asks for a
+  password that cannot help. The list has to read the write protection of
+  each drive, and the write has to refuse the drive with the fix.
+
 **The exit test.** Somebody who has never seen the project writes a Windows
 drive and a Linux drive, on a host you did not choose, without asking you a
 question.

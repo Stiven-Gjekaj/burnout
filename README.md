@@ -81,6 +81,7 @@ image decides the rest.
 - No flag for a thing that the tool can work out by itself.
 - It never mounts a drive, and it calls no tool of the host.
 - It refuses the disk that your system starts from.
+- Each error says what went wrong, and then what to do about it.
 - It asks for a password through `sudo`, and never reads one itself.
 - It names the target, and you confirm it, one time.
 
@@ -261,6 +262,14 @@ A drive that Burnout cannot prove is removable needs `--force`, and then the
 prompt asks for the model and the size of the drive rather than one word.
 Nothing allows a write to the drive that the system starts from.
 
+An ISO records the size of its own volume, and Burnout refuses a file that is
+shorter before it reads anything else. A download that stopped early leaves
+such a file, and a byte copy of it would pass its own check.
+
+```
+burnout: Win11.iso holds 3,000,000,000 bytes, and its file system says that it holds 7,994,415,104. The image is incomplete. Download it again, and compare its SHA-256 with the one that its publisher gives
+```
+
 When it finishes it names the check that it ran:
 
 ```
@@ -302,6 +311,7 @@ macOS ejected the drive, so nothing mounts it or writes to it until you connect 
 
 ```
 burnout write Win11_25H2.iso 2
+  -> reads the size that the ISO records, and refuses a file that is shorter
   -> reads the first 512 bytes, finds no hybrid table
   -> finds sources/install.wim, and selects Windows mode
   -> plans both partitions, and refuses a drive that is too small
