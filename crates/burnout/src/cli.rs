@@ -19,6 +19,12 @@ pub struct Cli {
     /// clears the environment.
     #[arg(long, hide = true, global = true)]
     pub elevated: bool,
+
+    /// Print JSON for a script to read, and not the text for a person.
+    ///
+    /// `list` prints one object, which holds the drives.
+    #[arg(long, global = true)]
+    pub json: bool,
 }
 
 #[derive(Debug, Subcommand)]

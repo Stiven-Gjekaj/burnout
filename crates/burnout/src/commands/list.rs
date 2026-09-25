@@ -6,8 +6,13 @@ use crate::format;
 use crate::platform;
 
 /// Print every drive that this computer reports.
-pub fn run() -> Result<i32> {
+pub fn run(json: bool) -> Result<i32> {
     let drives = in_list_order(platform::drive_list()?.drives()?);
+
+    if json {
+        println!("{}", format::list_json(&drives));
+        return Ok(0);
+    }
 
     if drives.is_empty() {
         // Not an error. The computer answered, and the answer is none.

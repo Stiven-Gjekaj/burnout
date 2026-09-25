@@ -3,7 +3,9 @@
 //! This module makes no system call and reads no drive. It takes the drives
 //! and returns the lines, so a test checks the table on any host.
 
-use burnout_core::{size_column, DriveInfo};
+use burnout_core::{size_column, Connection, DriveInfo};
+
+use crate::json::Json;
 
 /// The whole table, as lines.
 pub fn table(drives: &[DriveInfo]) -> Vec<String> {
@@ -66,6 +68,62 @@ pub fn table(drives: &[DriveInfo]) -> Vec<String> {
         lines.push(line);
     }
     lines
+}
+
+/// The list, as `list --json` prints it.
+///
+/// The object says whether the host named its system disk, because a drive
+/// list with no system disk in it is a list that the refusal of that disk did
+/// not run against.
+pub fn list_json(drives: &[DriveInfo]) -> Json {
+    Json::Object(vec![
+        (
+            "drives",
+            Json::List(
+                drives
+                    .iter()
+                    .enumerate()
+                    .map(|(at, d)| drive_json(at + 1, d))
+                    .collect(),
+            ),
+        ),
+        (
+            "system_disk_known",
+            Json::Bool(drives.iter().any(|d| d.system)),
+        ),
+    ])
+}
+
+/// One drive, as JSON. `number` is the number that the table prints.
+pub fn drive_json(number: usize, drive: &DriveInfo) -> Json {
+    let connection = match drive.connection {
+        Connection::Internal => "internal",
+        Connection::External => "external",
+        Connection::Unknown => "unknown",
+    };
+    Json::Object(vec![
+        ("number", Json::Number(number as u64)),
+        ("id", Json::text(drive.id.as_str())),
+        ("node", Json::text(&drive.node)),
+        ("name", Json::text(&drive.name)),
+        ("vendor", Json::maybe_text(drive.vendor.as_deref())),
+        ("model", Json::maybe_text(drive.model.as_deref())),
+        ("serial", Json::maybe_text(drive.serial.as_deref())),
+        ("size_bytes", Json::Number(drive.size_bytes)),
+        (
+            "logical_sector_size",
+            Json::Number(drive.logical_sector_size.into()),
+        ),
+        (
+            "physical_sector_size",
+            Json::maybe_number(drive.physical_sector_size.map(u64::from)),
+        ),
+        ("bus", Json::text(drive.bus.label())),
+        ("connection", Json::text(connection)),
+        ("removable", Json::Bool(drive.removable())),
+        ("system", Json::Bool(drive.system)),
+        ("read_only", Json::Bool(drive.read_only)),
+    ])
 }
 
 #[cfg(test)]
@@ -139,6 +197,39 @@ mod tests {
         for row in &rows {
             assert_eq!(row.trim_end(), row, "{row:?} ends in a space");
         }
+    }
+
+    #[test]
+    fn the_list_as_json_holds_each_drive_and_whether_the_system_disk_is_known() {
+        let mut stick = drive("sdb", 32_010_928_128, Bus::Usb, false);
+        stick.model = Some("Ultra \"Fit\"".to_string());
+        stick.serial = Some("4C53".to_string());
+        stick.physical_sector_size = Some(4096);
+        let json = list_json(&[drive("sda", 1024, Bus::Nvme, true), stick]).to_string();
+        assert_eq!(
+            json,
+            concat!(
+                r#"{"drives":["#,
+                r#"{"number":1,"id":"sda","node":"/dev/sda","name":"sda","vendor":null,"model":null,"#,
+                r#""serial":null,"size_bytes":1024,"logical_sector_size":512,"physical_sector_size":null,"#,
+                r#""bus":"NVMe","connection":"internal","removable":false,"system":true,"read_only":false},"#,
+                r#"{"number":2,"id":"sdb","node":"/dev/sdb","name":"sdb","vendor":null,"#,
+                r#""model":"Ultra \"Fit\"","serial":"4C53","size_bytes":32010928128,"#,
+                r#""logical_sector_size":512,"physical_sector_size":4096,"bus":"USB","#,
+                r#""connection":"external","removable":true,"system":false,"read_only":false}"#,
+                r#"],"system_disk_known":true}"#
+            )
+        );
+    }
+
+    #[test]
+    fn a_list_with_no_system_disk_says_so_in_json() {
+        let json = list_json(&[drive("sdb", 1024, Bus::Usb, false)]).to_string();
+        assert!(json.ends_with(r#""system_disk_known":false}"#), "{json}");
+        assert_eq!(
+            list_json(&[]).to_string(),
+            r#"{"drives":[],"system_disk_known":false}"#
+        );
     }
 
     #[test]
