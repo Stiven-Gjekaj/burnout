@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 
 use burnout_core::{human_size, Progress, ProgressEvent, Stage};
 
+use crate::json::Json;
+
 /// How often the line is drawn.
 ///
 /// A drive takes minutes and a terminal is not a film. Four times a second is
@@ -228,6 +230,93 @@ impl Progress for Bar {
     }
 }
 
+/// The progress of a write as JSON, one object on each line of the output
+/// stream, for a script to read.
+///
+/// The start and the end of each step always print. An advance prints four
+/// times a second at most, as the line for a person does, and it carries the
+/// total that the start of its step gave.
+pub struct JsonProgress {
+    starts: Starts,
+    printed: Instant,
+    out: Box<dyn Write>,
+}
+
+impl Default for JsonProgress {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl JsonProgress {
+    pub fn new() -> Self {
+        Self::on(Box::new(std::io::stdout()))
+    }
+
+    fn on(out: Box<dyn Write>) -> Self {
+        JsonProgress {
+            starts: Starts::default(),
+            printed: Instant::now() - REDRAW,
+            out,
+        }
+    }
+
+    fn print(&mut self, value: Json) {
+        let _ = writeln!(self.out, "{value}");
+        let _ = self.out.flush();
+    }
+}
+
+impl Progress for JsonProgress {
+    fn report(&mut self, event: ProgressEvent) {
+        let now = Instant::now();
+        let value = match event {
+            ProgressEvent::Start { stage, total_bytes } => {
+                self.starts.begin(stage, now, total_bytes);
+                Json::Object(vec![
+                    ("event", Json::text("start")),
+                    ("stage", Json::text(stage_name(stage))),
+                    ("total_bytes", Json::maybe_number(total_bytes)),
+                ])
+            }
+            ProgressEvent::Advance { stage, bytes_done } => {
+                if now.duration_since(self.printed) < REDRAW {
+                    return;
+                }
+                self.printed = now;
+                Json::Object(vec![
+                    ("event", Json::text("progress")),
+                    ("stage", Json::text(stage_name(stage))),
+                    ("bytes_done", Json::Number(bytes_done)),
+                    ("total_bytes", Json::maybe_number(self.starts.total(stage))),
+                ])
+            }
+            ProgressEvent::Done { stage, bytes_done } => Json::Object(vec![
+                ("event", Json::text("done")),
+                ("stage", Json::text(stage_name(stage))),
+                ("bytes_done", Json::Number(bytes_done)),
+            ]),
+            _ => return,
+        };
+        self.print(value);
+    }
+}
+
+/// What a write reports to: the line for a person, or JSON for a script.
+pub enum Listener {
+    Bar(Bar),
+    Json(JsonProgress),
+}
+
+impl Progress for Listener {
+    fn report(&mut self, event: ProgressEvent) {
+        match self {
+            Listener::Bar(bar) => bar.report(event),
+            Listener::Json(json) => json.report(event),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,6 +396,40 @@ mod tests {
             1,
             "{:?}",
             screen.text()
+        );
+    }
+
+    #[test]
+    fn the_progress_as_json_gives_each_start_and_end_and_the_total_of_an_advance() {
+        let screen = Screen::default();
+        let mut json = JsonProgress::on(Box::new(screen.clone()));
+        json.report(ProgressEvent::Start {
+            stage: Stage::Write,
+            total_bytes: Some(2_000),
+        });
+        json.report(ProgressEvent::Advance {
+            stage: Stage::Write,
+            bytes_done: 500,
+        });
+        // Too soon after the last one, so it does not print.
+        json.report(ProgressEvent::Advance {
+            stage: Stage::Write,
+            bytes_done: 600,
+        });
+        json.report(ProgressEvent::Done {
+            stage: Stage::Write,
+            bytes_done: 2_000,
+        });
+        assert_eq!(
+            screen.text(),
+            concat!(
+                r#"{"event":"start","stage":"write","total_bytes":2000}"#,
+                "\n",
+                r#"{"event":"progress","stage":"write","bytes_done":500,"total_bytes":2000}"#,
+                "\n",
+                r#"{"event":"done","stage":"write","bytes_done":2000}"#,
+                "\n"
+            )
         );
     }
 

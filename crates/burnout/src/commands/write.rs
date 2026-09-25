@@ -38,8 +38,29 @@ use burnout_layout::{
 use crate::cli::{ModeArg, WriteArgs};
 use crate::elevate::{self, Plan, State};
 use crate::platform;
-use crate::report::Bar;
+use crate::report::{Bar, JsonProgress, Listener};
 use crate::stop::Tracked;
+
+/// Print one line of text for a person.
+///
+/// With `--json` the output stream carries JSON, so the text for a person
+/// goes to the error stream, where a person still reads it.
+macro_rules! say {
+    ($json:expr) => {
+        if $json {
+            eprintln!()
+        } else {
+            println!()
+        }
+    };
+    ($json:expr, $($arg:tt)*) => {
+        if $json {
+            eprintln!($($arg)*)
+        } else {
+            println!($($arg)*)
+        }
+    };
+}
 
 /// How many times the check opens the drive before it stops, and the pause
 /// between two tries. Ten seconds in all.
@@ -67,7 +88,10 @@ struct WindowsJob {
 }
 
 /// Write an image to a drive.
-pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
+///
+/// With `json`, each step prints as one JSON object on a line of the output
+/// stream, and no progress line is drawn.
+pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
     crate::stop::on_stop();
     let job = prepare(args)?;
 
@@ -110,6 +134,7 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
         &job,
         layout.as_ref(),
         system_disk_known,
+        json,
     )? {
         return Err(Error::NotConfirmed {
             drive: describe(&chosen),
@@ -124,7 +149,10 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
     check_target(&again, force)?;
 
     let access = platform::drive_access()?;
-    let mut bar = Tracked(Bar::new());
+    let mut bar = Tracked(match json {
+        true => Listener::Json(JsonProgress::new()),
+        false => Listener::Bar(Bar::new()),
+    });
 
     // Before the unmount, and until the check ends. A host that mounts the
     // new volumes can write to them before the check reads them.
@@ -140,9 +168,9 @@ pub fn run(args: &WriteArgs, elevated: bool) -> Result<i32> {
     });
 
     match (job, layout) {
-        (Job::Raw { mut image, .. }, _) => write_raw(&access, &again, &mut image, &mut bar),
+        (Job::Raw { mut image, .. }, _) => write_raw(&access, &again, &mut image, &mut bar, json),
         (Job::Windows(w), Some(layout)) => {
-            write_windows_mode(&access, &again, &w, layout, &mut bar)
+            write_windows_mode(&access, &again, &w, layout, &mut bar, json)
         }
         (Job::Windows(_), None) => unreachable!("Windows mode plans a layout"),
     }
@@ -249,6 +277,7 @@ fn write_raw<A: DriveAccess>(
     drive: &DriveInfo,
     image: &mut File,
     bar: &mut impl Progress,
+    json: bool,
 ) -> Result<i32> {
     let report = {
         let mut target = access.open(&drive.id)?;
@@ -264,19 +293,21 @@ fn write_raw<A: DriveAccess>(
     };
     let ejected = access.eject(&drive.id);
 
-    println!();
-    println!(
+    say!(json);
+    say!(
+        json,
         "Wrote {} to {}.",
         size_column(report.image_bytes),
         drive.name
     );
-    println!(
+    say!(
+        json,
         "Checked {} of the drive against the image, byte for byte.",
         size_column(proof.bytes)
     );
-    println!("SHA-256 {}", proof.digest);
-    offline_note();
-    eject_note(&ejected);
+    say!(json, "SHA-256 {}", proof.digest);
+    offline_note(json);
+    eject_note(&ejected, json);
     Ok(0)
 }
 
@@ -288,6 +319,7 @@ fn write_windows_mode<A: DriveAccess>(
     w: &WindowsJob,
     layout: Layout,
     bar: &mut impl Progress,
+    json: bool,
 ) -> Result<i32> {
     let plan = WindowsDrive {
         layout,
@@ -309,20 +341,21 @@ fn write_windows_mode<A: DriveAccess>(
     let ejected = access.eject(&drive.id);
 
     let (files, bytes) = written.files();
-    println!();
-    println!(
+    say!(json);
+    say!(json,
         "Wrote {files} files of {} to {}: {} onto partition 1, FAT32, and {} onto partition 2, exFAT.",
         size_column(bytes),
         drive.name,
         written.boot.files.len(),
         written.install.files.len()
     );
-    println!(
+    say!(
+        json,
         "Checked each file through a new mount of its volume against the SHA-256 that it went in \
          with, and the partition table against the one that Burnout wrote."
     );
-    offline_note();
-    eject_note(&ejected);
+    offline_note(json);
+    eject_note(&ejected, json);
     Ok(0)
 }
 
@@ -330,22 +363,25 @@ fn write_windows_mode<A: DriveAccess>(
 ///
 /// The eject comes after the check, so a failed eject leaves a drive that is
 /// written and checked. That gives a line in the report, and not an error.
-fn eject_note(ejected: &Result<()>) {
+fn eject_note(ejected: &Result<()>, json: bool) {
     match ejected {
         Ok(()) => {
             #[cfg(target_os = "macos")]
-            println!(
+            say!(
+                json,
                 "macOS ejected the drive, so nothing mounts it or writes to it until you connect \
                  it again."
             );
         }
         // A busy drive gets no fix of its own here. The fix of a busy drive
         // is to try again, and the eject does not get another try.
-        Err(Error::InUse { .. }) => println!(
+        Err(Error::InUse { .. }) => say!(
+            json,
             "The eject failed, because a program uses the drive. The host can mount the drive \
              and write to it, so eject it before you remove it."
         ),
-        Err(e) => println!(
+        Err(e) => say!(
+            json,
             "The eject failed: {e}. The host can mount the drive and write to it, so eject it \
              before you remove it."
         ),
@@ -388,9 +424,13 @@ fn busy(e: &Error) -> bool {
 
 /// The Windows layer took the drive offline for the write, and a person who
 /// looks for it in Explorer needs to know why it is not there.
-fn offline_note() {
+fn offline_note(json: bool) {
     #[cfg(windows)]
-    println!("Windows now holds the drive offline and read-only, so it changes nothing on it.");
+    say!(
+        json,
+        "Windows now holds the drive offline and read-only, so it changes nothing on it."
+    );
+    let _ = json;
 }
 
 /// Refuse a drive whose size or sector size is not what the list said, and
@@ -592,18 +632,20 @@ fn confirm(
     job: &Job,
     layout: Option<&Layout>,
     system_disk_known: bool,
+    json: bool,
 ) -> Result<bool> {
     let image_bytes = match job {
         Job::Raw { bytes, .. } => *bytes,
         Job::Windows(w) => w.iso_bytes,
     };
-    println!("This erases the drive. Nothing undoes it.");
-    println!();
-    println!("    image   {}", args.image.display());
-    println!("            {}", size_column(image_bytes));
-    println!("    drive   {}", drive.name);
-    println!("            {}", size_column(drive.size_bytes));
-    println!(
+    say!(json, "This erases the drive. Nothing undoes it.");
+    say!(json);
+    say!(json, "    image   {}", args.image.display());
+    say!(json, "            {}", size_column(image_bytes));
+    say!(json, "    drive   {}", drive.name);
+    say!(json, "            {}", size_column(drive.size_bytes));
+    say!(
+        json,
         "            {} {} {}",
         drive.node,
         drive.bus.label(),
@@ -614,31 +656,45 @@ fn confirm(
         }
     );
     if let Some(serial) = &drive.serial {
-        println!("            serial {serial}");
+        say!(json, "            serial {serial}");
     }
-    println!();
+    say!(json);
     for line in what_goes_on(job, layout) {
-        println!("{line}");
+        say!(json, "{line}");
     }
-    println!();
+    say!(json);
 
     let wanted = if force == Force::Yes {
-        println!("This drive is not one that Burnout can prove is removable.");
-        println!("Type the model and the size of the drive to go on:");
-        println!("    {}", force_phrase(drive));
+        say!(
+            json,
+            "This drive is not one that Burnout can prove is removable."
+        );
+        say!(json, "Type the model and the size of the drive to go on:");
+        say!(json, "    {}", force_phrase(drive));
         None
     } else if !system_disk_known {
-        println!("Burnout cannot tell which drive this system starts from, so it");
-        println!("cannot refuse that drive. Read the drive above, and type its");
-        println!("model and its size to go on:");
-        println!("    {}", force_phrase(drive));
+        say!(
+            json,
+            "Burnout cannot tell which drive this system starts from, so it"
+        );
+        say!(
+            json,
+            "cannot refuse that drive. Read the drive above, and type its"
+        );
+        say!(json, "model and its size to go on:");
+        say!(json, "    {}", force_phrase(drive));
         None
     } else {
-        println!("Type yes to go on:");
+        say!(json, "Type yes to go on:");
         Some("yes")
     };
-    print!("> ");
-    std::io::stdout().flush()?;
+    if json {
+        eprint!("> ");
+        std::io::stderr().flush()?;
+    } else {
+        print!("> ");
+        std::io::stdout().flush()?;
+    }
 
     let mut typed = String::new();
     std::io::stdin().read_line(&mut typed)?;
