@@ -223,6 +223,18 @@ pub fn on_stop(json: bool) {
     }
     let handler = stop as extern "C" fn(libc::c_int);
     for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+        // A signal that the parent ignores stays ignored. `nohup` ignores
+        // SIGHUP so that a terminal that closes does not stop the program,
+        // and a shell with no job control ignores SIGINT for a program that
+        // it starts in the background.
+        //
+        // SAFETY: a null action asks for the action that is there, and
+        // changes nothing.
+        let mut before: libc::sigaction = unsafe { std::mem::zeroed() };
+        unsafe { libc::sigaction(signal, std::ptr::null(), &mut before) };
+        if before.sa_sigaction == libc::SIG_IGN {
+            continue;
+        }
         // SAFETY: the handler touches two atomics, `write` and `_exit`, and
         // nothing else.
         unsafe { libc::signal(signal, handler as libc::sighandler_t) };
@@ -384,6 +396,22 @@ mod tests {
                 ("message", crate::json::Json::text(text)),
             ]);
             assert_eq!(stopped_json(r), format!("{expected}\n"));
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_signal_that_the_parent_ignores_stays_ignored() {
+        // SAFETY: each disposition goes back to what it was at the end.
+        unsafe {
+            let hup = libc::signal(libc::SIGHUP, libc::SIG_IGN);
+            let term = libc::signal(libc::SIGTERM, libc::SIG_DFL);
+            on_stop(false);
+            let hup_after = libc::signal(libc::SIGHUP, hup);
+            let term_after = libc::signal(libc::SIGTERM, term);
+            assert_eq!(hup_after, libc::SIG_IGN, "nohup must keep its SIGHUP");
+            assert_ne!(term_after, libc::SIG_DFL, "SIGTERM gets the handler");
+            assert_ne!(term_after, libc::SIG_IGN);
         }
     }
 
