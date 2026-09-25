@@ -8,7 +8,7 @@
 //! project can do, so these rules come before the write path and not inside
 //! it.
 
-use crate::{DriveInfo, Error, Result};
+use crate::{grouped, DriveInfo, Error, Result};
 
 /// Whether the person passed `--force`.
 ///
@@ -92,7 +92,7 @@ pub fn describe(drive: &DriveInfo) -> String {
         "{} ({}, {} bytes)",
         drive.name,
         drive.id.as_str(),
-        drive.size_bytes
+        grouped(drive.size_bytes)
     )
 }
 
@@ -252,9 +252,9 @@ mod tests {
 
     #[test]
     fn a_description_carries_the_size_so_that_two_drives_tell_apart() {
-        let text = describe(&drive());
-        assert!(text.contains("Samsung PSSD T7"));
-        assert!(text.contains("disk4"));
-        assert!(text.contains("1000204886016"));
+        assert_eq!(
+            describe(&drive()),
+            "Samsung PSSD T7 (disk4, 1,000,204,886,016 bytes)"
+        );
     }
 }

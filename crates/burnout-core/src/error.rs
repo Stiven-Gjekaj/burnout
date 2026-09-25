@@ -491,12 +491,12 @@ mod tests {
     #[test]
     fn a_declined_write_names_the_drive_that_it_left_alone() {
         let e = Error::NotConfirmed {
-            drive: "Flash Drive (disk5, 128320801792 bytes)".to_string(),
+            drive: "Flash Drive (disk5, 128,320,801,792 bytes)".to_string(),
         };
         assert_eq!(
             e.to_string(),
             "the answer does not match, so Burnout wrote nothing to Flash Drive (disk5, \
-             128320801792 bytes)"
+             128,320,801,792 bytes)"
         );
     }
 
