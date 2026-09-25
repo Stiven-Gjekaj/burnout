@@ -914,7 +914,13 @@ run again with both fixes on the same drive, passed.
   `SectorIo` now sends whole sectors that follow one another in one write of
   up to 1 MiB. On macOS the write reached 803.4 MB at 31.8 MB/s, where it was
   at 12.7 MB/s near 997 MB before, and the whole write ran at 50.9 MB/s
-  against 38.9 MB/s. The Windows VM was not measured again.
+  against 38.9 MB/s. A Windows 11 VM then wrote the same drive twice, first
+  with the binary of the commit before the change, and then with v0.3.0.
+  After 30 seconds the old binary had written 125.4 MB at 4.2 MB/s, and
+  v0.3.0 767.0 MB at 25.4 MB/s. The whole write ran at 22.0 MB/s and then at
+  37.6 MB/s, and the check at 35.6 MB/s both times. That VM is not the
+  Windows VM of the exit test, which has a slower USB path: there the old
+  binary wrote at 8.8 MB/s. So only two runs in the same VM compare.
 
 The VM stopped at "Start boot option" after a warm restart twice, in the
 install from the drive that Windows wrote, and in its first run with a drive
