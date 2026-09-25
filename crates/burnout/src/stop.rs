@@ -174,9 +174,37 @@ pub fn on_stop() {
     }
 }
 
+/// Say what the drive holds when Ctrl-C, Ctrl-Break or the close of the
+/// console window stops the write, and end with 130.
+///
+/// Windows calls the handler on a thread of its own, and not as a signal, so
+/// the handler writes through the error stream of the program.
+#[cfg(windows)]
+pub fn on_stop() {
+    use windows_sys::Win32::Foundation::BOOL;
+    use windows_sys::Win32::System::Console::{
+        SetConsoleCtrlHandler, CTRL_BREAK_EVENT, CTRL_CLOSE_EVENT, CTRL_C_EVENT,
+    };
+
+    unsafe extern "system" fn stop(event: u32) -> BOOL {
+        match event {
+            CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT => {
+                let text = stopped(reached());
+                let _ = std::io::Write::write_all(&mut std::io::stderr(), text.as_bytes());
+                std::process::exit(130)
+            }
+            // A log off or a shut down goes to the next handler.
+            _ => 0,
+        }
+    }
+    // SAFETY: the handler is a function of this program, so it lives as long
+    // as the program does.
+    unsafe { SetConsoleCtrlHandler(Some(stop), 1) };
+}
+
 /// Say what the drive holds when a signal stops the write. This host has no
-/// handler yet, and a stop ends the process with no word.
-#[cfg(not(unix))]
+/// handler, and a stop ends the process with no word.
+#[cfg(not(any(unix, windows)))]
 pub fn on_stop() {}
 
 #[cfg(test)]
