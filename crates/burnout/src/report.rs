@@ -7,9 +7,7 @@
 use std::io::{IsTerminal, Write};
 use std::time::{Duration, Instant};
 
-use burnout_core::{Progress, ProgressEvent, Stage};
-
-use crate::format::human_size;
+use burnout_core::{human_size, Progress, ProgressEvent, Stage};
 
 /// How often the line is drawn.
 ///

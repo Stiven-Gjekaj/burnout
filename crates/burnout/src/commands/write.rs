@@ -24,9 +24,10 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use burnout_core::{
-    check_fits, check_same_drive, check_target, describe, force_phrase, has_boot_table,
-    in_list_order, phrase_matches, verify_image, write_image, BlockTarget, DriveAccess, DriveInfo,
-    Error, Force, Progress, ProgressEvent, Result, Stage, BOOT_SECTOR_BYTES,
+    check_fits, check_same_drive, check_target, describe, force_phrase, has_boot_table, human_size,
+    in_list_order, phrase_matches, size_column, verify_image, write_image, BlockTarget,
+    DriveAccess, DriveInfo, Error, Force, Progress, ProgressEvent, Result, Stage,
+    BOOT_SECTOR_BYTES,
 };
 use burnout_iso::{mode_of_file, IsoSource, Mode};
 use burnout_layout::{
@@ -36,7 +37,6 @@ use burnout_layout::{
 
 use crate::cli::{ModeArg, WriteArgs};
 use crate::elevate::{self, Plan, State};
-use crate::format::{human_size, size_column};
 use crate::platform;
 use crate::report::Bar;
 

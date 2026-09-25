@@ -17,6 +17,7 @@ mod progress;
 mod safety;
 mod sector_io;
 mod sha256;
+mod size;
 mod strict_target;
 mod target;
 mod tree;
@@ -38,6 +39,7 @@ pub use safety::{
 };
 pub use sector_io::SectorIo;
 pub use sha256::{sha256, Digest, Sha256};
+pub use size::{grouped, human_size, size_column};
 pub use strict_target::StrictTarget;
 pub use target::{BlockTarget, DriveAccess};
 pub use tree::{DirSource, Entry, FileSource, MemorySource, TreePath};
