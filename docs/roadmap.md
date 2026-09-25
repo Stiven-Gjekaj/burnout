@@ -958,8 +958,11 @@ The work that turns a program that works into one somebody else can use.
   gives one error on every host. Measured on macOS with a disk image: the
   unmount of a volume with a file open on it answers `0x0000c010`, which is
   `unix_err(EBUSY)`, and an eject while a program reads the raw node answers
-  busy too. A code of the system with one cause, such as `EIO`, carries its
-  fix.
+  busy too. Measured on Linux in the Fedora VM: the unmount of a volume with a
+  file open on it gives the error with the mount point. Measured on Windows in
+  a test VM: the lock of a volume with a file open on it gives the error for a
+  volume of the drive. A code of the system with one cause, such as `EIO`,
+  carries its fix.
 - An image that ends before its own ISO 9660 volume is refused in each mode,
   before the mode check reads it. Raw mode wrote such a file, and the check
   passed, because the check compares the drive with the same short file.
@@ -971,14 +974,27 @@ The work that turns a program that works into one somebody else can use.
   probe for a write with `EACCES`, and Burnout asked for a password that
   cannot help. macOS reads `Writable` from the registry, Linux reads
   `/sys/block/<drive>/ro`, and Windows asks `IOCTL_DISK_IS_WRITABLE`.
-  Measured on macOS with a disk image attached read only.
+  Windows also answers write-protected for the read-only mark that a write of
+  Burnout leaves on the drive, and the next write takes that mark off. So
+  Windows refuses only a drive that answers write-protected with no mark.
+  Measured with diskpart: a medium that QEMU gives read only says "Current
+  Read-only State: Yes" and "Read-only: No", and a drive that Burnout wrote
+  says yes to both. Measured on macOS with a disk image attached read only,
+  and on Linux and on Windows with a drive that QEMU gives read only: the
+  list marks it, and the write refuses it. On Windows a second write to the
+  drive that Burnout wrote goes through.
 - A write that stops says what the drive holds. After an error, one line
   follows the error. Ctrl-C, SIGTERM and SIGHUP on Linux and macOS end with
   128 and the number of the signal, and a signal that the parent ignores
   stays ignored, so `nohup` still works. Ctrl-C, Ctrl-Break and the close of
   the console on Windows end with 130. Burnout resumes nothing. Measured on
   macOS with a disk image: a stop at the confirmation, during the write, and
-  during the check.
+  during the check. Measured on Linux in the Fedora VM: SIGINT ends with 130,
+  SIGTERM with `--json` ends with 143 and the stopped event, a write under
+  `nohup` goes on to its end through SIGHUP, and Ctrl-C from the keyboard
+  ends the progress line and prints the stop. Measured on Windows in the test
+  VM: Ctrl-C from the keyboard in PowerShell prints the stop and ends with
+  130.
 - `--json`. `list` prints one object, and `write` prints one object on a line
   for the confirmation, each step, the result, an error and a stop. Each kind
   of error has a name that a script tests. Measured on macOS: a raw write of a
@@ -989,16 +1005,13 @@ The work that turns a program that works into one somebody else can use.
 - winget and Scoop. `scripts/winget-manifest.sh` and `scripts/scoop-manifest.sh`
   write each manifest from the `SHA256SUMS` of a release, and
   [releasing.md](releasing.md) says when to run them. Nothing publishes them
-  before version 1. Both manifests parse.
+  before version 1. Both manifests parse, and `winget validate` in Windows 11
+  25H2 says "Manifest validation succeeded."
 - The README says that both modes are built, and its release badge reads the
   latest release.
 
 **What is open.**
 
-- Measure on Linux and on Windows what is measured on macOS alone: the
-  refusal of a read-only drive, the error of a busy drive, and a stop by
-  Ctrl-C.
-- Run `winget validate` on the manifest that the script writes.
 - Write a Windows ISO whose install image is `install.esd`, and install from
   it.
 - Check the build provenance of each artifact of the next release.

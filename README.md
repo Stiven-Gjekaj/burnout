@@ -370,7 +370,8 @@ burnout: stopped. The write did not end, so the drive holds part of the image, a
 A stop during the check says that the drive holds the whole image and that
 Burnout did not complete the check. A stop before the write says that Burnout
 wrote nothing. After a signal, the exit code is 128 and the number of the
-signal, as a shell gives it.
+signal, as a shell gives it, and 130 on Windows. A signal that the parent
+ignores stays ignored, so a write under `nohup` goes on to its end.
 
 ### For a script
 
