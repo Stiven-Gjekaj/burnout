@@ -1024,9 +1024,15 @@ The work that turns a program that works into one somebody else can use.
 
 - Check the build provenance of each artifact of the next release.
 
-**The exit test.** Somebody who has never seen the project writes a Windows
-drive and a Linux drive, on a host you did not choose, without asking you a
-question.
+**The exit test, dropped.** The first plan was this: somebody who has never
+seen the project writes a Windows drive and a Linux drive, on a host you did
+not choose, without asking you a question. The person who owns the project
+dropped it on 2026-09-26. The exit tests of P2 and P6 already wrote a Linux
+drive and a Windows drive from each of the three hosts, and each drive started
+its system. So for a release of P7, the exit test that
+[releasing.md](releasing.md) asks for is those two, and both passed. No test
+put the tool in the hands of a person who is new to it, and no test started a
+drive on the firmware of a physical PC.
 
 ---
 
