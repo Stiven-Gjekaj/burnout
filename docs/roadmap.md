@@ -16,6 +16,7 @@ P0 to P7 are done. Raw mode and Windows mode write a drive on all three
 hosts, and a drive from each host installs Windows 11.
 v0.3.0 is the first release, and it holds P0 to P6. v1.0.0 holds P7. v0.1
 and v0.2 were planned, and nobody cut them.
+P8, Legacy BIOS boot, is next.
 Burnout reads an ISO itself, and `burnout write` uses the reader to choose the
 mode.
 
@@ -47,6 +48,7 @@ flowchart LR
     P4 --> P6[P6 Windows mode]
     P5[P5 read an ISO] --> P6
     P6 --> P7[P7 the edges]
+    P7 --> P8[P8 Legacy BIOS]
 ```
 
 P0 and P5 do not wait for anything.
@@ -62,6 +64,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P5 | Reading an ISO | L | **done** |
 | P6 | Windows mode | L | **v0.3.0** |
 | P7 | The edges | M | **v1.0.0** |
+| P8 | Legacy BIOS boot | M | next |
 
 ---
 
@@ -1051,6 +1054,54 @@ drive on the firmware of a physical PC.
 
 ---
 
+## P8. Legacy BIOS boot
+
+**Size M. Depends on P7. Not started.**
+
+A Windows drive from Burnout starts a PC with UEFI firmware only. P8 makes the
+same drive start a PC with BIOS firmware, or with UEFI in its compatibility
+mode. Raw mode needs nothing here, because a hybrid image carries its own boot
+code.
+
+The layout does not change. Partition 1 stays FAT32 and active, and partition
+2 stays exFAT. The MBR was chosen so that this phase fits with no change to
+anything that exists.
+
+- Boot code in the MBR that starts the active partition.
+- A FAT32 boot sector on partition 1 that loads grub4dos, and a menu that
+  starts `bootmgr`. `bootmgr` then reads `boot/BCD` and starts `boot.wim`, as
+  a BIOS start from the ISO does.
+- grub4dos is GPL, so Burnout does not ship it. Burnout downloads one pinned
+  release at run time and checks it against a SHA-256 in the source, as Rufus
+  does. A download that does not match is refused.
+- A way to give Burnout a local copy of grub4dos, for a computer with no
+  network.
+
+**Two decisions come first.**
+
+- Burnout has no network code. A download adds an HTTPS library, and that is
+  a new dependency for the whole tool. The other way is a file that the
+  person gives.
+- An option or the default. BIOS boot code does no harm to a UEFI start, but
+  a download for each Windows write is a cost that each person pays.
+
+**Measured, to size it.** Burnout holds 25,138 lines of Rust, and the exFAT
+writer of P4 holds 3,645 of them. P8 needs about 1,000 to 1,500 new lines with
+its tests, which is an estimate from those numbers. That is about a third of
+the exFAT writer. The boot code itself comes from grub4dos, and Burnout
+writes none of it.
+
+**The test needs x86 firmware.** A SeaBIOS VM, which this Arm Mac can only
+emulate, and one physical PC. Run the check on x64 hardware that P7 left
+open first, because it needs the same machines.
+
+**The exit test.** A drive that Burnout writes from a Windows 11 ISO starts
+Setup on a PC in BIOS mode and on the same PC in UEFI mode, and Setup installs
+in each. A grub4dos download with the wrong SHA-256 is refused, and nothing is
+written.
+
+---
+
 ## The decisions that were open
 
 All four are settled. The reasons are here so that a later reader can reopen
@@ -1162,3 +1213,4 @@ way past it for anybody who downloads one directly.
 Legacy BIOS boot, Windows To Go, a drive that holds many images, a write to a
 single partition, a graphical interface, and macOS install media.
 [The milestones](milestones.md) say why for each one.
+Legacy BIOS boot is now P8.
