@@ -55,20 +55,36 @@ Every item has to be true, and not only probably true.
        brew install stiven-gjekaj/tap/burnout
        burnout --version
 
-At version 1, two more channels open, and [the roadmap](roadmap.md) says why
-they wait. The scripts are ready, and nothing publishes what they write before
-then.
+Since version 1.0.0, two more channels take each release, and
+[the roadmap](roadmap.md) says why they waited until then.
 
-8. Write the Scoop manifest, and commit it to a bucket:
+8. Write the Scoop manifest into the bucket,
+   [Stiven-Gjekaj/scoop-bucket](https://github.com/Stiven-Gjekaj/scoop-bucket),
+   and commit it there. A person writes that commit. No bot pushes to the
+   bucket.
 
-       scripts/scoop-manifest.sh 1.0.0 release/SHA256SUMS > burnout.json
+       scripts/scoop-manifest.sh 1.0.0 release/SHA256SUMS > ../scoop-bucket/bucket/burnout.json
 
-9. Write the winget manifest into a clone of
-   [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs), check it
-   on Windows, and open a pull request with it:
+9. Write the winget manifest into a branch of the fork
+   [Stiven-Gjekaj/winget-pkgs](https://github.com/Stiven-Gjekaj/winget-pkgs),
+   check it on Windows, and open a pull request to
+   [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) with it.
+   The repository holds hundreds of thousands of files, so sync the fork and
+   clone only the folder of Burnout:
 
+       gh repo sync Stiven-Gjekaj/winget-pkgs
+       git clone --depth 1 --filter=blob:none --sparse https://github.com/Stiven-Gjekaj/winget-pkgs.git ../winget-pkgs
+       git -C ../winget-pkgs sparse-checkout set manifests/s/Stiven-Gjekaj
+       git -C ../winget-pkgs checkout -b Stiven-Gjekaj.Burnout-1.0.0
        scripts/winget-manifest.sh 1.0.0 release/SHA256SUMS ../winget-pkgs
        winget validate --manifest ..\winget-pkgs\manifests\s\Stiven-Gjekaj\Burnout\1.0.0
+
+   The title of the pull request is `New package: Stiven-Gjekaj.Burnout
+   version 1.0.0` for the first version, and
+   `Update: Stiven-Gjekaj.Burnout to <version>` for each later one. Follow the
+   template of the pull request, and say which checks ran. Microsoft checks the
+   pull request, and a bot merges it. The first pull request of an account
+   asks its owner to sign the Contributor License Agreement of Microsoft.
 
 The draft is the last point where nobody outside the project has the files.
 This tool erases drives, so a person looks before anybody can download it.
