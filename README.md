@@ -99,6 +99,20 @@ On macOS or on Linux, with Homebrew:
 brew install stiven-gjekaj/tap/burnout
 ```
 
+On Windows, with Scoop:
+
+```powershell
+scoop bucket add stiven-gjekaj https://github.com/Stiven-Gjekaj/scoop-bucket
+scoop install stiven-gjekaj/burnout
+```
+
+On Windows, with winget, when Microsoft accepts the manifest in
+[winget-pkgs](https://github.com/microsoft/winget-pkgs/pull/441640):
+
+```powershell
+winget install Stiven-Gjekaj.Burnout
+```
+
 With Cargo, on any of the three hosts:
 
 ```bash
