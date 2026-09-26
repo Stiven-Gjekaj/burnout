@@ -21,7 +21,7 @@ OUT="${3:?$USAGE}"
 BASE="${4:-https://github.com/Stiven-Gjekaj/burnout/releases/download/v${VERSION}}"
 
 ID="Stiven-Gjekaj.Burnout"
-SCHEMA="1.6.0"
+SCHEMA="1.12.0"
 
 # The digest of one binary of the release in capitals, as winget-pkgs writes
 # it, or a stop that names what is missing. SHA256SUMS holds lines of
