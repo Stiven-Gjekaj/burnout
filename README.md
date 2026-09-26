@@ -12,7 +12,7 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 ![Linux](https://img.shields.io/badge/linux-facc15?style=for-the-badge&logo=linux&logoColor=0c0706)
 [![MIT licence](https://img.shields.io/badge/mit_licence-fde68a?style=for-the-badge&logoColor=0c0706)](LICENSE)
 
-![Phase](https://img.shields.io/badge/phase-P6_done-f97316?style=flat-square&labelColor=0c0706)
+![Phase](https://img.shields.io/badge/phase-P7_done-f97316?style=flat-square&labelColor=0c0706)
 [![Release](https://img.shields.io/github/v/release/Stiven-Gjekaj/burnout?style=flat-square&labelColor=0c0706&color=78350f&label=release)](https://github.com/Stiven-Gjekaj/burnout/releases/latest)
 
 <p align="center">
@@ -34,7 +34,7 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 > `write` reads the image first. It copies a hybrid image to a drive, flushes
 > it, reads it back and compares a hash. It lays a Windows ISO out for Windows,
 > and reads each file back against its own hash.
-> Version 0.3.0 is out, and [Install](#install) says how to get it.
+> Version 1.0.0 is out, and [Install](#install) says how to get it.
 > [docs/roadmap.md](docs/roadmap.md) holds the measurements behind both
 > claims.
 > [docs/roadmap.md](docs/roadmap.md) says what comes next, and
@@ -120,7 +120,7 @@ what the file holds. Check the file first, and then take the mark off.
   Take the mark off, and it starts:
 
   ```bash
-  xattr -d com.apple.quarantine burnout-0.3.0-aarch64-apple-darwin
+  xattr -d com.apple.quarantine burnout-1.0.0-aarch64-apple-darwin
   ```
 
 - **Windows** SmartScreen can show "Windows protected your PC". Select
@@ -128,7 +128,7 @@ what the file holds. Check the file first, and then take the mark off.
   the mark off:
 
   ```powershell
-  Unblock-File .\burnout-0.3.0-x86_64-pc-windows-msvc.exe
+  Unblock-File .\burnout-1.0.0-x86_64-pc-windows-msvc.exe
   ```
 
 Homebrew, Cargo, `curl` and `gh release download` set no mark, so they bring
