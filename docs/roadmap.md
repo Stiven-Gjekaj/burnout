@@ -12,10 +12,10 @@ Do not start a phase until the phase it depends on passes its exit test.
 The sizes are relative: S is a day or two, M is a week, L is longer, and XL is
 the one that needs a plan of its own.
 
-P0 to P6 are done. Raw mode and Windows mode write a drive on all three
+P0 to P7 are done. Raw mode and Windows mode write a drive on all three
 hosts, and a drive from each host installs Windows 11.
-v0.3.0 is the first release, and it holds P0 to P6. v0.1 and v0.2 were
-planned, and nobody cut them.
+v0.3.0 is the first release, and it holds P0 to P6. v1.0.0 holds P7. v0.1
+and v0.2 were planned, and nobody cut them.
 Burnout reads an ISO itself, and `burnout write` uses the reader to choose the
 mode.
 
@@ -61,7 +61,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P4 | The exFAT writer | XL | **done** |
 | P5 | Reading an ISO | L | **done** |
 | P6 | Windows mode | L | **v0.3.0** |
-| P7 | The edges | M | **v1.0** |
+| P7 | The edges | M | **v1.0.0** |
 
 ---
 
@@ -934,7 +934,7 @@ The drive started in an Arm64 VM on this Mac.
 
 ## P7. The edges, and version 1
 
-**Size M. Depends on P6. Ships as v1.0.**
+**Size M. Depends on P6. Done. Shipped as v1.0.0.**
 
 The work that turns a program that works into one somebody else can use.
 
@@ -1019,10 +1019,25 @@ The work that turns a program that works into one somebody else can use.
   `Applying WIM file: W:\sources\install.esd, index 1`, and the first page of
   the first-run setup showed less than six and a half minutes after the click
   on Next.
+- The build provenance of v1.0.0. `gh attestation verify` passes for each of
+  the six binaries. Each digest is a subject of one attestation, which
+  `release.yml` made at `refs/tags/v1.0.0`, commit `2bdd517`. Each digest also
+  matches `SHA256SUMS`.
+- Version 1.0.0 is out: the release, the four crates on crates.io, and the
+  formula in the tap. `brew install stiven-gjekaj/tap/burnout` installed
+  1.0.0 on the Mac.
+- Scoop and winget. The bucket
+  [Stiven-Gjekaj/scoop-bucket](https://github.com/Stiven-Gjekaj/scoop-bucket)
+  holds the manifest of 1.0.0. It validates against the schema of Scoop, and
+  each download matches its hash. The winget manifest went to winget-pkgs in
+  [pull request 441640](https://github.com/microsoft/winget-pkgs/pull/441640),
+  in schema 1.12.0, which the template of winget-pkgs asks for. It validates
+  against the JSON schemas of 1.12.0, and each download matches its hash.
 
 **What is open.**
 
-- Check the build provenance of each artifact of the next release.
+- Microsoft reviews the winget pull request. The person who owns the project
+  signs the Contributor License Agreement of Microsoft in it first.
 
 **The exit test, dropped.** The first plan was this: somebody who has never
 seen the project writes a Windows drive and a Linux drive, on a host you did
