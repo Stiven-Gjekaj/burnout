@@ -418,6 +418,7 @@ that refuses a machine with no TPM 2.0 never appears.
 It costs a grub4dos download at run time, MBR and partition boot code, and a
 test on hardware that gets rarer each year.
 The MBR layout above means it fits later with no change to anything.
+[P8 in the roadmap](roadmap.md#p8-legacy-bios-boot) plans it.
 
 **Windows To Go waits.**
 It applies an image to a disk instead of copying an installer, so it is a
