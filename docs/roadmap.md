@@ -1009,11 +1009,19 @@ The work that turns a program that works into one somebody else can use.
   25H2 says "Manifest validation succeeded."
 - The README says that both modes are built, and its release badge reads the
   latest release.
+- `install.esd`. Measured in the Windows test VM: DISM exported image 1 of the
+  `install.wim` of Windows 11 25H2 Arm64, with recovery compression, into an
+  `install.esd` of 5,271,324,480 bytes. `scripts/make-iso.ps1` made an ISO of
+  6,188,892,160 bytes from that tree. Burnout on macOS wrote the ISO onto a
+  16 GB disk image in 44 seconds, with `sources/install.esd` on partition 2,
+  and the check passed. Setup started from that drive and installed onto a
+  blank disk. Its log says
+  `Applying WIM file: W:\sources\install.esd, index 1`, and the first page of
+  the first-run setup showed less than six and a half minutes after the click
+  on Next.
 
 **What is open.**
 
-- Write a Windows ISO whose install image is `install.esd`, and install from
-  it.
 - Check the build provenance of each artifact of the next release.
 
 **The exit test.** Somebody who has never seen the project writes a Windows
