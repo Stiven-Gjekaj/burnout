@@ -37,6 +37,10 @@ public static class ImageFile {
 }
 
 $image = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
+# The default limit of IMAPI is the size of a CD, and a Windows ISO is larger.
+# Measured: a tree with a 5.3 GB install.esd stops at boot.wim with
+# IMAPI_E_IMAGE_SIZE_LIMIT, 0xC0AAB120.
+$image.FreeMediaBlocks = [int]::MaxValue
 $image.FileSystemsToCreate = $FileSystems
 if ($FileSystems -band 4) {
     $image.UDFRevision = $Revision
