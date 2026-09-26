@@ -1102,6 +1102,34 @@ written.
 
 ---
 
+## Windows To Go: a far future, and a maybe
+
+Not planned. Reopen it only when many people ask for it.
+
+Windows To Go puts a Windows system that runs from the USB drive onto it, in
+place of an installer. So it is a third write mode, and not an option on
+Windows mode. It needs three large parts that Burnout does not have, and it
+avoided two of them on purpose.
+
+| Part | The reference, measured on 2026-09-26 | An estimate in Rust |
+| --- | --- | --- |
+| A WIM reader: resources, XPRESS, LZX and LZMS, extraction | wimlib, about 350 KB of C in those files | 5,000 to 7,000 lines |
+| An NTFS writer: MFT, attributes, indexes, security, log file | ntfs-3g, about 754 KB of C in those files | 8,000 to 12,000 lines |
+| A BCD store, which is a registry hive | none measured | 1,500 to 2,000 lines |
+
+That is 15,000 to 20,000 lines, four to six times the exFAT writer, and most
+of the size of Burnout today.
+
+- Windows needs hard links, reparse points, extended attributes and large
+  directory indexes on its system volume. Setup applies the image with
+  extended attributes, and its log says so.
+- wimlib is LGPL or GPL, so a WIM reader in Burnout must be new code to stay
+  under the MIT licence.
+- Microsoft took Windows To Go out of Windows itself.
+- Each test applies an image of 5 to 10 GB and then starts Windows.
+
+---
+
 ## The decisions that were open
 
 All four are settled. The reasons are here so that a later reader can reopen
@@ -1213,4 +1241,4 @@ way past it for anybody who downloads one directly.
 Legacy BIOS boot, Windows To Go, a drive that holds many images, a write to a
 single partition, a graphical interface, and macOS install media.
 [The milestones](milestones.md) say why for each one.
-Legacy BIOS boot is now P8.
+Legacy BIOS boot is now P8, and Windows To Go is a far-future maybe.
