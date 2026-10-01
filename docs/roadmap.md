@@ -1091,14 +1091,21 @@ its tests, which is an estimate from those numbers. That is about a third of
 the exFAT writer. The boot code itself comes from grub4dos, and Burnout
 writes none of it.
 
-**The test needs x86 firmware.** A SeaBIOS VM, which this Arm Mac can only
-emulate, and one physical PC. Run the check on x64 hardware that P7 left
-open first, because it needs the same machines.
+**The test runs in emulation only.** The project has no x64 PC, and the
+person who owns it said so on 2026-10-01. This Arm Mac emulates x86 in UTM:
+SeaBIOS for a BIOS start, and OVMF for a UEFI start. The emulation is slow,
+and Windows 11 x64 stops during its start under it, so the test goes as far
+as the first screen of Setup. Windows 10 x64 needs no TPM, so it shows the
+boot chain alone.
 
-**The exit test.** A drive that Burnout writes from a Windows 11 ISO starts
-Setup on a PC in BIOS mode and on the same PC in UEFI mode, and Setup installs
-in each. A grub4dos download with the wrong SHA-256 is refused, and nothing is
-written.
+**The exit test.** A drive that Burnout writes from
+`Win10_22H2_English_x64v1.iso` reaches the first screen of Setup in an
+emulated x86 VM with SeaBIOS, and again with OVMF. A drive from a Linux x86_64
+ISO starts in both. A grub4dos download with the wrong SHA-256 is refused,
+and nothing is written.
+
+**What stays unproved.** The firmware of a physical PC, in BIOS mode and in
+UEFI mode, as after P2 and P6. A full install on x64.
 
 ---
 
