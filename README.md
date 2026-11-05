@@ -104,8 +104,7 @@ scoop bucket add stiven-gjekaj https://github.com/Stiven-Gjekaj/scoop-bucket
 scoop install stiven-gjekaj/burnout
 ```
 
-On Windows, with winget, when Microsoft accepts the manifest in
-[winget-pkgs](https://github.com/microsoft/winget-pkgs/pull/441640):
+On Windows, with winget:
 
 ```powershell
 winget install Stiven-Gjekaj.Burnout
