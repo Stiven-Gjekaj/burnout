@@ -9,7 +9,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "2.3.0"
+version = "3.0.0"
 edition = "2021"
 rust-version = "1.77"
 license = "MIT"
@@ -19,10 +19,10 @@ authors = ["Stiven Gjekaj <stivenagostingjekaj@gmail.com>"]
 # The crates of this workspace, by path for a build and by version for
 # crates.io. A release sets each version here to the version above.
 [workspace.dependencies]
-burnout-core = { path = "crates/burnout-core", version = "2.3.0" }
-burnout-iso = { path = "crates/burnout-iso", version = "2.3.0" }
-burnout-layout = { path = "crates/burnout-layout", version = "2.3.0" }
-burnout-wim = { path = "crates/burnout-wim", version = "2.3.0" }
+burnout-core = { path = "crates/burnout-core", version = "3.0.0" }
+burnout-iso = { path = "crates/burnout-iso", version = "3.0.0" }
+burnout-layout = { path = "crates/burnout-layout", version = "3.0.0" }
+burnout-wim = { path = "crates/burnout-wim", version = "3.0.0" }
 
 [profile.release]
 strip = true
