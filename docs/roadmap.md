@@ -16,7 +16,7 @@ P0 to P7 are done. Raw mode and Windows mode write a drive on all three
 hosts, and a drive from each host installs Windows 11.
 v0.3.0 is the first release, and it holds P0 to P6. v1.0.0 holds P7. v0.1
 and v0.2 were planned, and nobody cut them.
-P8, Legacy BIOS boot, is next.
+P8, Legacy BIOS boot, is in progress.
 Burnout reads an ISO itself, and `burnout write` uses the reader to choose the
 mode.
 
@@ -64,7 +64,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P5 | Reading an ISO | L | **done** |
 | P6 | Windows mode | L | **v0.3.0** |
 | P7 | The edges | M | **v1.0.0** |
-| P8 | Legacy BIOS boot | M | next |
+| P8 | Legacy BIOS boot | M | in progress |
 
 ---
 
@@ -1056,7 +1056,7 @@ drive on the firmware of a physical PC.
 
 ## P8. Legacy BIOS boot
 
-**Size M. Depends on P7. Not started.**
+**Size M. Depends on P7. In progress.**
 
 A Windows drive from Burnout starts a PC with UEFI firmware only. P8 makes the
 same drive start a PC with BIOS firmware, or with UEFI in its compatibility
@@ -1067,42 +1067,78 @@ The layout does not change. Partition 1 stays FAT32 and active, and partition
 2 stays exFAT. The MBR was chosen so that this phase fits with no change to
 anything that exists.
 
-- Boot code in the MBR that starts the active partition.
-- A FAT32 boot sector on partition 1 that loads grub4dos, and a menu that
-  starts `bootmgr`. `bootmgr` then reads `boot/BCD` and starts `boot.wim`, as
-  a BIOS start from the ISO does.
-- grub4dos is GPL, so Burnout does not ship it. Burnout downloads one pinned
-  release at run time and checks it against a SHA-256 in the source, as Rufus
-  does. A download that does not match is refused.
-- A way to give Burnout a local copy of grub4dos, for a computer with no
-  network.
+**The plan changed: Burnout writes the boot code itself.** The first plan
+was to download grub4dos at run time. A look at it on 2026-11-11 found three
+costs. Its releases on GitHub are builds for UEFI in `.7z` archives, and its
+builds for a BIOS are archives on another server. A download needs an HTTPS
+library and an archive reader, in a tool that has almost no dependencies.
+grub4dos is GPL. The source of grub4dos shows the one thing that a loader
+must do for `BOOTMGR`: load the whole file at `2000:0000`, keep the boot
+sector of the partition at `0000:7C00` with the first sector of the partition
+in its BPB, and jump with the drive in `DL`. That is a small loader, so
+Burnout has its own, under the MIT licence:
 
-**Two decisions come first.**
+- `boot/mbr.asm` of `burnout-layout`, the code of the MBR. It reads the first
+  sector of the active partition by LBA, and starts it.
+- `boot/fat32.asm`, the code of the FAT32 volume, in two parts of 512 bytes.
+  Part 1 goes into the boot sector and its copy, around the BPB that the
+  format wrote. Part 2 goes into reserved sector 2, which nothing else uses.
+  It walks the root directory, loads `BOOTMGR`, and starts it.
+- Burnout includes the bytes that `nasm` builds, and `scripts/boot-code.sh`
+  builds them again in CI and compares them.
 
-- Burnout has no network code. A download adds an HTTPS library, and that is
-  a new dependency for the whole tool. The other way is a file that the
-  person gives.
-- An option or the default. BIOS boot code does no harm to a UEFI start, but
-  a download for each Windows write is a cost that each person pays.
+Both decisions of the first plan fall away. There is no download, so there
+is no network code and no copy for a computer with no network. The code costs
+nothing on a UEFI start, so it is not an option: each Windows drive carries
+it.
+
+**What is done.**
+
+- The boot code, in the MBR and in the FAT32 volume, on every Windows write.
+  The check after the write reads the MBR back with its code.
+- A test in QEMU with SeaBIOS, in CI on each push:
+  `scripts/bios-boot-test.sh`. A drive image with a probe of 409,600 bytes as
+  `bootmgr`, behind 300 files with long names, starts as an IDE disk and as a
+  USB stick on xHCI and on EHCI. Measured on macOS with QEMU 11.1.3 and
+  SeaBIOS 1.17.0, all three print
+  `PROBE cs=2000 dl=80 bpb-dl=80 hidden=00000800 signature=ok end=ok`: the
+  probe runs at `2000:0000`, with the drive in `DL` and in the BPB, with the
+  first sector of partition 1 in the BPB, and with the last bytes of the file
+  in memory.
+- An image with no `bootmgr` stops with "Burnout: the volume holds no
+  BOOTMGR" on the screen. `fsck_msdos -n` on macOS finds the volume clean
+  with the boot code in it.
+
+**What is open.**
+
+- A real `BOOTMGR`. The T7 that holds the Windows ISOs was not connected
+  when the code was done. The next step writes `Win10_22H2_English_x64v1.iso`
+  to a drive image and starts it in QEMU with SeaBIOS, up to the first screen
+  of Setup.
+- The same drive with OVMF, for UEFI, and a Linux x86_64 ISO in both.
+- The CI check on Windows of a FAT32 volume that carries the boot code. It
+  runs on the next push.
+- A drive with sectors of 4096 bytes. The code reads each number from the
+  BPB, but SeaBIOS 1.17.0 cannot read sector 0 of such a drive at all, so
+  QEMU cannot test it. A USB stick has sectors of 512 bytes.
 
 **Measured, to size it.** Burnout holds 25,138 lines of Rust, and the exFAT
-writer of P4 holds 3,645 of them. P8 needs about 1,000 to 1,500 new lines with
-its tests, which is an estimate from those numbers. That is about a third of
-the exFAT writer. The boot code itself comes from grub4dos, and Burnout
-writes none of it.
+writer of P4 holds 3,645 of them. The code of P8 is 199 lines of Rust with
+its tests (190 in `boot.rs` and 9 in the MBR and the format), 459 lines of
+assembly in the MBR and the volume, a probe of 154 lines, and two scripts of
+102 lines. That is far less than the estimate of 1,000 to 1,500 lines,
+because no download and no archive reader came in.
 
 **The test runs in emulation only.** The project has no x64 PC, and the
-person who owns it said so on 2026-10-01. This Arm Mac emulates x86 in UTM:
-SeaBIOS for a BIOS start, and OVMF for a UEFI start. The emulation is slow,
-and Windows 11 x64 stops during its start under it, so the test goes as far
-as the first screen of Setup. Windows 10 x64 needs no TPM, so it shows the
-boot chain alone.
+person who owns it said so on 2026-10-01. This Arm Mac emulates x86 in QEMU:
+SeaBIOS for a BIOS start, and OVMF for a UEFI start. Windows 11 x64 stops
+during its start under emulation, so the test goes as far as the first screen
+of Setup. Windows 10 x64 needs no TPM, so it shows the boot chain alone.
 
 **The exit test.** A drive that Burnout writes from
 `Win10_22H2_English_x64v1.iso` reaches the first screen of Setup in an
 emulated x86 VM with SeaBIOS, and again with OVMF. A drive from a Linux x86_64
-ISO starts in both. A grub4dos download with the wrong SHA-256 is refused,
-and nothing is written.
+ISO starts in both.
 
 **What stays unproved.** The firmware of a physical PC, in BIOS mode and in
 UEFI mode, as after P2 and P6. A full install on x64.
