@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/burnout-core", "crates/burnout-layout", "crates/burnout-iso", "crates/burnout"]
+members = [
+    "crates/burnout-core",
+    "crates/burnout-layout",
+    "crates/burnout-iso",
+    "crates/burnout-wim",
+    "crates/burnout",
+]
 resolver = "2"
 
 [workspace.package]
@@ -16,6 +22,7 @@ authors = ["Stiven Gjekaj <stivenagostingjekaj@gmail.com>"]
 burnout-core = { path = "crates/burnout-core", version = "2.0.0" }
 burnout-iso = { path = "crates/burnout-iso", version = "2.0.0" }
 burnout-layout = { path = "crates/burnout-layout", version = "2.0.0" }
+burnout-wim = { path = "crates/burnout-wim", version = "2.0.0" }
 
 [profile.release]
 strip = true

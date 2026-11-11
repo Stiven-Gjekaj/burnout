@@ -1,0 +1,16 @@
+[package]
+name = "burnout-wim"
+description = "Reads the WIM and ESD images of Windows: the header and the list of editions. Burnout uses it, and its interface is not stable."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords = ["wim", "esd", "windows", "imaging"]
+categories = ["filesystem", "parser-implementations"]
+
+# This crate takes no dependency beside the core of Burnout. wimlib is LGPL or
+# GPL, so the reader here is new code, to keep Burnout under the MIT licence.
+[dependencies]
+burnout-core.workspace = true
