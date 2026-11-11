@@ -1378,5 +1378,5 @@ way past it for anybody who downloads one directly.
 Legacy BIOS boot, Windows To Go, a drive that holds many images, a write to a
 single partition, a graphical interface, and macOS install media.
 [The milestones](milestones.md) say why for each one.
-Legacy BIOS boot is now P8, and Windows To Go is a far-future maybe. The other
-four are in [Later, maybe](#later-maybe).
+Legacy BIOS boot is now P8, a write to one partition is P9, and Windows To Go
+is a far-future maybe. The other three are in [Later, maybe](#later-maybe).

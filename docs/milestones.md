@@ -423,6 +423,9 @@ The MBR layout above means it fits later with no change to anything.
 one part of this: Burnout writes its own boot code, so no grub4dos and no
 download come in.
 
+**A write to one partition came in version 2.**
+[P9 in the roadmap](roadmap.md#p9-a-write-to-one-partition) does it.
+
 **Windows To Go waits.**
 It applies an image to a disk instead of copying an installer, so it is a
 third write mode and not an option on the second one.
