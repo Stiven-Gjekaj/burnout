@@ -12,7 +12,7 @@ mod geometry;
 mod place;
 mod read;
 mod sums;
-mod upcase;
+pub(crate) mod upcase;
 mod verify;
 mod write;
 
