@@ -50,6 +50,10 @@ flowchart LR
     P6 --> P7[P7 the edges]
     P7 --> P8[P8 Legacy BIOS]
     P7 --> P9[P9 one partition]
+    P5 --> P10[P10 read a WIM]
+    P10 --> P11[P11 NTFS]
+    P11 --> P12[P12 Windows To Go]
+    P8 --> P12
 ```
 
 P0 and P5 do not wait for anything.
@@ -67,6 +71,9 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P7 | The edges | M | **v1.0.0** |
 | P8 | Legacy BIOS boot | M | **v1.1.0** |
 | P9 | A write to one partition | S to M | **v2.0.0** |
+| P10 | Read a WIM file | L | **v2.1.0 and v2.2.0** |
+| P11 | Write an NTFS volume | XL | planned |
+| P12 | Windows To Go | L | planned, v3.0.0 |
 
 ---
 
@@ -1258,7 +1265,7 @@ that writes a drive that Windows starts from.
 
 ### P10. Read a WIM file
 
-**Size L. Depends on P5. Started.**
+**Size L. Depends on P5. Done for WIM files, and LZMS is blocked.**
 
 The crate `burnout-wim` reads a WIM or ESD file from inside an ISO, through
 `IsoSource::open_file`, which seeks.
@@ -1270,20 +1277,34 @@ The crate `burnout-wim` reads a WIM or ESD file from inside an ISO, through
    counted. Each run took less than a quarter of a second.
 2. **The offset table and the resources.** Done. Each stream, by its SHA-1,
    with its place, its size and its chunks.
-3. **The decompressors.** LZX and XPRESS are done. LZMS, which an ESD file and
-   a solid resource use, is next. Each one is new code from the public
-   description of the format. Four WIM files that wimlib made are test data
-   in CI, and each of their streams decompresses to its SHA-1. Measured on
-   2026-11-11 with the example `wim_check`: each stream of the three install
-   images matched its SHA-1. That is 71,824 streams and 11.5 GB for Windows
-   10 22H2 x64, 95,219 streams and 16.4 GB for Windows 11 25H2 x64, and
-   90,772 streams and 15.2 GB for Windows 11 25H2 Arm64, at about 200 MB/s
-   on one core of this Mac.
-4. **The metadata resource.** The security descriptors and the tree of
-   directory entries of one edition, with hard links, reparse points,
-   alternate streams and extended attributes.
-5. **The exit test.** Each file of one edition of each of the three Windows
-   ISOs comes out with the SHA-1 that the WIM records for it.
+3. **The decompressors.** LZX and XPRESS are done. Each one is new code from
+   a public description: the LZX of the Cabinet SDK, and LZ77+Huffman in
+   [MS-XCA]. Four WIM files that wimlib made are test data in CI, and each
+   of their streams decompresses to its SHA-1. Measured on 2026-11-11 with
+   the example `wim_check`: each stream of the three install images matched
+   its SHA-1. That is 71,824 streams and 11.5 GB for Windows 10 22H2 x64,
+   95,219 streams and 16.4 GB for Windows 11 25H2 x64, and 90,772 streams
+   and 15.2 GB for Windows 11 25H2 Arm64, at about 200 MB/s on one core of
+   this Mac. A resource streams one chunk at a time, so its size does not
+   matter.
+4. **The metadata resource.** Done. The security descriptors and the tree of
+   directory entries of one edition, with hard links, reparse points and
+   extra streams. Measured on 2026-11-11 with the example `wim_tree`: for
+   each of the 25 editions of the three ISOs, the counts of directories and
+   of files equal the ones in the XML, and each file with data names a
+   stream of the offset table. The XML counts a directory that is a
+   reparse point as a file. Windows 11 25H2 x64 Pro holds 32,610
+   directories, 143,888 files, 470 security descriptors, 2 reparse points,
+   no named stream, and 45,176 names that are hard links to another file.
+5. **The exit test.** Met for WIM files: each stream comes out with its
+   SHA-1, and each file of each edition names one of those streams.
+
+**Blocked: LZMS.** An ESD file and a solid resource use LZMS. Microsoft
+publishes no description of LZMS, and the one public decoder, in wimlib, is
+GPL, so new code under the MIT licence cannot follow it. The three ISOs of
+Microsoft here hold `install.wim` with LZX, so Windows To Go goes on without
+LZMS. An ESD from the Media Creation Tool waits until a description that
+Burnout can use exists.
 
 ### P11. Write an NTFS volume
 
