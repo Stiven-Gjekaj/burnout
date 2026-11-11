@@ -15,6 +15,7 @@ categories = ["command-line-utilities", "filesystem"]
 burnout-core.workspace = true
 burnout-iso.workspace = true
 burnout-layout.workspace = true
+burnout-wim.workspace = true
 clap = { version = "4", features = ["derive"] }
 
 # umount2, geteuid and O_EXCL have no equivalent in the standard library.

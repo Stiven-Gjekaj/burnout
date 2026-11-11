@@ -22,7 +22,8 @@ pub struct Cli {
 
     /// Print JSON for a script to read, and not the text for a person.
     ///
-    /// `list` prints one object, which holds the drives. `write` prints one
+    /// `list` prints one object, which holds the drives. `info` prints one
+    /// object, which describes the image. `write` prints one
     /// object on a line for each event: the confirmation, the start, the
     /// progress and the end of each step, the result, an error, and a stop.
     /// The text for a person then goes to the error stream.
@@ -38,10 +39,22 @@ pub enum Command {
     /// a password.
     List,
 
+    /// Show what an image is, and the mode that `write` uses for it.
+    ///
+    /// For a Windows ISO it lists the editions of the install image. It reads
+    /// the image only, and needs no privilege.
+    Info(InfoArgs),
+
     /// Write an image to a drive.
     ///
     /// This erases the drive. Nothing undoes it.
     Write(WriteArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct InfoArgs {
+    /// The image file to read.
+    pub image: PathBuf,
 }
 
 #[derive(Debug, Args)]

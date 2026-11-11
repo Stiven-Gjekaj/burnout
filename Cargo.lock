@@ -65,6 +65,7 @@ dependencies = [
  "burnout-core",
  "burnout-iso",
  "burnout-layout",
+ "burnout-wim",
  "clap",
  "core-foundation",
  "core-foundation-sys",

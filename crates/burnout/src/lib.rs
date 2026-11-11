@@ -22,6 +22,7 @@ pub fn run() -> i32 {
     let cli = cli::Cli::parse();
     let outcome = match &cli.command {
         cli::Command::List => commands::list::run(cli.json),
+        cli::Command::Info(args) => commands::info::run(&args.image, cli.json),
         cli::Command::Write(args) => commands::write::run(args, cli.elevated, cli.json),
     };
     match outcome {
