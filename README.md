@@ -266,6 +266,29 @@ A drive is sold in powers of ten, so the rounded figure uses them too.
 A drive that takes no write, such as an SD card with its lock switch on,
 carries the mark `(read only)`, and `write` refuses it.
 
+`info` reads an image and says what `write` does with it. It needs no
+privilege. For a Windows ISO it lists the editions of the install image:
+
+```bash
+burnout info Win11_25H2_English_Arm64_v2.iso
+```
+
+```
+image   Win11_25H2_English_Arm64_v2.iso
+        8.0 GB (7,994,415,104 bytes)
+volume  UDF, label CCCOMA_A64FRE_EN-US_DV9
+mode    windows
+
+The image holds an install image of Windows, so `write` lays the drive out for Windows.
+
+install sources/install.wim, 7.1 GB, LZX compression
+   1  Windows 11 Home                  ARM64  10.0.26200.8037  en-US
+   2  Windows 11 Home Single Language  ARM64  10.0.26200.8037  en-US
+   3  Windows 11 Pro                   ARM64  10.0.26200.8037  en-US
+
+Setup shows these editions, and you choose one there.
+```
+
 ```bash
 burnout write ubuntu-24.04.iso 2
 ```
@@ -427,7 +450,7 @@ ignores stays ignored, so a write under `nohup` goes on to its end.
 ### For a script
 
 `--json` prints JSON on the output stream, and the text for a person goes to
-the error stream. `list` prints one object:
+the error stream. `list` and `info` print one object each:
 
 ```bash
 burnout list --json
