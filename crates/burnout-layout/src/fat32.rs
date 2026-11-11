@@ -10,6 +10,8 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use burnout_core::{BlockTarget, Error, Result, SectorIo};
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 
+use crate::boot::write_fat32_code;
+
 /// A volume with fewer clusters than this is FAT16, whatever its boot sector
 /// says, because every host decides the type from the count.
 const MIN_CLUSTERS: u64 = 65_525;
@@ -89,6 +91,7 @@ pub fn format_fat32<T: BlockTarget>(mut volume: T, options: &Fat32Options) -> Re
     over_sectors(&mut volume, |io| {
         fatfs::format_volume(&mut *io, format)?;
         record_first_sector(io, sector_size, options.first_sector)?;
+        write_fat32_code(io, sector_size)?;
         Ok(())
     })?;
 
