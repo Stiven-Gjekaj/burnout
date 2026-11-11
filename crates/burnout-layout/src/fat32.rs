@@ -331,6 +331,28 @@ mod tests {
     }
 
     #[test]
+    fn the_volume_carries_the_boot_code_and_still_mounts() {
+        // fatfs keeps sector 2 out of its own use, so part 2 of the code
+        // can live there, and the volume mounts clean with the code in it.
+        for sector in [512u32, 4096] {
+            let mut d = Drive::usual(sector);
+            d.format().unwrap();
+            let p = d.partition_bytes();
+            let s = sector as usize;
+            let boot = <&[u8; 512]>::try_from(&p[..512]).unwrap();
+            assert_eq!(&p[..512], &crate::boot::with_fat32_code(boot));
+            assert_eq!(&p[..s], &p[6 * s..7 * s], "the copy carries it too");
+            assert_eq!(&p[2 * s..2 * s + 512], crate::boot::fat32_part_2());
+            with_volume(d.partition(), |fs| {
+                assert!(!fs.read_status_flags()?.dirty());
+                assert_eq!(fs.fat_type(), FatType::Fat32);
+                Ok(())
+            })
+            .unwrap();
+        }
+    }
+
+    #[test]
     fn the_volume_is_clean_and_knows_how_much_of_it_is_free() {
         for sector in [512u32, 4096] {
             let mut d = Drive::usual(sector);
