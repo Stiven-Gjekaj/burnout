@@ -110,6 +110,39 @@ pub struct Wim {
     pub editions: Vec<Edition>,
 }
 
+impl Wim {
+    /// The edition that `text` names: its index, its name or display name,
+    /// its edition ID, or the end of its name after a space, such as "Pro" for
+    /// "Windows 11 Pro". Case does not matter. A text that names more than one
+    /// edition names none.
+    pub fn find_edition(&self, text: &str) -> Option<&Edition> {
+        let text = text.trim();
+        if let Ok(index) = text.parse::<u32>() {
+            return self.editions.iter().find(|e| e.index == index);
+        }
+        let same = |a: &str| !a.is_empty() && a.eq_ignore_ascii_case(text);
+        let tests: [&dyn Fn(&Edition) -> bool; 3] = [
+            &|e| same(&e.name) || same(&e.display_name),
+            &|e| same(&e.edition_id),
+            &|e| {
+                [&e.name, &e.display_name].iter().any(|n| {
+                    let lower = n.to_ascii_lowercase();
+                    lower.ends_with(&format!(" {}", text.to_ascii_lowercase()))
+                })
+            },
+        ];
+        for test in tests {
+            let found: Vec<&Edition> = self.editions.iter().filter(|e| test(e)).collect();
+            match found.len() {
+                0 => continue,
+                1 => return Some(found[0]),
+                _ => return None,
+            }
+        }
+        None
+    }
+}
+
 /// Read the header and the editions of the WIM file that `reader` gives.
 /// `name` names the file in an error.
 pub fn read_wim<R: Read + Seek>(mut reader: R, name: &str) -> Result<Wim> {
@@ -295,6 +328,37 @@ mod tests {
             (pro.total_bytes, pro.file_count, pro.dir_count),
             (Some(2000), Some(100), Some(20))
         );
+    }
+
+    #[test]
+    fn an_edition_is_found_by_its_index_its_name_or_the_end_of_its_name() {
+        let edition = |index, name: &str, id: &str| Edition {
+            index,
+            name: name.to_string(),
+            edition_id: id.to_string(),
+            ..Edition::default()
+        };
+        let w = Wim {
+            header: Header::parse(&header::tests::header(0, 4, (0, 0)), "a").unwrap(),
+            editions: vec![
+                edition(1, "Windows 11 Home", "Core"),
+                edition(2, "Windows 11 Home N", "CoreN"),
+                edition(3, "Windows 11 Pro", "Professional"),
+                edition(4, "Windows 11 Pro N", "ProfessionalN"),
+            ],
+        };
+        let index = |text: &str| w.find_edition(text).map(|e| e.index);
+        assert_eq!(index("3"), Some(3));
+        assert_eq!(index(" 4 "), Some(4));
+        assert_eq!(index("5"), None);
+        assert_eq!(index("windows 11 pro"), Some(3));
+        assert_eq!(index("Professional"), Some(3));
+        assert_eq!(index("coren"), Some(2));
+        assert_eq!(index("Pro"), Some(3));
+        assert_eq!(index("pro n"), Some(4));
+        assert_eq!(index("N"), None, "N ends two names");
+        assert_eq!(index("Education"), None);
+        assert_eq!(index(""), None);
     }
 
     #[test]
