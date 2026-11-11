@@ -8,8 +8,10 @@
 //! open and measure the image          no privilege
 //! list the drives, find the target    no privilege
 //! ----------------------------------  check the privilege, start again here
+//! read the partition table            with --partition only
 //! confirm the target with the person
 //! list again, and refuse a drive that changed
+//! read the table again, and refuse a partition that changed
 //! unmount, write, flush, unmount again, verify, eject
 //! ```
 //!
@@ -24,10 +26,10 @@ use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use burnout_core::{
-    check_fits, check_same_drive, check_target, describe, force_phrase, has_boot_table, human_size,
-    in_list_order, phrase_matches, size_column, verify_image, write_image, BlockTarget,
-    DriveAccess, DriveInfo, Error, Force, Progress, ProgressEvent, Result, Stage,
-    BOOT_SECTOR_BYTES,
+    check_fits, check_same_drive, check_target, choose_partition, describe, force_phrase, grouped,
+    has_boot_table, human_size, in_list_order, phrase_matches, read_table, size_column,
+    verify_image, write_image, BlockTarget, DriveAccess, DriveInfo, Error, Force, Partition,
+    Progress, ProgressEvent, Result, Stage, Window, BOOT_SECTOR_BYTES, TABLE_BYTES,
 };
 use burnout_iso::{check_whole, mode_of_file, IsoSource, Mode};
 use burnout_layout::{
@@ -129,6 +131,13 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
         }
     }
 
+    // The table comes from the drive, so it needs the privilege, and the
+    // person sees the partition before they agree to it.
+    let partition = match (&job, args.partition) {
+        (Job::Raw { bytes, .. }, Some(number)) => Some(partition_of(&chosen, number, *bytes)?),
+        _ => None,
+    };
+
     let number = drives
         .iter()
         .position(|d| d.id == chosen.id)
@@ -140,6 +149,7 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
         args,
         &job,
         layout.as_ref(),
+        partition.as_ref(),
         system_disk_known,
         json,
     )? {
@@ -154,6 +164,11 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
     let (_, again) = find_target(args)?;
     check_same_drive(&chosen, &again)?;
     check_target(&again, force)?;
+    if let (Some(p), Job::Raw { bytes, .. }) = (&partition, &job) {
+        if partition_of(&again, p.number, *bytes)? != *p {
+            return Err(Error::PartitionChanged { number: p.number });
+        }
+    }
 
     let access = platform::drive_access()?;
     let mut bar = Tracked(match json {
@@ -175,7 +190,14 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
     });
 
     match (job, layout) {
-        (Job::Raw { mut image, .. }, _) => write_raw(&access, &again, &mut image, &mut bar, json),
+        (Job::Raw { mut image, .. }, _) => write_raw(
+            &access,
+            &again,
+            partition.as_ref(),
+            &mut image,
+            &mut bar,
+            json,
+        ),
         (Job::Windows(w), Some(layout)) => {
             write_windows_mode(&access, &again, &w, layout, &mut bar, json)
         }
@@ -186,10 +208,12 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
 /// Read the image and choose the mode, before anything needs privilege.
 fn prepare(args: &WriteArgs) -> Result<Job> {
     refuse_incomplete(&args.image)?;
-    let mode = match args.mode {
-        Some(ModeArg::Raw) => Mode::Raw,
-        Some(ModeArg::Windows) => Mode::Windows,
-        None => decide(mode_of_file(&args.image), &args.image)?,
+    let mode = match (args.partition, args.mode) {
+        (Some(_), Some(ModeArg::Windows)) => return Err(windows_in_partition(&args.image)),
+        (Some(_), _) => partition_mode(mode_of_file(&args.image), &args.image)?,
+        (None, Some(ModeArg::Raw)) => Mode::Raw,
+        (None, Some(ModeArg::Windows)) => Mode::Windows,
+        (None, None) => decide(mode_of_file(&args.image), &args.image)?,
     };
     if mode == Mode::Windows {
         return Ok(Job::Windows(Box::new(windows_job(args)?)));
@@ -282,13 +306,17 @@ fn windows_job(args: &WriteArgs) -> Result<WindowsJob> {
 fn write_raw<A: DriveAccess>(
     access: &A,
     drive: &DriveInfo,
+    partition: Option<&Partition>,
     image: &mut File,
     bar: &mut impl Progress,
     json: bool,
 ) -> Result<i32> {
     let report = {
         let mut target = access.open(&drive.id)?;
-        write_image(image, &mut target, bar)?
+        match partition {
+            Some(p) => write_image(image, &mut inside(&mut target, p)?, bar)?,
+            None => write_image(image, &mut target, bar)?,
+        }
     };
 
     // Open the drive again for the check. A read through the handle that did
@@ -296,20 +324,25 @@ fn write_raw<A: DriveAccess>(
     // it proves that the cache holds the image and not that the drive does.
     let proof = {
         let mut target = open_again(access, drive, OPEN_TRIES, OPEN_PAUSE)?;
-        verify_image(image, &mut target, bar)?
+        match partition {
+            Some(p) => verify_image(image, &mut inside(&mut target, p)?, bar)?,
+            None => verify_image(image, &mut target, bar)?,
+        }
     };
     let ejected = access.eject(&drive.id);
 
+    let (into, of) = match partition {
+        Some(p) => (
+            format!("partition {} of {}", p.number, drive.name),
+            "partition",
+        ),
+        None => (drive.name.clone(), "drive"),
+    };
     say!(json);
+    say!(json, "Wrote {} to {into}.", size_column(report.image_bytes));
     say!(
         json,
-        "Wrote {} to {}.",
-        size_column(report.image_bytes),
-        drive.name
-    );
-    say!(
-        json,
-        "Checked {} of the drive against the image, byte for byte.",
+        "Checked {} of the {of} against the image, byte for byte.",
         size_column(proof.bytes)
     );
     say!(json, "SHA-256 {}", proof.digest);
@@ -321,6 +354,7 @@ fn write_raw<A: DriveAccess>(
             Json::Object(vec![
                 ("event", Json::text("result")),
                 ("mode", Json::text("raw")),
+                ("partition", partition_number_json(partition)),
                 ("image_bytes", Json::Number(report.image_bytes)),
                 ("written_bytes", Json::Number(report.written_bytes)),
                 ("checked_bytes", Json::Number(proof.bytes)),
@@ -529,6 +563,70 @@ fn decide(mode: Result<Mode>, image: &Path) -> Result<Mode> {
     }
 }
 
+/// The mode of an image that goes into one partition: raw, whatever the
+/// image is, except a Windows ISO.
+///
+/// A file system image fits neither mode on a whole drive, and it is the usual
+/// image for one partition, so it goes on. macOS media and a file that cannot
+/// be read stay refused.
+fn partition_mode(mode: Result<Mode>, image: &Path) -> Result<Mode> {
+    match mode? {
+        Mode::Windows => Err(windows_in_partition(image)),
+        _ => Ok(Mode::Raw),
+    }
+}
+
+fn windows_in_partition(image: &Path) -> Error {
+    Error::WindowsInPartition {
+        path: image.display().to_string(),
+    }
+}
+
+/// Partition `number` of `drive`, read from the table on the drive, and
+/// checked for an image of `image_bytes`.
+fn partition_of(drive: &DriveInfo, number: u32, image_bytes: u64) -> Result<Partition> {
+    let sector = drive.logical_sector_size as u64;
+    let length = (TABLE_BYTES as u64).min(drive.size_bytes) / sector * sector;
+    let mut head = vec![0u8; length as usize];
+    File::open(&drive.node)?.read_exact(&mut head)?;
+    let table = read_table(&head, drive.logical_sector_size, drive.size_bytes)?;
+    choose_partition(table.as_ref(), number, &drive.name, image_bytes)
+}
+
+/// The part of the drive that the partition holds.
+fn inside<'a, T: BlockTarget>(target: &'a mut T, p: &Partition) -> Result<Window<&'a mut T>> {
+    Window::new(target, p.first_byte, p.bytes)
+}
+
+/// The lines of the confirmation that name the partition.
+fn partition_lines(p: &Partition) -> Vec<String> {
+    vec![
+        format!("    partition {}", p.number),
+        format!("            {}", size_column(p.bytes)),
+        format!("            from byte {}", grouped(p.first_byte)),
+        format!("            {}", p.kind.describe()),
+    ]
+}
+
+fn partition_json(p: Option<&Partition>) -> Json {
+    match p {
+        Some(p) => Json::Object(vec![
+            ("number", Json::Number(p.number as u64)),
+            ("first_byte", Json::Number(p.first_byte)),
+            ("size_bytes", Json::Number(p.bytes)),
+            ("type", Json::text(p.kind.describe())),
+        ]),
+        None => Json::Null,
+    }
+}
+
+fn partition_number_json(p: Option<&Partition>) -> Json {
+    match p {
+        Some(p) => Json::Number(p.number as u64),
+        None => Json::Null,
+    }
+}
+
 /// The name of the mode of a job, as JSON gives it.
 fn mode_name(job: &Job) -> &'static str {
     match job {
@@ -686,6 +784,7 @@ fn confirm(
     args: &WriteArgs,
     job: &Job,
     layout: Option<&Layout>,
+    partition: Option<&Partition>,
     system_disk_known: bool,
     json: bool,
 ) -> Result<bool> {
@@ -693,7 +792,14 @@ fn confirm(
         Job::Raw { bytes, .. } => *bytes,
         Job::Windows(w) => w.iso_bytes,
     };
-    say!(json, "This erases the drive. Nothing undoes it.");
+    match partition {
+        Some(p) => say!(
+            json,
+            "This erases partition {} of the drive. Nothing undoes it.",
+            p.number
+        ),
+        None => say!(json, "This erases the drive. Nothing undoes it."),
+    }
     say!(json);
     say!(json, "    image   {}", args.image.display());
     say!(json, "            {}", size_column(image_bytes));
@@ -713,8 +819,17 @@ fn confirm(
     if let Some(serial) = &drive.serial {
         say!(json, "            serial {serial}");
     }
+    if let Some(p) = partition {
+        for line in partition_lines(p) {
+            say!(json, "{line}");
+        }
+    }
     say!(json);
-    for line in what_goes_on(job, layout) {
+    let lines = match partition {
+        Some(_) => vec!["The other partitions of the drive stay as they are.".to_string()],
+        None => what_goes_on(job, layout),
+    };
+    for line in lines {
         say!(json, "{line}");
     }
     say!(json);
@@ -760,6 +875,7 @@ fn confirm(
                 ),
                 ("mode", Json::text(mode_name(job))),
                 ("drive", drive_json(number, drive)),
+                ("partition", partition_json(partition)),
                 ("expects", Json::text(wanted.unwrap_or(&phrase))),
             ])
         );
@@ -793,9 +909,55 @@ mod tests {
             force: false,
             no_elevate: true,
             mode: None,
+            partition: None,
             skip_hardware_checks: false,
             no_microsoft_account: false,
         }
+    }
+
+    #[test]
+    fn a_partition_takes_any_image_but_a_windows_iso() {
+        let image = Path::new("data.img");
+        for mode in [Mode::Raw, Mode::Neither] {
+            assert_eq!(partition_mode(Ok(mode), image).unwrap(), Mode::Raw);
+        }
+        let e = partition_mode(Ok(Mode::Windows), Path::new("Win11.iso")).unwrap_err();
+        assert_eq!(e.kind(), "windows_in_partition");
+        assert!(
+            e.to_string().starts_with("Win11.iso is a Windows ISO"),
+            "{e}"
+        );
+        let fault = Error::MacosMedia {
+            path: "Install.app".to_string(),
+            what: "an installer app",
+        };
+        assert_eq!(
+            partition_mode(Err(fault), image).unwrap_err().kind(),
+            "macos_media"
+        );
+    }
+
+    #[test]
+    fn the_confirmation_names_the_partition_with_its_place_and_type() {
+        let p = Partition {
+            number: 2,
+            first_byte: 1_048_576,
+            bytes: 2_000_000_000,
+            kind: burnout_core::PartitionType::Mbr(0x83),
+        };
+        assert_eq!(
+            partition_lines(&p),
+            vec![
+                "    partition 2",
+                "            2.0 GB (2,000,000,000 bytes)",
+                "            from byte 1,048,576",
+                "            Linux (0x83)",
+            ]
+        );
+        let json = partition_json(Some(&p)).to_string();
+        assert!(json.contains("\"number\":2"), "{json}");
+        assert!(json.contains("\"first_byte\":1048576"), "{json}");
+        assert_eq!(partition_json(None).to_string(), "null");
     }
 
     #[test]

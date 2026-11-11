@@ -59,6 +59,15 @@ pub struct WriteArgs {
     #[arg(long, value_name = "PATH")]
     pub device: Option<String>,
 
+    /// Write the image into this partition of the drive, and keep the others.
+    ///
+    /// The number is the one that the host shows: 2 for `sdb2`, `disk4s2` or
+    /// partition 2 of Disk Management. Burnout reads it from the partition
+    /// table of the drive, and shows the partition before it asks. The image
+    /// goes in byte for byte, so a Windows ISO cannot go into a partition.
+    #[arg(long, value_name = "NUMBER")]
+    pub partition: Option<u32>,
+
     /// Allow a drive that Burnout cannot prove is removable.
     ///
     /// This never allows the drive that the system starts from.
