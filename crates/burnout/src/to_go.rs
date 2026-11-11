@@ -15,7 +15,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use burnout_core::{
     BlockTarget, Error, MemorySource, Progress, ProgressEvent, Result, SectorIo, Stage, Window,
 };
-use burnout_layout::bcd::{store_bytes, BcdDrive};
+use burnout_layout::bcd::{store_bytes, BcdDrive, Device, Firmware};
 use burnout_layout::gpt::{gpt, GptPartition, BASIC_DATA, EFI_SYSTEM};
 use burnout_layout::ntfs::{format, Formatted, NewFile, NtfsOptions, Run, Times, CLUSTER};
 use burnout_layout::{copy_to_fat32, format_fat32, verify_fat32, Fat32Options, Manifest};
@@ -323,9 +323,15 @@ pub fn plan<R: Read + Seek>(
     let (disk_id, efi_id, windows_id) = (new_guid(seed, 1), new_guid(seed, 2), new_guid(seed, 3));
     let store = store_bytes(
         &BcdDrive {
-            disk: disk_id,
-            efi_partition: efi_id,
-            windows_partition: windows_id,
+            firmware: Firmware::Uefi,
+            system: Device::Gpt {
+                disk: disk_id,
+                partition: efi_id,
+            },
+            windows: Device::Gpt {
+                disk: disk_id,
+                partition: windows_id,
+            },
             loader: new_guid(seed, 4),
             resume: new_guid(seed, 5),
             description: info.shown_name().to_string(),

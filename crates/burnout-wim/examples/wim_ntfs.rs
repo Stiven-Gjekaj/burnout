@@ -286,7 +286,7 @@ fn to_go<R: std::io::Read + Seek>(
     wim_file: &mut R,
     name: &str,
 ) -> Result<(), String> {
-    use burnout_layout::bcd::{store_bytes, BcdDrive};
+    use burnout_layout::bcd::{store_bytes, BcdDrive, Device, Firmware};
     use burnout_layout::gpt::{gpt, GptPartition, BASIC_DATA, EFI_SYSTEM};
     use burnout_layout::{copy_to_fat32, format_fat32, Fat32Options, MemorySource};
 
@@ -376,9 +376,15 @@ fn to_go<R: std::io::Read + Seek>(
     }
     let store = store_bytes(
         &BcdDrive {
-            disk: disk_id,
-            efi_partition: esp_id,
-            windows_partition: windows_id,
+            firmware: Firmware::Uefi,
+            system: Device::Gpt {
+                disk: disk_id,
+                partition: esp_id,
+            },
+            windows: Device::Gpt {
+                disk: disk_id,
+                partition: windows_id,
+            },
             loader: new_guid(&seed, 4),
             resume: new_guid(&seed, 5),
             description: edition_info.shown_name().to_string(),
