@@ -56,7 +56,7 @@ impl Resource {
     pub const SPANNED: u8 = 0x08;
     pub const SOLID: u8 = 0x10;
 
-    fn parse(b: &[u8]) -> Resource {
+    pub(crate) fn parse(b: &[u8]) -> Resource {
         let mut size = [0u8; 8];
         size[..7].copy_from_slice(&b[..7]);
         Resource {

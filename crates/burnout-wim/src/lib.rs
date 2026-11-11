@@ -12,6 +12,7 @@
 
 #![forbid(unsafe_code)]
 
+mod blobs;
 mod header;
 pub mod sha1;
 mod xml;
@@ -20,6 +21,7 @@ use std::io::{Read, Seek, SeekFrom};
 
 use burnout_core::{Error, Result};
 
+pub use blobs::{parse_blobs, Blob};
 pub use header::{Compression, Header, Resource, HEADER_BYTES};
 
 /// The largest XML that Burnout reads. An image with many editions holds
