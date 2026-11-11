@@ -49,6 +49,7 @@ flowchart LR
     P5[P5 read an ISO] --> P6
     P6 --> P7[P7 the edges]
     P7 --> P8[P8 Legacy BIOS]
+    P7 --> P9[P9 one partition]
 ```
 
 P0 and P5 do not wait for anything.
@@ -65,6 +66,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P6 | Windows mode | L | **v0.3.0** |
 | P7 | The edges | M | **v1.0.0** |
 | P8 | Legacy BIOS boot | M | **v1.1.0** |
+| P9 | A write to one partition | S to M | **v2.0.0** |
 
 ---
 
@@ -1173,6 +1175,52 @@ UEFI mode, as after P2 and P6. A full install on x64.
 
 ---
 
+## P9. A write to one partition
+
+**Size S to M. Depends on P7. Done. Ships as v2.0.0.**
+
+`burnout write <image> <drive> --partition <n>` copies the image byte for byte
+into partition `n` and leaves the rest of the drive as it is. The person who
+owns the project asked for it on 2026-11-11, and it left "Later, maybe".
+
+The risk is a wrong partition beside data that a person keeps. So most of the
+phase is safety:
+
+- **The table comes from the drive.** Burnout reads the first 1 MiB of the
+  drive after it has the privilege, and reads an MBR or a GPT from it. It
+  checks the CRC-32 of the GPT header and of its entries, and refuses a table
+  whose partitions overlap or go past the end of the drive.
+- **The confirmation names the partition.** It shows the number, the size,
+  the first byte and the type, and says that the other partitions stay as
+  they are.
+- **The table is read again after the confirmation.** A partition that moved
+  or changed size between the two reads stops the write with
+  `partition_changed`.
+- **The write cannot leave the partition.** Each write and each read of the
+  check go through a window on the drive that starts at the first byte of the
+  partition and ends at its last byte.
+- **A Windows ISO is refused.** Windows mode writes a whole drive. An image
+  that a whole drive does not take, such as a file system, goes on.
+- An extended MBR partition, a number that is not in the table, an image
+  larger than the partition and a drive with no table are refused, each with
+  its own error kind.
+
+**Measured, to size it.** 924 lines came in: 595 in `partitions.rs` with its
+tests, 202 in the write command, 135 for seven new error kinds, and 13 in the
+CLI and the exports. That is size S to M, as estimated.
+
+**The exit test, measured on macOS with disk images on 2026-11-11.** A write
+into partition 2 of a GPT image left the GPT and partition 1 with the same
+SHA-256 before and after, and partition 1 still mounted with its file. A
+write into partition 2 of an MBR image passed its check. A missing number, a
+partition too small, a drive with no table and a Windows ISO were refused. The
+JSON confirm event carried the partition, and the result named it.
+
+**What stays unproved.** A write to one partition on Windows and on Linux. CI
+runs the unit tests on both, but no person ran the command there.
+
+---
+
 ## Windows To Go: a far future, and a maybe
 
 Not planned. Reopen it only when many people ask for it.
@@ -1210,12 +1258,12 @@ as it stands, and nothing measured them.
 
 | Feature | Size | What it costs |
 | --- | --- | --- |
-| A write to one partition | S to M | Mostly safety. Burnout refuses anything but a whole drive, so the risk is a wrong partition beside data that a person keeps. |
 | A graphical interface | L | A second program on the same crates. The choice of the drive, the progress and the confirmation must stay as safe as they are on the command line. |
 | A drive that holds many images | XL | A boot menu that loads an ISO from a data partition, for BIOS and for UEFI, with Secure Boot. Much of what such a tool gives comes from years of fixes for one ISO after another. |
 | macOS install media | XL | Apple ships no ISO, and `createinstallmedia` runs on macOS only. Burnout would build the installer from the packages that Apple ships, in a format that Apple does not document and changes each year. |
 
-A write to one partition and a graphical interface are the first candidates.
+A write to one partition left this list as P9. A graphical interface is the
+first candidate now.
 
 ---
 
