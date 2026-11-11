@@ -32,7 +32,7 @@ _Two commands. The same two on Windows, on macOS, and on Linux._
 > `write` reads the image first. It copies a hybrid image to a drive, flushes
 > it, reads it back and compares a hash. It lays a Windows ISO out for Windows,
 > and reads each file back against its own hash.
-> Version 1.0.0 is out, and [Install](#install) says how to get it.
+> Version 2.0.0 is out, and [Install](#install) says how to get it.
 > [docs/roadmap.md](docs/roadmap.md) holds the measurements behind both
 > claims.
 > [docs/roadmap.md](docs/roadmap.md) says what comes next, and
@@ -371,6 +371,43 @@ It writes the partition table and both file systems itself, which is the only
 reason the steps are identical on three operating systems.
 
 </details>
+
+### One partition
+
+`--partition` writes the image into one partition of the drive, byte for byte,
+and leaves the other partitions as they are. It takes a file system image or
+a raw image. A Windows ISO needs the whole drive, so Burnout refuses it here.
+
+```bash
+burnout write rescue.img 2 --partition 2
+```
+
+Burnout reads the partition table from the drive, MBR or GPT, and names the
+partition in the confirmation:
+
+```
+This erases partition 2 of the drive. Nothing undoes it.
+
+    image   rescue.img
+            50.0 MB (50,000,000 bytes)
+    drive   SanDisk Ultra
+            62.5 GB (62,521,344,000 bytes)
+            /dev/rdisk4 USB removable
+    partition 2
+            166.7 MB (166,723,584 bytes)
+            from byte 100,663,296
+            Microsoft basic data
+
+The other partitions of the drive stay as they are.
+
+Type yes to go on:
+>
+```
+
+It reads the table again after your answer, and stops if the partition moved.
+It refuses a table that is damaged, a number that the table does not hold, an
+extended partition, and a partition smaller than the image. The check reads
+the partition back against the image.
 
 ### A write that stops
 
