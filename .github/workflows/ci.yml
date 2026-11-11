@@ -276,6 +276,17 @@ jobs:
   # A shim that belongs to one host is compiled only on that host, so a break
   # in it waits for that job. `cargo check` does not link, so this catches the
   # break from Linux in about a minute.
+  # Burnout ships the boot code of a Windows drive as bytes. This builds the
+  # bytes again from their source, so a change to one without the other
+  # fails.
+  boot-code:
+    name: the boot code and its source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: sudo apt-get update && sudo apt-get install -y nasm
+      - run: scripts/boot-code.sh
+
   other-targets:
     name: check the other hosts
     runs-on: ubuntu-latest
