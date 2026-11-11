@@ -287,6 +287,18 @@ pub enum Error {
         /// A command that decompresses it.
         command: &'static str,
     },
+    /// The install image is compressed with LZMS, as an install.esd is, and
+    /// --to-go must decompress it. The person exports the edition to a WIM
+    /// file with DISM or wimlib-imagex, and gives Burnout that file.
+    LzmsImage {
+        /// The image, as the person gave it.
+        path: String,
+        /// The install image is sources/install.esd inside an ISO, and not
+        /// the file that the person gave.
+        inside_iso: bool,
+        /// The index of the edition in the install image.
+        index: u32,
+    },
 }
 
 /// The way past a lock switch, as a literal that `concat!` takes.
@@ -603,6 +615,61 @@ impl fmt::Display for Error {
                     "{path} is compressed with {format}, so it holds the image and is not the image. Decompress it first, for example with {command}, and give Burnout the file that comes out"
                 )
             }
+            Error::LzmsImage {
+                path,
+                inside_iso,
+                index,
+            } => {
+                let (dism_source, other_source) = if *inside_iso {
+                    (
+                        "D:\\sources\\install.esd".to_string(),
+                        "/mnt/iso/sources/install.esd".to_string(),
+                    )
+                } else {
+                    (path.clone(), path.clone())
+                };
+                let dism = format!(
+                    "dism /Export-Image /SourceImageFile:{dism_source} /SourceIndex:{index} \
+                     /DestinationImageFile:install.wim /Compress:max"
+                );
+                write!(
+                    f,
+                    "{path} holds an install image that LZMS compresses, and Burnout does not \
+                     read LZMS."
+                )?;
+                if cfg!(windows) {
+                    if *inside_iso {
+                        write!(
+                            f,
+                            " Open the ISO in File Explorer, and put its drive letter in the \
+                             place of D:."
+                        )?;
+                    }
+                    write!(
+                        f,
+                        " In a terminal that runs as administrator, export the edition to a \
+                         WIM file:\n{dism}"
+                    )?;
+                } else {
+                    if *inside_iso {
+                        write!(
+                            f,
+                            " Mount the ISO, and put its mount point in the place of /mnt/iso."
+                        )?;
+                    }
+                    write!(
+                        f,
+                        " Export the edition to a WIM file with wimlib-imagex, from the package \
+                         wimlib or wimtools:\nwimlib-imagex export {other_source} {index} \
+                         install.wim --compress=LZX\nOn Windows, DISM does the same:\n{dism}"
+                    )?;
+                }
+                write!(
+                    f,
+                    "\nThen give Burnout that file:\nburnout write install.wim <drive> --to-go \
+                     --edition 1"
+                )
+            }
             Error::VolumeFull {
                 file_system,
                 needed_bytes,
@@ -719,6 +786,7 @@ impl Error {
             Error::PartitionTooSmall { .. } => "partition_too_small",
             Error::NeedsLargerDrive { .. } => "needs_larger_drive",
             Error::VolumeFull { .. } => "volume_full",
+            Error::LzmsImage { .. } => "lzms_image",
             Error::CompressedImage { .. } => "compressed_image",
             Error::NoSuchEdition { .. } => "no_such_edition",
             Error::WindowsInPartition { .. } => "windows_in_partition",
@@ -1207,6 +1275,11 @@ mod tests {
                 format: "xz",
                 command: "xz -d",
             },
+            Error::LzmsImage {
+                path: text(),
+                inside_iso: true,
+                index: 3,
+            },
         ];
         // A new kind of error does not compile here until it is in the list
         // above, so it cannot miss the test below.
@@ -1249,7 +1322,8 @@ mod tests {
                 | Error::PartitionChanged { .. }
                 | Error::WindowsInPartition { .. }
                 | Error::NoSuchEdition { .. }
-                | Error::CompressedImage { .. } => {}
+                | Error::CompressedImage { .. }
+                | Error::LzmsImage { .. } => {}
             }
         }
         all

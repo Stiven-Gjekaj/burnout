@@ -468,6 +468,7 @@ fn to_go_job(args: &WriteArgs) -> Result<ToGoJob> {
     let mut magic = [0u8; 8];
     let is_wim = file.read_exact(&mut magic).is_ok() && &magic == WIM_MAGIC;
     file.seek(SeekFrom::Start(0))?;
+    let mut esd = false;
     let input = if is_wim {
         WimInput::File(args.image.clone())
     } else {
@@ -482,23 +483,15 @@ fn to_go_job(args: &WriteArgs) -> Result<ToGoJob> {
             Error::Source { path, detail } => unreadable(format!("{path}: {detail}")),
             other => other,
         })?;
-        if tree.image != InstallImage::Wim {
-            return Err(unreadable(format!(
-                "it holds {}, which LZMS compresses, and Burnout does not read LZMS",
-                tree.image_path()
-            )));
-        }
+        esd = tree.image == InstallImage::Esd;
         WimInput::Iso {
             path: tree.image_path().clone(),
             source,
         }
     };
+    // The header and the XML of an install.esd are not compressed, so the
+    // edition is found before the refusal, and the refusal names its index.
     let wim = read_wim(input.open()?, &input.name())?;
-    if wim.header.compression() == Compression::Lzms {
-        return Err(unreadable(
-            "LZMS compresses it, and Burnout does not read LZMS".to_string(),
-        ));
-    }
     let text = args.edition.as_deref().unwrap_or_default();
     let edition = wim
         .find_edition(text)
@@ -508,6 +501,13 @@ fn to_go_job(args: &WriteArgs) -> Result<ToGoJob> {
             edition: text.to_string(),
             editions: editions_text(&wim.editions),
         })?;
+    if esd || wim.header.compression() == Compression::Lzms {
+        return Err(Error::LzmsImage {
+            path: name.clone(),
+            inside_iso: matches!(input, WimInput::Iso { .. }),
+            index: edition.index,
+        });
+    }
     let position = wim
         .editions
         .iter()
@@ -1274,11 +1274,29 @@ mod tests {
     }
 
     #[test]
-    fn to_go_refuses_a_wim_file_that_lzms_compresses() {
-        let Err(e) = to_go_job(&to_go_args(&wim_fixture("lzms-solid.wim"), "1")) else {
+    fn to_go_refuses_a_wim_file_that_lzms_compresses_and_tells_how_to_export_it() {
+        let image = wim_fixture("lzms-solid.wim");
+        let Err(e) = to_go_job(&to_go_args(&image, "Windows Test")) else {
             panic!("refused")
         };
-        assert!(e.to_string().contains("LZMS"), "{e}");
+        assert_eq!(e.kind(), "lzms_image");
+        let text = e.to_string();
+        assert!(
+            text.contains(&format!(
+                "dism /Export-Image /SourceImageFile:{image} /SourceIndex:1"
+            )),
+            "{text}"
+        );
+        assert!(
+            text.contains("burnout write install.wim <drive> --to-go --edition 1"),
+            "{text}"
+        );
+        if !cfg!(windows) {
+            assert!(
+                text.contains(&format!("wimlib-imagex export {image} 1 install.wim")),
+                "{text}"
+            );
+        }
     }
 
     #[test]
