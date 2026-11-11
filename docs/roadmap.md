@@ -1134,10 +1134,18 @@ for each Windows 10 ISO. `autounattend.xml` now gives an empty key that Setup
 always asks for. The run after the fix reached the first page of Setup with
 both firmwares.
 
+Windows 11 with the new answer file: a drive image from
+`Win11_25H2_English_Arm64_v2.iso` started in QEMU on this Mac with HVF and
+OVMF for Arm64, and Setup showed its first page and then its usual page for
+the product key, with "I don't have a product key" on it.
+
+v1.1.0 shipped all of this: the release, the four crates, the formula in the
+tap, the manifest in the bucket, and a pull request to winget-pkgs. Each of
+the six binaries passes `gh attestation verify` at `refs/tags/v1.1.0`, and
+`brew install stiven-gjekaj/tap/burnout` installed 1.1.0.
+
 **What is open.**
 
-- Windows 11 with the new answer file. Windows 11 x64 stops under emulation
-  on this Mac, so only a run on Arm64 in UTM can check it.
 - A drive with sectors of 4096 bytes. The code reads each number from the
   BPB, but SeaBIOS 1.17.0 cannot read sector 0 of such a drive at all, so
   QEMU cannot test it. A USB stick has sectors of 512 bytes.
