@@ -5,6 +5,11 @@
 //! half is the size of the offset field. The offset is signed, and counts
 //! from the first cluster of the run before. A run with no offset field is
 //! sparse: it reads as zeros and holds no cluster. A byte of 0 ends the list.
+//!
+//! NTFS reads the length as signed too, so a length whose top byte has its
+//! high bit set takes one byte more. Windows writes the run of 65,263
+//! clusters as `03 EF FE 00`, and reads `02 EF FE` as a negative length: a
+//! volume with such a run does not mount, measured on 2026-11-11.
 
 /// One run: its first cluster, or `None` for a sparse run, and its count of
 /// clusters.
@@ -12,11 +17,6 @@
 pub(crate) struct Run {
     pub lcn: Option<u64>,
     pub clusters: u64,
-}
-
-/// The smallest count of bytes that holds `value` as an unsigned number.
-fn unsigned_bytes(value: u64) -> usize {
-    (8 - value.leading_zeros() as usize / 8).max(1)
 }
 
 /// The smallest count of bytes that holds `value` as a signed number.
@@ -34,7 +34,7 @@ pub(crate) fn encode(runs: &[Run]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut previous = 0i64;
     for run in runs.iter().filter(|r| r.clusters > 0) {
-        let length_bytes = unsigned_bytes(run.clusters);
+        let length_bytes = signed_bytes(run.clusters as i64);
         let (offset_bytes, offset) = match run.lcn {
             Some(lcn) => {
                 let delta = lcn as i64 - previous;
@@ -121,6 +121,14 @@ mod tests {
             clusters: 0x300,
         };
         assert_eq!(encode(&[sparse]), [0x02, 0x00, 0x03, 0]);
+        // A length with the high bit of its top byte set takes one byte
+        // more, as Windows writes the run of $Bad.
+        let bad = Run {
+            lcn: None,
+            clusters: 0xFEEF,
+        };
+        assert_eq!(encode(&[bad]), [0x03, 0xEF, 0xFE, 0x00, 0]);
+        assert_eq!(encode(&[run(5, 0x80)]), [0x12, 0x80, 0x00, 0x05, 0]);
         assert_eq!(encode(&[]), [0]);
     }
 
