@@ -7,7 +7,10 @@
 //!
 //! A test that cannot attach a virtual disk, because it has no privilege,
 //! uses this. A VM then starts the image. The image is raw, with sectors of
-//! 512 bytes, and the file is sparse where the host allows it.
+//! 512 bytes, and the file is sparse. NTFS makes a file sparse only when a
+//! program asks, so on Windows the example asks with FSCTL_SET_SPARSE.
+//! A test on Windows on 2026-11-11 found a 40 GB image that took 40 GB on
+//! the disk without it.
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -106,7 +109,7 @@ fn run(
         "{}: {} files and directories, {} more names, {} bytes of streams, {} boot files",
         plan.edition, plan.files, plan.links, plan.stream_bytes, plan.boot_files
     );
-    let mut target = FileTarget::create(out, bytes, 512).map_err(err)?;
+    let mut target = sparse_target(out, bytes)?;
     let written =
         to_go::write(&mut target, &plan, &mut reader, &wim, &name, &mut Silent).map_err(err)?;
     println!("written in {:.1} s", start.elapsed().as_secs_f64());
@@ -115,6 +118,50 @@ fn run(
         "checked the GPT, the boot files and each stream in {:.1} s",
         start.elapsed().as_secs_f64()
     );
+    Ok(())
+}
+
+/// A new file of `bytes` bytes as the drive, sparse on each host.
+fn sparse_target(path: &Path, bytes: u64) -> Result<FileTarget, String> {
+    let fault = |e: std::io::Error| format!("{}: {e}", path.display());
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .map_err(fault)?;
+    #[cfg(windows)]
+    set_sparse(&file).map_err(fault)?;
+    file.set_len(bytes).map_err(fault)?;
+    FileTarget::new(file, 512).map_err(|e| e.to_string())
+}
+
+/// Ask NTFS to keep the file sparse, so the clusters that nothing writes
+/// take no room on the disk.
+#[cfg(windows)]
+fn set_sparse(file: &File) -> std::io::Result<()> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::Ioctl::FSCTL_SET_SPARSE;
+    use windows_sys::Win32::System::IO::DeviceIoControl;
+    let mut returned = 0u32;
+    // SAFETY: the handle is open for the life of `file`, and the call takes
+    // no buffers.
+    let ok = unsafe {
+        DeviceIoControl(
+            file.as_raw_handle() as _,
+            FSCTL_SET_SPARSE,
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+            0,
+            &mut returned,
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
     Ok(())
 }
 
