@@ -14,6 +14,9 @@
 
 mod blobs;
 mod header;
+mod huffman;
+mod lzx;
+mod resource;
 pub mod sha1;
 mod xml;
 
@@ -23,6 +26,7 @@ use burnout_core::{Error, Result};
 
 pub use blobs::{parse_blobs, Blob};
 pub use header::{Compression, Header, Resource, HEADER_BYTES};
+pub use resource::read_resource;
 
 /// The largest XML that Burnout reads. An image with many editions holds
 /// some tens of KB.
@@ -152,6 +156,13 @@ pub fn read_wim<R: Read + Seek>(mut reader: R, name: &str) -> Result<Wim> {
         )));
     }
     Ok(Wim { header, editions })
+}
+
+/// Read the offset table of the WIM file that `reader` gives, with the
+/// header that `read_wim` read.
+pub fn read_blobs<R: Read + Seek>(mut reader: R, header: &Header, name: &str) -> Result<Vec<Blob>> {
+    let bytes = read_resource(&mut reader, header, &header.offset_table, name)?;
+    parse_blobs(&bytes, name)
 }
 
 fn read_full<R: Read>(reader: &mut R, buf: &mut [u8]) -> std::io::Result<()> {

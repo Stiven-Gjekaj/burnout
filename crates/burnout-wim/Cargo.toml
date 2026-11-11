@@ -14,3 +14,7 @@ categories = ["filesystem", "parser-implementations"]
 # GPL, so the reader here is new code, to keep Burnout under the MIT licence.
 [dependencies]
 burnout-core.workspace = true
+
+# The example reads a WIM file inside an ISO, so it needs the ISO reader.
+[dev-dependencies]
+burnout-iso.workspace = true
