@@ -20,7 +20,14 @@ use burnout_layout::ntfs::{format, NewFile, NtfsOptions, Run, Times, CLUSTER};
 use burnout_wim::sha1::Digest;
 use burnout_wim::{copy_resource, parse_metadata, read_blobs, read_resource, read_wim, Blob};
 
-const START_SECTOR: u64 = 2048;
+/// The first sector of the NTFS partition. WIM_NTFS_START_MIB moves it, to
+/// leave room for an EFI partition in front of it.
+fn start_sector() -> u64 {
+    std::env::var("WIM_NTFS_START_MIB")
+        .ok()
+        .and_then(|m| m.parse::<u64>().ok())
+        .map_or(2048, |m| m * 2048)
+}
 /// The attributes of Windows that a file keeps on the new volume. Sparse,
 /// compressed and encrypted need attributes of their own, which the writer
 /// does not make yet.
@@ -170,10 +177,10 @@ fn run(iso: &str, edition: usize, image: &str, gib: u64) -> Result<(), String> {
     );
 
     let disk = gib * 1024 * 1024 * 1024;
-    let partition = disk - START_SECTOR * 512;
+    let partition = disk - start_sector() * 512;
     let f = format(
         partition,
-        START_SECTOR as u32,
+        start_sector() as u32,
         &NtfsOptions {
             label: "WINDOWS".into(),
             serial: 0x5EED_0000_B0B0_0001,
@@ -198,12 +205,12 @@ fn run(iso: &str, edition: usize, image: &str, gib: u64) -> Result<(), String> {
     let mut out = BufWriter::with_capacity(8 << 20, out);
     let mut mbr = vec![0u8; 512];
     mbr[446 + 4] = 0x07;
-    mbr[446 + 8..446 + 12].copy_from_slice(&(START_SECTOR as u32).to_le_bytes());
+    mbr[446 + 8..446 + 12].copy_from_slice(&(start_sector() as u32).to_le_bytes());
     mbr[446 + 12..446 + 16].copy_from_slice(&((partition / 512) as u32).to_le_bytes());
     mbr[510] = 0x55;
     mbr[511] = 0xAA;
     out.write_all(&mbr).map_err(err)?;
-    let base = START_SECTOR * 512;
+    let base = start_sector() * 512;
     for (at, b) in &f.writes {
         out.seek(SeekFrom::Start(base + at)).map_err(err)?;
         out.write_all(b).map_err(err)?;
