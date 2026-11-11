@@ -19,6 +19,19 @@ pub const TYPE_FAT32: u8 = 0x0C;
 /// exFAT. It shares the byte with NTFS, and the file system says which.
 pub const TYPE_EXFAT: u8 = 0x07;
 
+/// NTFS. It shares the byte with exFAT.
+pub const TYPE_NTFS: u8 = 0x07;
+
+/// One partition of an MBR, in sectors of the drive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MbrPartition {
+    pub first_sector: u32,
+    pub sectors: u32,
+    pub kind: u8,
+    /// The partition that a BIOS starts.
+    pub active: bool,
+}
+
 /// The byte that marks the partition a BIOS starts from.
 const ACTIVE: u8 = 0x80;
 
@@ -31,28 +44,49 @@ const ACTIVE: u8 = 0x80;
 /// drives with one number make Windows take the second offline, so the
 /// caller gives a number of its own.
 pub fn mbr_bytes(layout: &Layout, disk_signature: u32) -> [u8; 512] {
+    // The plan keeps every partition inside what 32 bits can count.
+    let part = |extent: Extent, kind: u8, active: bool| MbrPartition {
+        first_sector: layout.first_sector(extent) as u32,
+        sectors: layout.sectors(extent) as u32,
+        kind,
+        active,
+    };
+    mbr_with(
+        &[
+            part(layout.boot, TYPE_FAT32, true),
+            part(layout.install, TYPE_EXFAT, false),
+        ],
+        disk_signature,
+    )
+}
+
+/// The 512 bytes of an MBR with the boot code of Burnout and up to four
+/// partitions.
+pub fn mbr_with(partitions: &[MbrPartition], disk_signature: u32) -> [u8; 512] {
+    assert!(partitions.len() <= 4, "an MBR holds four partitions");
     let mut mbr = [0u8; 512];
     mbr[..MBR_CODE_BYTES].copy_from_slice(MBR_CODE);
     mbr[440..444].copy_from_slice(&disk_signature.to_le_bytes());
-    mbr[446..462].copy_from_slice(&entry(layout, layout.boot, TYPE_FAT32, true));
-    mbr[462..478].copy_from_slice(&entry(layout, layout.install, TYPE_EXFAT, false));
+    for (i, p) in partitions.iter().enumerate() {
+        let at = 446 + 16 * i;
+        mbr[at..at + 16].copy_from_slice(&entry(p));
+    }
     mbr[510] = 0x55;
     mbr[511] = 0xAA;
     mbr
 }
 
 /// One entry of the table.
-fn entry(layout: &Layout, extent: Extent, kind: u8, active: bool) -> [u8; 16] {
-    let first = layout.first_sector(extent);
-    let count = layout.sectors(extent);
+fn entry(p: &MbrPartition) -> [u8; 16] {
+    let first = u64::from(p.first_sector);
+    let count = u64::from(p.sectors);
     let mut e = [0u8; 16];
-    e[0] = if active { ACTIVE } else { 0 };
+    e[0] = if p.active { ACTIVE } else { 0 };
     e[1..4].copy_from_slice(&chs(first));
-    e[4] = kind;
+    e[4] = p.kind;
     e[5..8].copy_from_slice(&chs(first + count - 1));
-    // The plan keeps every partition inside what 32 bits can count.
-    e[8..12].copy_from_slice(&(first as u32).to_le_bytes());
-    e[12..16].copy_from_slice(&(count as u32).to_le_bytes());
+    e[8..12].copy_from_slice(&p.first_sector.to_le_bytes());
+    e[12..16].copy_from_slice(&p.sectors.to_le_bytes());
     e
 }
 
@@ -151,6 +185,37 @@ mod tests {
         assert_eq!(&mbr[..440], MBR_CODE, "the code starts the active one");
         assert_eq!(mbr[462 + 4], TYPE_EXFAT);
         assert_eq!(u32_at(&mbr, 462 + 8) as u64, 17 * MIB / 512);
+    }
+
+    #[test]
+    fn a_table_of_its_own_holds_each_partition_in_its_place() {
+        let parts = [
+            MbrPartition {
+                first_sector: 2048,
+                sectors: 300 * 2048,
+                kind: TYPE_FAT32,
+                active: true,
+            },
+            MbrPartition {
+                first_sector: 512 * 2048,
+                sectors: 100_000,
+                kind: TYPE_NTFS,
+                active: false,
+            },
+        ];
+        let mbr = mbr_with(&parts, 0x1234_5678);
+        assert_eq!(&mbr[..MBR_CODE_BYTES], &MBR_CODE[..]);
+        assert_eq!(u32_at(&mbr, 440), 0x1234_5678);
+        assert_eq!((mbr[446], mbr[450]), (0x80, 0x0C));
+        assert_eq!((u32_at(&mbr, 454), u32_at(&mbr, 458)), (2048, 300 * 2048));
+        assert_eq!((mbr[462], mbr[466]), (0, 0x07));
+        assert_eq!(
+            (u32_at(&mbr, 470), u32_at(&mbr, 474)),
+            (512 * 2048, 100_000)
+        );
+        assert_eq!(&mbr[478..510], &[0u8; 32][..]);
+        assert_eq!(&mbr[510..], &[0x55, 0xAA]);
+        assert!(has_boot_table(&mbr));
     }
 
     #[test]

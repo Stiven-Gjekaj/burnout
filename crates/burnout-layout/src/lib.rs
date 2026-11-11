@@ -41,7 +41,7 @@ pub use exfat::{
 };
 pub use fat32::{format_fat32, Fat32Options};
 pub use manifest::{CopiedFile, Manifest};
-pub use mbr::{mbr_bytes, write_table, TYPE_EXFAT, TYPE_FAT32};
+pub use mbr::{mbr_bytes, mbr_with, write_table, MbrPartition, TYPE_EXFAT, TYPE_FAT32, TYPE_NTFS};
 pub use plan::{plan, Extent, Layout, ALIGN, MBR_SECTORS};
 pub use unattend::{unattend_xml, Architecture, InstallImage, Unattend};
 pub use verify::{verify_fat32, verify_fat32_with};
