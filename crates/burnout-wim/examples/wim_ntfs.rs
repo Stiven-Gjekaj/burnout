@@ -7,6 +7,11 @@
 //! file, directory, hard link, reparse point, named stream and security
 //! descriptor of the edition goes onto the volume, and each stream is
 //! decompressed into its clusters. The image is then for Windows to check.
+//!
+//! With WIM_NTFS_TO_GO set, the image is a drive of Windows To Go for UEFI:
+//! a GPT with an EFI system partition from 1 MiB to 301 MiB, formatted
+//! FAT32, with the boot files of the edition and a BCD store, and the NTFS
+//! partition from 512 MiB.
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
@@ -235,10 +240,171 @@ fn run(iso: &str, edition: usize, image: &str, gib: u64) -> Result<(), String> {
         written += blob.resource.original_bytes;
     }
     out.flush().map_err(err)?;
+    drop(out);
+    if std::env::var("WIM_NTFS_TO_GO").is_ok() {
+        to_go(
+            image,
+            disk,
+            partition,
+            edition,
+            &wim,
+            &tree,
+            &by_hash,
+            &mut wim_file,
+            name,
+        )?;
+    }
     println!(
         "wrote {written} bytes of {} streams in {:.1} s",
         fills.len(),
         start.elapsed().as_secs_f64()
     );
+    Ok(())
+}
+
+/// 16 bytes for a GUID, from a seed and a number.
+fn new_guid(seed: &str, n: u8) -> [u8; 16] {
+    let d = burnout_core::sha256(format!("{seed}/{n}").as_bytes());
+    let mut g: [u8; 16] = d.as_bytes()[..16].try_into().unwrap();
+    // Version 4 and the variant of RFC 4122, as a random GUID has them.
+    g[7] = (g[7] & 0x0F) | 0x40;
+    g[8] = (g[8] & 0x3F) | 0x80;
+    g
+}
+
+/// Make the image a drive of Windows To Go: the GPT, the EFI partition with
+/// the boot files of the edition, and the BCD store.
+#[allow(clippy::too_many_arguments)]
+fn to_go<R: std::io::Read + Seek>(
+    image: &str,
+    disk: u64,
+    partition: u64,
+    edition: usize,
+    wim: &burnout_wim::Wim,
+    tree: &burnout_wim::Metadata,
+    by_hash: &HashMap<Digest, &Blob>,
+    wim_file: &mut R,
+    name: &str,
+) -> Result<(), String> {
+    use burnout_layout::bcd::{store_bytes, BcdDrive};
+    use burnout_layout::gpt::{gpt, GptPartition, BASIC_DATA, EFI_SYSTEM};
+    use burnout_layout::{copy_to_fat32, format_fat32, Fat32Options, MemorySource};
+
+    let sectors = disk / 512;
+    let start = start_sector();
+    let esp_sectors = 300 * 2048;
+    if start < 2048 + esp_sectors {
+        return Err("WIM_NTFS_START_MIB leaves no room for the EFI partition".to_string());
+    }
+    let seed = format!("{image}/{edition}");
+    let (disk_id, esp_id, windows_id) =
+        (new_guid(&seed, 1), new_guid(&seed, 2), new_guid(&seed, 3));
+    let table = gpt(
+        sectors,
+        disk_id,
+        &[
+            GptPartition {
+                kind: EFI_SYSTEM,
+                id: esp_id,
+                first: 2048,
+                last: 2048 + esp_sectors - 1,
+                name: "EFI system partition".to_string(),
+            },
+            GptPartition {
+                kind: BASIC_DATA,
+                id: windows_id,
+                first: start,
+                last: start + partition / 512 - 1,
+                name: "Windows".to_string(),
+            },
+        ],
+    )?;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(image)
+        .map_err(err)?;
+    file.seek(SeekFrom::Start(0)).map_err(err)?;
+    file.write_all(&table.head).map_err(err)?;
+    file.seek(SeekFrom::Start(table.tail_sector * 512))
+        .map_err(err)?;
+    file.write_all(&table.tail).map_err(err)?;
+    file.flush().map_err(err)?;
+
+    // The boot files: Windows\Boot\EFI and its fonts, as bcdboot copies
+    // them, and the boot manager again as the file that the firmware starts.
+    let edition_info = &wim.editions[edition - 1];
+    let arm = edition_info.arch == Some(burnout_wim::Arch::Arm64);
+    let mut boot = MemorySource::new();
+    let mut count = 0;
+    for d in &tree.entries {
+        let lower = d.path.to_ascii_lowercase();
+        let dest = if let Some(rest) = lower.strip_prefix("windows/boot/efi/") {
+            format!(
+                "EFI/Microsoft/Boot/{}",
+                &d.path[d.path.len() - rest.len()..]
+            )
+        } else if let Some(rest) = lower.strip_prefix("windows/boot/fonts/") {
+            format!(
+                "EFI/Microsoft/Boot/Fonts/{}",
+                &d.path[d.path.len() - rest.len()..]
+            )
+        } else {
+            continue;
+        };
+        if d.is_directory() {
+            boot.add_dir(&dest).map_err(err)?;
+            continue;
+        }
+        let bytes = match d.data_hash() {
+            Some(h) => {
+                let b = by_hash.get(h).ok_or("a boot file names no stream")?;
+                read_resource(wim_file, &wim.header, &b.resource, name).map_err(err)?
+            }
+            None => Vec::new(),
+        };
+        if lower == "windows/boot/efi/bootmgfw.efi" {
+            let firmware = if arm {
+                "EFI/Boot/BOOTAA64.EFI"
+            } else {
+                "EFI/Boot/BOOTX64.EFI"
+            };
+            boot.add_file(firmware, bytes.clone()).map_err(err)?;
+        }
+        boot.add_file(&dest, bytes).map_err(err)?;
+        count += 1;
+    }
+    let store = store_bytes(
+        &BcdDrive {
+            disk: disk_id,
+            efi_partition: esp_id,
+            windows_partition: windows_id,
+            loader: new_guid(&seed, 4),
+            resume: new_guid(&seed, 5),
+            description: edition_info.shown_name().to_string(),
+            locale: if edition_info.default_language.is_empty() {
+                "en-US".to_string()
+            } else {
+                edition_info.default_language.clone()
+            },
+        },
+        134_070_000_000_000_000,
+    )?;
+    boot.add_file("EFI/Microsoft/Boot/BCD", store)
+        .map_err(err)?;
+
+    let target = burnout_core::FileTarget::new(file, 512).map_err(err)?;
+    let mut esp = burnout_core::Window::new(target, 2048 * 512, esp_sectors * 512).map_err(err)?;
+    format_fat32(
+        &mut esp,
+        &Fat32Options {
+            label: "SYSTEM",
+            serial: u32::from_le_bytes(disk_id[..4].try_into().unwrap()),
+            first_sector: 2048,
+        },
+    )
+    .map_err(err)?;
+    copy_to_fat32(&mut esp, &boot).map_err(err)?;
+    println!("to go: a GPT, and {count} boot files and the BCD store on the EFI partition");
     Ok(())
 }
