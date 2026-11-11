@@ -9,5 +9,6 @@
 
 #![allow(dead_code)]
 
+mod boot;
 mod record;
 mod runs;
