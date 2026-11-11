@@ -11,6 +11,7 @@
 
 mod attrdef;
 mod boot;
+mod index;
 mod record;
 mod runs;
 mod values;
