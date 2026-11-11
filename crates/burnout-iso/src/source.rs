@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt;
-use std::io::{self, Read, Seek};
+use std::io::{self, Read, Seek, SeekFrom};
 
 use burnout_core::{Entry, Error, FileSource, Result, TreePath};
 
@@ -144,6 +144,15 @@ impl<R: Read + Seek> FileSource for IsoSource<R> {
     }
 
     fn open(&self, path: &TreePath) -> Result<Box<dyn Read + '_>> {
+        Ok(Box::new(self.open_file(path)?))
+    }
+}
+
+impl<R: Read + Seek> IsoSource<R> {
+    /// Open a file of the tree, to read it from any byte.
+    ///
+    /// A reader of a format inside the image, such as a WIM, needs to seek.
+    pub fn open_file(&self, path: &TreePath) -> Result<IsoFile<'_, R>> {
         let (path, extents) = self
             .files
             .get_key_value(path)
@@ -151,18 +160,18 @@ impl<R: Read + Seek> FileSource for IsoSource<R> {
                 path: path.to_string(),
                 detail: "the tree holds no file with this name".to_string(),
             })?;
-        Ok(Box::new(Extents {
+        Ok(IsoFile {
             image: &self.image,
             extents,
             what: path.as_str(),
             index: 0,
             offset: 0,
-        }))
+        })
     }
 }
 
-/// The bytes of one file, from its extents in the image.
-struct Extents<'a, R> {
+/// The bytes of one file of an image, from its extents in the image.
+pub struct IsoFile<'a, R> {
     image: &'a RefCell<Image<R>>,
     extents: &'a [Extent],
     /// The file, for an error.
@@ -173,7 +182,7 @@ struct Extents<'a, R> {
     offset: u64,
 }
 
-impl<R: Read + Seek> Read for Extents<'_, R> {
+impl<R: Read + Seek> Read for IsoFile<'_, R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         while let Some(extent) = self.extents.get(self.index) {
             let left = extent.length - self.offset;
@@ -195,6 +204,44 @@ impl<R: Read + Seek> Read for Extents<'_, R> {
             return Ok(part.len());
         }
         Ok(0)
+    }
+}
+
+impl<R> IsoFile<'_, R> {
+    fn len(&self) -> u64 {
+        self.extents.iter().map(|e| e.length).sum()
+    }
+
+    fn position(&self) -> u64 {
+        let before: u64 = self.extents[..self.index].iter().map(|e| e.length).sum();
+        before + self.offset
+    }
+}
+
+impl<R: Read + Seek> Seek for IsoFile<'_, R> {
+    /// A position past the end reads nothing, as with a file of the host.
+    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+        let target = match to {
+            SeekFrom::Start(n) => Some(n),
+            SeekFrom::End(d) => self.len().checked_add_signed(d),
+            SeekFrom::Current(d) => self.position().checked_add_signed(d),
+        }
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "a seek before byte 0"))?;
+        let mut left = target;
+        self.index = 0;
+        self.offset = 0;
+        while let Some(extent) = self.extents.get(self.index) {
+            if left < extent.length {
+                self.offset = left;
+                return Ok(target);
+            }
+            left -= extent.length;
+            self.index += 1;
+        }
+        // Past the last extent. The rest of the target is kept in the
+        // offset, so that the position stays the one asked for.
+        self.offset = left;
+        Ok(target)
     }
 }
 
@@ -343,7 +390,7 @@ mod tests {
         let expected = [&image[100..110], &[0; 5], &image[3..7]].concat();
         let cell = RefCell::new(Image::new(Cursor::new(image.clone()), "t").unwrap());
         for size in [1, 3, 7, 64] {
-            let mut reader = Extents {
+            let mut reader = IsoFile {
                 image: &cell,
                 extents: &extents,
                 what: "a.txt",
@@ -360,6 +407,37 @@ mod tests {
             }
             assert_eq!(got, expected, "reads of {size} bytes");
         }
+    }
+
+    #[test]
+    fn a_file_seeks_to_any_byte_across_its_extents() {
+        let image: Vec<u8> = (0..=255).collect();
+        let run = |at, length, zero| Extent { at, length, zero };
+        let extents = [run(100, 10, false), run(0, 5, true), run(3, 4, false)];
+        let expected = [&image[100..110], &[0; 5], &image[3..7]].concat();
+        let cell = RefCell::new(Image::new(Cursor::new(image.clone()), "t").unwrap());
+        let mut file = IsoFile {
+            image: &cell,
+            extents: &extents,
+            what: "a.txt",
+            index: 0,
+            offset: 0,
+        };
+        for at in 0..expected.len() {
+            assert_eq!(file.seek(SeekFrom::Start(at as u64)).unwrap(), at as u64);
+            let mut rest = Vec::new();
+            file.read_to_end(&mut rest).unwrap();
+            assert_eq!(rest, &expected[at..], "from byte {at}");
+        }
+        assert_eq!(file.seek(SeekFrom::End(-4)).unwrap(), 15);
+        assert_eq!(file.seek(SeekFrom::Current(-6)).unwrap(), 9);
+        let mut two = [0; 2];
+        file.read_exact(&mut two).unwrap();
+        assert_eq!(two, [image[109], 0]);
+        assert_eq!(file.seek(SeekFrom::Start(100)).unwrap(), 100);
+        assert_eq!(file.read(&mut two).unwrap(), 0);
+        assert_eq!(file.stream_position().unwrap(), 100);
+        assert!(file.seek(SeekFrom::End(-20)).is_err());
     }
 
     #[test]
