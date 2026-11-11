@@ -72,7 +72,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P8 | Legacy BIOS boot | M | **v1.1.0** |
 | P9 | A write to one partition | S to M | **v2.0.0** |
 | P10 | Read a WIM file | L | **v2.1.0 and v2.2.0** |
-| P11 | Write an NTFS volume | XL | planned |
+| P11 | Write an NTFS volume | XL | started |
 | P12 | Windows To Go | L | planned, v3.0.0 |
 
 ---
@@ -1308,12 +1308,40 @@ Burnout can use exists.
 
 ### P11. Write an NTFS volume
 
-**Size XL. Depends on P10.**
+**Size XL. Depends on P10. Started.**
 
 An NTFS writer that takes the tree of P10: the MFT and its mirror, the
 attributes, the B+ tree indexes of large directories, the security
 descriptors, hard links, reparse points and extended attributes, and a clean
 log file. A drive image goes to Windows in a VM, and `chkdsk` finds no fault.
+
+**How it is tested.** Windows PE, from the Windows 11 25H2 Arm64 ISO in
+QEMU, runs `diskpart` and `chkdsk` on a disk image that the Mac writes.
+`diskpart` can take the disk offline, the Mac changes the image, and the disk
+comes online again, so one start of the VM tests many images. First, `format`
+of Windows wrote a volume of 256 MiB, and the Mac read it, as the reference
+for each structure. No code of Windows comes in: the reference gives the
+values of the format, and the tests compare bytes.
+
+Done, in `crates/burnout-layout/src/ntfs/`, measured on 2026-11-11:
+
+1. **The parts.** The run lists, the file records with their fixups, the boot
+   sector, `$STANDARD_INFORMATION` and `$FILE_NAME`, the B-tree of an index,
+   and the descriptors of the system files. `$AttrDef` and `$SDS` are the same
+   bytes that Windows wrote, and so are the descriptors 256 and 257.
+2. **An empty volume.** Records 0 to 15, and `$Quota`, `$ObjId` and `$Reparse`
+   in `$Extend`. Windows mounts it as NTFS, and `chkdsk` says that it found no
+   problems. Windows accepts a `$LogFile` of 0xFF bytes, as on its own volume.
+   The first image did not mount: a run of `$Bad` gave its length with the
+   high bit set, and NTFS reads the length as signed. Swapping the parts of
+   Burnout into the volume of Windows, one group at a time, found it.
+3. **`$UpCase`.** Burnout writes the table of its exFAT writer. It differs from
+   the table of Windows 11 in 109 of the 65,536 units, and Windows takes it,
+   because each volume carries its own table.
+
+Next: the files of a WIM edition, with their streams, hard links, reparse
+points and security descriptors, then directories that need blocks, then a
+check against each edition of the three ISOs.
 
 ### P12. Windows To Go
 
