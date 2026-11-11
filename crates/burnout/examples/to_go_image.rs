@@ -84,7 +84,16 @@ fn run(image: &str, edition: &str, out: &Path, gib: u64) -> Result<(), String> {
 
     let bytes = gib * 1024 * 1024 * 1024;
     let seed = format!("{}/{:?}", out.display(), std::time::SystemTime::now());
-    let plan = to_go::plan(&mut reader, &name, &wim, position, bytes, &seed).map_err(err)?;
+    let plan = to_go::plan(
+        &mut reader,
+        &name,
+        &wim,
+        position,
+        bytes,
+        &seed,
+        to_go::Firmware::Uefi,
+    )
+    .map_err(err)?;
     println!(
         "{}: {} files and directories, {} more names, {} bytes of streams, {} boot files",
         plan.edition, plan.files, plan.links, plan.stream_bytes, plan.boot_files

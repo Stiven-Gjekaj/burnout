@@ -44,7 +44,8 @@ trap 'rm -rf "$tree" "$win"' EXIT
 python3 - "$win" <<'PY'
 import os, sys
 root = sys.argv[1]
-for d in ("Windows/Boot/EFI/en-US", "Windows/Boot/Fonts", "Windows/System32/drivers"):
+for d in ("Windows/Boot/EFI/en-US", "Windows/Boot/Fonts", "Windows/Boot/PCAT/en-US",
+          "Windows/Boot/Resources", "Windows/System32/drivers"):
     os.makedirs(f"{root}/{d}", exist_ok=True)
 state, manager = 777, bytearray(b"MZ")
 for _ in range(150000):
@@ -53,6 +54,11 @@ for _ in range(150000):
 open(f"{root}/Windows/Boot/EFI/bootmgfw.efi", "wb").write(manager)
 open(f"{root}/Windows/Boot/EFI/en-US/bootmgfw.efi.mui", "wb").write(b"MUI" * 3000)
 open(f"{root}/Windows/Boot/Fonts/segmono_boot.ttf", "wb").write(b"font" * 5000)
+# The boot manager of a BIOS and its files.
+open(f"{root}/Windows/Boot/PCAT/bootmgr", "wb").write(bytes(manager[::-1]))
+open(f"{root}/Windows/Boot/PCAT/bootnxt", "wb").write(b"next" * 100)
+open(f"{root}/Windows/Boot/PCAT/en-US/bootmgr.exe.mui", "wb").write(b"PCAT" * 2000)
+open(f"{root}/Windows/Boot/Resources/bootres.dll", "wb").write(b"res" * 9000)
 open(f"{root}/Windows/System32/notepad.exe", "wb").write(b"notepad " * 40000)
 open(f"{root}/Windows/System32/drivers/small.sys", "wb").write(b"small\n")
 os.link(f"{root}/Windows/System32/notepad.exe", f"{root}/Windows/notepad.exe")

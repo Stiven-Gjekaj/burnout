@@ -183,6 +183,7 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
                 t.position,
                 chosen.size_bytes,
                 &seed(&chosen),
+                to_go::Firmware::Uefi,
             )?);
             None
         }
@@ -1260,7 +1261,16 @@ mod tests {
         assert_eq!(job.image_bytes, std::fs::metadata(&image).unwrap().len());
         // The tree of the edition reads through the input.
         let mut file = job.input.open().unwrap();
-        let plan = to_go::plan(&mut file, &job.name(), &job.wim, 1, 600 << 20, "t").unwrap();
+        let plan = to_go::plan(
+            &mut file,
+            &job.name(),
+            &job.wim,
+            1,
+            600 << 20,
+            "t",
+            to_go::Firmware::Uefi,
+        )
+        .unwrap();
         assert_eq!(plan.boot_files, 3);
     }
 

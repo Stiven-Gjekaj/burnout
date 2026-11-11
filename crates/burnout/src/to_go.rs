@@ -1,13 +1,20 @@
 //! A drive of Windows To Go: one edition of the install image of a Windows
 //! ISO, applied to an NTFS partition, with the boot files and a BCD store on
-//! an EFI system partition. The drive starts Windows itself through UEFI.
+//! a FAT32 system partition. The drive starts Windows itself, through UEFI
+//! or through a BIOS.
 //!
-//! The layout is a GPT with two partitions. The EFI system partition goes
-//! from 1 MiB for 300 MiB, in FAT32. The Windows partition goes from 512
-//! MiB to 1 MiB before the end of the drive, in NTFS. The last MiB holds the
-//! copy of the GPT. A drive with this layout, written to a disk image,
-//! started Windows 11 25H2 Pro of the Arm64 ISO to its first-run setup in
-//! QEMU on 2026-11-11, with no program of Windows in the path.
+//! Both layouts have two partitions. The system partition goes from 1 MiB
+//! for 300 MiB, in FAT32. The Windows partition goes from 512 MiB to 1 MiB
+//! before the end of the drive, in NTFS.
+//!
+//! - For UEFI, the table is a GPT, and the system partition is the EFI
+//!   system partition. The last MiB holds the copy of the GPT. A drive with
+//!   this layout, written to a disk image, started Windows 11 25H2 Pro of
+//!   the Arm64 ISO to its first-run setup in QEMU on 2026-11-11, with no
+//!   program of Windows in the path.
+//! - For a BIOS, the table is an MBR with the boot code of Burnout, and the
+//!   system partition is active. Its boot code loads `bootmgr`, which reads
+//!   `\Boot\BCD`. Windows starts from a BIOS only on an MBR disk.
 
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -15,21 +22,29 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use burnout_core::{
     BlockTarget, Error, MemorySource, Progress, ProgressEvent, Result, SectorIo, Stage, Window,
 };
-use burnout_layout::bcd::{store_bytes, BcdDrive, Device, Firmware};
+use burnout_layout::bcd::{store_bytes, BcdDrive, Device};
 use burnout_layout::gpt::{gpt, GptPartition, BASIC_DATA, EFI_SYSTEM};
 use burnout_layout::ntfs::{format, Formatted, NewFile, NtfsOptions, Run, Times, CLUSTER};
-use burnout_layout::{copy_to_fat32, format_fat32, verify_fat32, Fat32Options, Manifest};
+use burnout_layout::{
+    copy_to_fat32, format_fat32, mbr_with, verify_fat32, Fat32Options, Manifest, MbrPartition,
+    TYPE_FAT32, TYPE_NTFS,
+};
 use burnout_wim::sha1::{Digest, Sha1};
 use burnout_wim::{copy_resource, parse_metadata, read_blobs, read_resource, Arch, Blob, Wim};
 
-/// The first sector of the EFI system partition, and its length.
+pub use burnout_layout::bcd::Firmware;
+
+/// The first sector of the system partition, and its length.
 pub const EFI_FIRST_SECTOR: u64 = 2048;
 pub const EFI_SECTORS: u64 = 300 * 2048;
 /// The first sector of the Windows partition.
 pub const WINDOWS_FIRST_SECTOR: u64 = 512 * 2048;
 /// The bytes at the end of the drive that no partition takes. The copy of
-/// the GPT goes there.
+/// the GPT goes there, and for an MBR they go to zero, so no old copy of a
+/// GPT stays.
 const TAIL_BYTES: u64 = 1024 * 1024;
+/// A MiB.
+const MIB: u64 = 1024 * 1024;
 /// The sector size of the layout. A drive with other sectors is refused.
 const SECTOR: u32 = 512;
 /// The time on the new volumes: 2025-11-11, in the units of NTFS and of
@@ -64,17 +79,28 @@ pub struct ToGo {
     pub links: usize,
     /// The bytes of the streams that go onto the Windows partition.
     pub stream_bytes: u64,
-    /// The boot files on the EFI system partition, without the BCD store.
+    /// The boot files on the system partition, without the BCD store.
     pub boot_files: usize,
+    /// The firmware that starts the drive.
+    pub firmware: Firmware,
     drive_bytes: u64,
     windows_bytes: u64,
     fills: Vec<Fill>,
     sizes: HashMap<Digest, u64>,
     ntfs: Formatted,
     boot: MemorySource,
-    disk_id: [u8; 16],
-    efi_id: [u8; 16],
-    windows_id: [u8; 16],
+    table: Table,
+    /// The serial number of the FAT32 volume.
+    serial: u32,
+}
+
+/// The partition table, as bytes for the start of the drive and bytes for
+/// its end.
+#[derive(Clone, Debug)]
+struct Table {
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    tail_byte: u64,
 }
 
 /// Written to the drive: the files of the EFI system partition, for the
@@ -109,7 +135,8 @@ pub fn needed_bytes(edition_bytes: u64) -> u64 {
 }
 
 /// Work out the drive for edition `edition`, the position of the edition in
-/// the install image counted from 1. `seed` makes the GUIDs of the drive.
+/// the install image counted from 1, for `firmware`. `seed` makes the GUIDs
+/// and the disk signature of the drive.
 pub fn plan<R: Read + Seek>(
     wim_file: &mut R,
     name: &str,
@@ -117,6 +144,7 @@ pub fn plan<R: Read + Seek>(
     edition: usize,
     drive_bytes: u64,
     seed: &str,
+    firmware: Firmware,
 ) -> Result<ToGo> {
     let info = wim
         .editions
@@ -251,8 +279,12 @@ pub fn plan<R: Read + Seek>(
             drive_bytes,
         });
     }
-    // Whole MiB, so the partition ends where it can on any drive.
-    let windows_bytes = (drive_bytes - first - TAIL_BYTES) / (1024 * 1024) * (1024 * 1024);
+    // Whole MiB, so the partition ends where it can on any drive. An MBR
+    // counts the sectors of a partition in 32 bits.
+    let mut windows_bytes = (drive_bytes - first - TAIL_BYTES) / MIB * MIB;
+    if firmware == Firmware::Bios {
+        windows_bytes = windows_bytes.min(u64::from(u32::MAX) * u64::from(SECTOR) / MIB * MIB);
+    }
     let seed_serial = new_guid(seed, 6);
     let ntfs = format(
         windows_bytes,
@@ -267,29 +299,12 @@ pub fn plan<R: Read + Seek>(
     )
     .map_err(|e| image_error(name, format!("the edition does not fit on NTFS: {e}")))?;
 
-    // The boot files: Windows\Boot\EFI and its fonts, as bcdboot copies
-    // them, and the boot manager again as the file that the firmware starts.
-    let firmware = if info.arch == Some(Arch::Arm64) {
-        "EFI/Boot/BOOTAA64.EFI"
-    } else {
-        "EFI/Boot/BOOTX64.EFI"
-    };
+    let boot_dirs = BootFiles::of(firmware, info.arch);
     let mut boot = MemorySource::new();
     let mut boot_files = 0;
     let mut manager = false;
     for d in &tree.entries {
-        let lower = d.path.to_ascii_lowercase();
-        let dest = if let Some(rest) = lower.strip_prefix("windows/boot/efi/") {
-            format!(
-                "EFI/Microsoft/Boot/{}",
-                &d.path[d.path.len() - rest.len()..]
-            )
-        } else if let Some(rest) = lower.strip_prefix("windows/boot/fonts/") {
-            format!(
-                "EFI/Microsoft/Boot/Fonts/{}",
-                &d.path[d.path.len() - rest.len()..]
-            )
-        } else {
+        let Some(dest) = boot_dirs.place(&d.path) else {
             continue;
         };
         if d.is_directory() {
@@ -305,9 +320,11 @@ pub fn plan<R: Read + Seek>(
             }
             None => Vec::new(),
         };
-        if lower == "windows/boot/efi/bootmgfw.efi" {
-            boot.add_file(firmware, bytes.clone())?;
+        if d.path.eq_ignore_ascii_case(boot_dirs.manager) {
             manager = true;
+            if let Some(again) = boot_dirs.manager_again {
+                boot.add_file(again, bytes.clone())?;
+            }
         }
         boot.add_file(&dest, bytes)?;
         boot_files += 1;
@@ -316,22 +333,45 @@ pub fn plan<R: Read + Seek>(
         return Err(image_error(
             name,
             format!(
-                "edition {edition} has no Windows\\Boot\\EFI\\bootmgfw.efi, so a drive of it cannot start"
+                "edition {edition} has no {}, so {} cannot start a drive of it",
+                boot_dirs.manager.replace('/', "\\"),
+                match firmware {
+                    Firmware::Uefi => "UEFI",
+                    Firmware::Bios => "a BIOS",
+                }
             ),
         ));
     }
     let (disk_id, efi_id, windows_id) = (new_guid(seed, 1), new_guid(seed, 2), new_guid(seed, 3));
-    let store = store_bytes(
-        &BcdDrive {
-            firmware: Firmware::Uefi,
-            system: Device::Gpt {
+    // A disk signature of zero means none to Windows.
+    let signature = u32::from_le_bytes(disk_id[..4].try_into().expect("4 bytes")).max(1);
+    let (system, windows) = match firmware {
+        Firmware::Uefi => (
+            Device::Gpt {
                 disk: disk_id,
                 partition: efi_id,
             },
-            windows: Device::Gpt {
+            Device::Gpt {
                 disk: disk_id,
                 partition: windows_id,
             },
+        ),
+        Firmware::Bios => (
+            Device::Mbr {
+                signature,
+                first_byte: EFI_FIRST_SECTOR * u64::from(SECTOR),
+            },
+            Device::Mbr {
+                signature,
+                first_byte: first,
+            },
+        ),
+    };
+    let store = store_bytes(
+        &BcdDrive {
+            firmware,
+            system,
+            windows,
             loader: new_guid(seed, 4),
             resume: new_guid(seed, 5),
             description: info.shown_name().to_string(),
@@ -344,11 +384,46 @@ pub fn plan<R: Read + Seek>(
         TIME,
     )
     .map_err(|e| image_error(name, format!("the BCD store: {e}")))?;
-    boot.add_file("EFI/Microsoft/Boot/BCD", store)?;
-    // The GPT goes into the drive plan as a check here, and onto the drive
-    // in `write`.
-    gpt_for(drive_bytes, disk_id, efi_id, windows_id, windows_bytes)
-        .map_err(|e| image_error(name, e))?;
+    boot.add_file(boot_dirs.store, store)?;
+    let table = match firmware {
+        Firmware::Uefi => {
+            let g = gpt_for(drive_bytes, disk_id, efi_id, windows_id, windows_bytes)
+                .map_err(|e| image_error(name, e))?;
+            Table {
+                head: g.head,
+                tail: g.tail,
+                tail_byte: g.tail_sector * u64::from(SECTOR),
+            }
+        }
+        Firmware::Bios => {
+            let mbr = mbr_with(
+                &[
+                    MbrPartition {
+                        first_sector: EFI_FIRST_SECTOR as u32,
+                        sectors: EFI_SECTORS as u32,
+                        kind: TYPE_FAT32,
+                        active: true,
+                    },
+                    MbrPartition {
+                        first_sector: WINDOWS_FIRST_SECTOR as u32,
+                        sectors: (windows_bytes / u64::from(SECTOR)) as u32,
+                        kind: TYPE_NTFS,
+                        active: false,
+                    },
+                ],
+                signature,
+            );
+            // The MBR, and zeros up to the system partition and over the
+            // last MiB, so no old GPT stays at either end.
+            let mut head = vec![0u8; (EFI_FIRST_SECTOR * u64::from(SECTOR)) as usize];
+            head[..512].copy_from_slice(&mbr);
+            Table {
+                head,
+                tail: vec![0u8; TAIL_BYTES as usize],
+                tail_byte: drive_bytes - TAIL_BYTES,
+            }
+        }
+    };
 
     let sizes = fills
         .iter()
@@ -362,16 +437,80 @@ pub fn plan<R: Read + Seek>(
         links,
         stream_bytes,
         boot_files,
+        firmware,
         drive_bytes,
         windows_bytes,
         fills,
         sizes,
         ntfs,
         boot,
-        disk_id,
-        efi_id,
-        windows_id,
+        table,
+        serial: u32::from_le_bytes(disk_id[..4].try_into().expect("4 bytes")),
     })
+}
+
+/// Where the boot files of an edition go on the system partition.
+struct BootFiles {
+    /// Directories of the edition, and the directory that each goes to.
+    places: &'static [(&'static str, &'static str)],
+    /// Files of the edition that go to a place of their own.
+    files: &'static [(&'static str, &'static str)],
+    /// The boot manager, which the drive cannot start without.
+    manager: &'static str,
+    /// A second place for the boot manager: the file that UEFI starts.
+    manager_again: Option<&'static str>,
+    /// The BCD store.
+    store: &'static str,
+}
+
+impl BootFiles {
+    /// As bcdboot copies them, measured on 2026-11-11.
+    fn of(firmware: Firmware, arch: Option<Arch>) -> BootFiles {
+        match firmware {
+            Firmware::Uefi => BootFiles {
+                places: &[
+                    ("windows/boot/efi/", "EFI/Microsoft/Boot/"),
+                    ("windows/boot/fonts/", "EFI/Microsoft/Boot/Fonts/"),
+                ],
+                files: &[],
+                manager: "Windows/Boot/EFI/bootmgfw.efi",
+                manager_again: Some(if arch == Some(Arch::Arm64) {
+                    "EFI/Boot/BOOTAA64.EFI"
+                } else {
+                    "EFI/Boot/BOOTX64.EFI"
+                }),
+                store: "EFI/Microsoft/Boot/BCD",
+            },
+            Firmware::Bios => BootFiles {
+                places: &[
+                    ("windows/boot/pcat/", "Boot/"),
+                    ("windows/boot/fonts/", "Boot/Fonts/"),
+                    ("windows/boot/resources/", "Boot/Resources/"),
+                ],
+                files: &[
+                    ("windows/boot/pcat/bootmgr", "bootmgr"),
+                    ("windows/boot/pcat/bootnxt", "BOOTNXT"),
+                ],
+                manager: "Windows/Boot/PCAT/bootmgr",
+                manager_again: None,
+                store: "Boot/BCD",
+            },
+        }
+    }
+
+    /// The place of `path` of the edition on the system partition, or none.
+    fn place(&self, path: &str) -> Option<String> {
+        let lower = path.to_ascii_lowercase();
+        if let Some((_, to)) = self.files.iter().find(|(from, _)| *from == lower) {
+            return Some(to.to_string());
+        }
+        self.places.iter().find_map(|(from, to)| {
+            lower
+                .strip_prefix(from)
+                .filter(|rest| !rest.is_empty())
+                .map(|rest| format!("{to}{}", &path[path.len() - rest.len()..]))
+        })
+    }
 }
 
 fn gpt_for(
@@ -407,17 +546,6 @@ impl ToGo {
     /// The size of the Windows partition.
     pub fn windows_bytes(&self) -> u64 {
         self.windows_bytes
-    }
-    /// The GPT of the drive.
-    fn table(&self) -> burnout_layout::gpt::Gpt {
-        gpt_for(
-            self.drive_bytes,
-            self.disk_id,
-            self.efi_id,
-            self.windows_id,
-            self.windows_bytes,
-        )
-        .expect("plan checked the table")
     }
 
     /// The bytes that `write` puts on the drive and `verify` reads back,
@@ -455,7 +583,7 @@ pub fn write<T: BlockTarget, R: Read + Seek>(
             found: format!("a drive of {} bytes", drive.length()),
         });
     }
-    let table = plan.table();
+    let table = &plan.table;
     progress.report(ProgressEvent::Start {
         stage: Stage::Write,
         total_bytes: Some(plan.total_bytes()),
@@ -472,7 +600,7 @@ pub fn write<T: BlockTarget, R: Read + Seek>(
         let mut io = SectorIo::new(&mut *drive);
         io.seek(SeekFrom::Start(0))?;
         io.write_all(&table.head)?;
-        io.seek(SeekFrom::Start(table.tail_sector * u64::from(SECTOR)))?;
+        io.seek(SeekFrom::Start(table.tail_byte))?;
         io.write_all(&table.tail)?;
         io.flush()?;
     }
@@ -482,7 +610,7 @@ pub fn write<T: BlockTarget, R: Read + Seek>(
         efi,
         &Fat32Options {
             label: "SYSTEM",
-            serial: u32::from_le_bytes(plan.disk_id[..4].try_into().expect("4 bytes")),
+            serial: plan.serial,
             first_sector: EFI_FIRST_SECTOR as u32,
         },
     )?;
@@ -551,17 +679,17 @@ pub fn verify<T: BlockTarget>(
     written: &Written,
     progress: &mut dyn Progress,
 ) -> Result<()> {
-    let table = plan.table();
+    let table = &plan.table;
     let mut head = vec![0u8; table.head.len()];
     drive.seek(SeekFrom::Start(0))?;
     drive.read_exact(&mut head)?;
     let mut tail = vec![0u8; table.tail.len()];
-    drive.seek(SeekFrom::Start(table.tail_sector * u64::from(SECTOR)))?;
+    drive.seek(SeekFrom::Start(table.tail_byte))?;
     drive.read_exact(&mut tail)?;
     if head != table.head || tail != table.tail {
         return Err(Error::VolumeDiffers {
             path: "the partition table".to_string(),
-            detail: "the drive does not hold the GPT that Burnout wrote".to_string(),
+            detail: "the drive does not hold the table that Burnout wrote".to_string(),
         });
     }
     progress.report(ProgressEvent::Start {
@@ -632,6 +760,7 @@ pub fn verify<T: BlockTarget>(
 mod tests {
     use super::*;
     use burnout_core::{read_table, FileTarget, PartitionType, Silent, TableKind};
+    use burnout_layout::mbr_with;
     use std::fs::File;
     use std::path::PathBuf;
 
@@ -669,10 +798,20 @@ mod tests {
     fn a_drive_reads_back_with_its_table_its_boot_files_and_each_stream() {
         let (mut file, wim) = open("to-go.wim");
         let bytes = 600 * MIB;
-        let plan = plan(&mut file, "to-go.wim", &wim, 1, bytes, "test").unwrap();
-        // Windows, Boot, EFI, en-US, Fonts, System32, drivers, and the five
-        // files. The second name of notepad.exe is a link.
-        assert_eq!((plan.files, plan.links), (12, 1));
+        let plan = plan(
+            &mut file,
+            "to-go.wim",
+            &wim,
+            1,
+            bytes,
+            "test",
+            Firmware::Uefi,
+        )
+        .unwrap();
+        // Windows, Boot, EFI, en-US, Fonts, PCAT, en-US, Resources,
+        // System32, drivers, and the nine files. The second name of
+        // notepad.exe is a link.
+        assert_eq!((plan.files, plan.links), (19, 1));
         assert_eq!(plan.boot_files, 3);
         let (_keep, mut drive) = Drive::new("reads-back", bytes);
         let written = write(&mut drive, &plan, &mut file, &wim, "to-go.wim", &mut Silent).unwrap();
@@ -705,10 +844,108 @@ mod tests {
     }
 
     #[test]
+    fn a_drive_for_a_bios_has_an_mbr_with_burnout_code_and_an_active_system_partition() {
+        let (mut file, wim) = open("to-go.wim");
+        let bytes = 600 * MIB;
+        let plan = plan(
+            &mut file,
+            "to-go.wim",
+            &wim,
+            1,
+            bytes,
+            "test",
+            Firmware::Bios,
+        )
+        .unwrap();
+        // bootmgr, BOOTNXT, the language file of PCAT, the font and
+        // bootres.dll.
+        assert_eq!(plan.boot_files, 5);
+        let (_keep, mut drive) = Drive::new("bios", bytes);
+        // An old GPT at both ends, as a drive of Windows To Go for UEFI
+        // leaves it.
+        let uefi = super::plan(
+            &mut file,
+            "to-go.wim",
+            &wim,
+            1,
+            bytes,
+            "old",
+            Firmware::Uefi,
+        )
+        .unwrap();
+        write(&mut drive, &uefi, &mut file, &wim, "to-go.wim", &mut Silent).unwrap();
+
+        let written = write(&mut drive, &plan, &mut file, &wim, "to-go.wim", &mut Silent).unwrap();
+        verify(&mut drive, &plan, &written, &mut Silent).unwrap();
+
+        let mut head = vec![0u8; MIB as usize];
+        drive.seek(SeekFrom::Start(0)).unwrap();
+        drive.read_exact(&mut head).unwrap();
+        assert_eq!(
+            &head[..440],
+            &mbr_with(&[], 0)[..440],
+            "the boot code of Burnout"
+        );
+        assert_eq!(head[446], 0x80, "partition 1 is active");
+        assert!(head[512..].iter().all(|&b| b == 0), "no GPT header stays");
+        let table = read_table(&head, 512, bytes).unwrap().unwrap();
+        assert_eq!(table.kind, TableKind::Mbr);
+        assert_eq!(table.partitions.len(), 2);
+        assert_eq!(table.partitions[0].first_byte, MIB);
+        assert_eq!(table.partitions[1].first_byte, 512 * MIB);
+        let mut last = vec![0u8; MIB as usize];
+        drive.seek(SeekFrom::Start(bytes - MIB)).unwrap();
+        drive.read_exact(&mut last).unwrap();
+        assert!(last.iter().all(|&b| b == 0), "no copy of a GPT stays");
+
+        // The FAT32 boot sector of partition 1 carries code, and the
+        // NTFS boot sector counts its hidden sectors from 512 MiB.
+        let mut sector = vec![0u8; 512];
+        drive.seek(SeekFrom::Start(MIB)).unwrap();
+        drive.read_exact(&mut sector).unwrap();
+        assert_eq!(&sector[82..90], b"FAT32   ");
+        assert_ne!(&sector[90..100], &[0u8; 10][..]);
+        drive.seek(SeekFrom::Start(512 * MIB)).unwrap();
+        drive.read_exact(&mut sector).unwrap();
+        assert_eq!(&sector[3..11], b"NTFS    ");
+        assert_eq!(
+            u32::from_le_bytes(sector[28..32].try_into().unwrap()),
+            512 * 2048
+        );
+    }
+
+    #[test]
+    fn an_edition_without_the_boot_manager_of_a_bios_is_refused_for_a_bios() {
+        let (mut file, wim) = open("lzx-32k.wim");
+        let e = plan(
+            &mut file,
+            "lzx-32k.wim",
+            &wim,
+            1,
+            600 * MIB,
+            "test",
+            Firmware::Bios,
+        )
+        .unwrap_err();
+        let text = e.to_string();
+        assert!(text.contains("Windows\\Boot\\PCAT\\bootmgr"), "{text}");
+        assert!(text.contains("a BIOS"), "{text}");
+    }
+
+    #[test]
     fn a_changed_byte_of_a_stream_fails_the_check() {
         let (mut file, wim) = open("to-go.wim");
         let bytes = 600 * MIB;
-        let plan = plan(&mut file, "to-go.wim", &wim, 1, bytes, "test").unwrap();
+        let plan = plan(
+            &mut file,
+            "to-go.wim",
+            &wim,
+            1,
+            bytes,
+            "test",
+            Firmware::Uefi,
+        )
+        .unwrap();
         let (_keep, mut drive) = Drive::new("changed", bytes);
         let written = write(&mut drive, &plan, &mut file, &wim, "to-go.wim", &mut Silent).unwrap();
         let last = plan.fills.last().unwrap();
@@ -728,14 +965,32 @@ mod tests {
     #[test]
     fn an_edition_without_a_boot_manager_is_refused() {
         let (mut file, wim) = open("lzx-32k.wim");
-        let e = plan(&mut file, "lzx-32k.wim", &wim, 1, 600 * MIB, "test").unwrap_err();
+        let e = plan(
+            &mut file,
+            "lzx-32k.wim",
+            &wim,
+            1,
+            600 * MIB,
+            "test",
+            Firmware::Uefi,
+        )
+        .unwrap_err();
         assert!(e.to_string().contains("bootmgfw.efi"), "{e}");
     }
 
     #[test]
     fn a_drive_without_room_for_the_layout_is_refused() {
         let (mut file, wim) = open("to-go.wim");
-        let e = plan(&mut file, "to-go.wim", &wim, 1, 520 * MIB, "test").unwrap_err();
+        let e = plan(
+            &mut file,
+            "to-go.wim",
+            &wim,
+            1,
+            520 * MIB,
+            "test",
+            Firmware::Uefi,
+        )
+        .unwrap_err();
         assert!(matches!(e, Error::NeedsLargerDrive { .. }), "{e}");
     }
 
