@@ -10,6 +10,7 @@ use std::io::SeekFrom;
 
 use burnout_core::{BlockTarget, Result};
 
+use crate::boot::{MBR_CODE, MBR_CODE_BYTES};
 use crate::{Extent, Layout, ALIGN};
 
 /// FAT32 with LBA addressing.
@@ -23,14 +24,15 @@ const ACTIVE: u8 = 0x80;
 
 /// The 512 bytes of an MBR.
 ///
-/// The boot code is zero. UEFI firmware never runs it, and Legacy BIOS boot
-/// is a door this leaves open for later.
+/// The boot code starts the active partition on a BIOS. UEFI firmware never
+/// runs it.
 ///
 /// `disk_signature` is the number Windows uses to tell drives apart. Two
 /// drives with one number make Windows take the second offline, so the
 /// caller gives a number of its own.
 pub fn mbr_bytes(layout: &Layout, disk_signature: u32) -> [u8; 512] {
     let mut mbr = [0u8; 512];
+    mbr[..MBR_CODE_BYTES].copy_from_slice(MBR_CODE);
     mbr[440..444].copy_from_slice(&disk_signature.to_le_bytes());
     mbr[446..462].copy_from_slice(&entry(layout, layout.boot, TYPE_FAT32, true));
     mbr[462..478].copy_from_slice(&entry(layout, layout.install, TYPE_EXFAT, false));
@@ -146,6 +148,7 @@ mod tests {
         assert_eq!(u32_at(&mbr, 446 + 12) as u64, 16 * MIB / 512);
 
         assert_eq!(mbr[462], 0x00, "partition 2 is not");
+        assert_eq!(&mbr[..440], MBR_CODE, "the code starts the active one");
         assert_eq!(mbr[462 + 4], TYPE_EXFAT);
         assert_eq!(u32_at(&mbr, 462 + 8) as u64, 17 * MIB / 512);
     }

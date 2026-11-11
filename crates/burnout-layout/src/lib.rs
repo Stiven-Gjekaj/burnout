@@ -13,6 +13,7 @@
 //!
 //! [The milestones]: https://github.com/Stiven-Gjekaj/burnout/blob/main/docs/milestones.md
 
+mod boot;
 mod copy;
 mod dot_entries;
 mod drive;
