@@ -26,7 +26,9 @@ const BLOCK_USA_AT: usize = 0x28;
 const ROOT_ENTRIES: usize = 0x10;
 
 /// One entry of an index: the file that it names, or 0, and its key. For a
-/// directory the key is the $FILE_NAME of the file.
+/// directory the key is the $FILE_NAME of the file. An entry with a key and
+/// file 0 is an entry of a view index, such as $SDH or $R, and it gives the
+/// place of its data even when it has none.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Entry {
     pub file: u64,
@@ -46,7 +48,7 @@ impl Entry {
         let len = body + if child.is_some() { 8 } else { 0 };
         let mut b = vec![0u8; len];
         b[0..8].copy_from_slice(&self.file.to_le_bytes());
-        if !self.data.is_empty() {
+        if self.file == 0 && !self.key.is_empty() {
             // A view index puts the place and the size of the data where
             // a directory puts the file reference.
             let data_at = 16 + self.key.len();
@@ -312,8 +314,9 @@ mod tests {
     fn entry(i: u32, key_len: usize) -> Entry {
         let mut key = vec![0u8; key_len];
         key[..4].copy_from_slice(&i.to_be_bytes());
+        // File 0 marks a view entry, so the files count from 1.
         Entry {
-            file: i as u64,
+            file: i as u64 + 1,
             key,
             data: Vec::new(),
         }
@@ -388,7 +391,7 @@ mod tests {
             &[0x30, 0, 0, 0, 1, 0, 0, 0, 0, 0x10, 0, 0, 1, 0, 0, 0]
         );
         assert_eq!(index.root[28], 0, "a small index");
-        assert_eq!(files(&index).0, [0, 1, 2]);
+        assert_eq!(files(&index).0, [1, 2, 3]);
     }
 
     #[test]
@@ -409,7 +412,7 @@ mod tests {
         assert_eq!(&block[4..8], &[0x28, 0, 9, 0]);
         assert_eq!(&block[0x18..0x1C], &64u32.to_le_bytes());
         assert_eq!(&block[0x20..0x24], &4072u32.to_le_bytes());
-        assert_eq!(files(&index).0, (0..12).collect::<Vec<u64>>());
+        assert_eq!(files(&index).0, (1..13).collect::<Vec<u64>>());
     }
 
     #[test]
@@ -419,7 +422,7 @@ mod tests {
             let (got, leaves) = files(&index);
             assert_eq!(
                 got,
-                (0..count as u64).collect::<Vec<_>>(),
+                (1..=count as u64).collect::<Vec<_>>(),
                 "{count} entries"
             );
             assert!(
@@ -438,6 +441,20 @@ mod tests {
                 assert!(used <= 4096 - 0x18);
             }
         }
+    }
+
+    #[test]
+    fn a_view_entry_with_no_data_still_gives_where_its_data_would_be() {
+        // An entry of $Reparse:$R: the tag and the file in the key.
+        let e = Entry {
+            file: 0,
+            key: vec![0; 12],
+            data: Vec::new(),
+        };
+        let b = e.bytes(None, false);
+        assert_eq!(&b[0..2], &28u16.to_le_bytes());
+        assert_eq!(&b[2..4], &0u16.to_le_bytes());
+        assert_eq!(&b[8..10], &32u16.to_le_bytes());
     }
 
     #[test]
