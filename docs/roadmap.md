@@ -1201,6 +1201,24 @@ of the size of Burnout today.
 
 ---
 
+## Later, maybe
+
+Not planned. Each one changes what Burnout is, so it needs a phase of its own
+in this roadmap before work starts. The person who owns the project moved them
+here from "out for good" on 2026-11-11. The sizes are estimates from the code
+as it stands, and nothing measured them.
+
+| Feature | Size | What it costs |
+| --- | --- | --- |
+| A write to one partition | S to M | Mostly safety. Burnout refuses anything but a whole drive, so the risk is a wrong partition beside data that a person keeps. |
+| A graphical interface | L | A second program on the same crates. The choice of the drive, the progress and the confirmation must stay as safe as they are on the command line. |
+| A drive that holds many images | XL | A boot menu that loads an ISO from a data partition, for BIOS and for UEFI, with Secure Boot. Much of what such a tool gives comes from years of fixes for one ISO after another. |
+| macOS install media | XL | Apple ships no ISO, and `createinstallmedia` runs on macOS only. Burnout would build the installer from the packages that Apple ships, in a format that Apple does not document and changes each year. |
+
+A write to one partition and a graphical interface are the first candidates.
+
+---
+
 ## The decisions that were open
 
 All four are settled. The reasons are here so that a later reader can reopen
@@ -1312,4 +1330,5 @@ way past it for anybody who downloads one directly.
 Legacy BIOS boot, Windows To Go, a drive that holds many images, a write to a
 single partition, a graphical interface, and macOS install media.
 [The milestones](milestones.md) say why for each one.
-Legacy BIOS boot is now P8, and Windows To Go is a far-future maybe.
+Legacy BIOS boot is now P8, and Windows To Go is a far-future maybe. The other
+four are in [Later, maybe](#later-maybe).
