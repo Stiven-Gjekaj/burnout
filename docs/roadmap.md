@@ -1263,12 +1263,17 @@ The crate `burnout-wim` reads a WIM or ESD file from inside an ISO, through
    2026-11-11: the Windows 10 22H2 x64 and the Windows 11 25H2 x64 ISOs list
    11 editions each, and the Windows 11 25H2 Arm64 ISO lists 3, as P6
    counted. Each run took less than a quarter of a second.
-2. **The offset table and the resources.** Each stream, by its SHA-1, with its
-   place, its size and its chunks.
-3. **The decompressors.** XPRESS with Huffman codes, LZX, and LZMS, which an
-   ESD file and a solid resource use. Each one is new code from the public
-   description of the format. A test compares each decompressed stream with
-   its SHA-1.
+2. **The offset table and the resources.** Done. Each stream, by its SHA-1,
+   with its place, its size and its chunks.
+3. **The decompressors.** LZX and XPRESS are done. LZMS, which an ESD file and
+   a solid resource use, is next. Each one is new code from the public
+   description of the format. Four WIM files that wimlib made are test data
+   in CI, and each of their streams decompresses to its SHA-1. Measured on
+   2026-11-11 with the example `wim_check`: each stream of the three install
+   images matched its SHA-1. That is 71,824 streams and 11.5 GB for Windows
+   10 22H2 x64, 95,219 streams and 16.4 GB for Windows 11 25H2 x64, and
+   90,772 streams and 15.2 GB for Windows 11 25H2 Arm64, at about 200 MB/s
+   on one core of this Mac.
 4. **The metadata resource.** The security descriptors and the tree of
    directory entries of one edition, with hard links, reparse points,
    alternate streams and extended attributes.
