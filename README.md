@@ -201,9 +201,9 @@ them.
 > Apple ships no ISO, and the supported path is `createinstallmedia`, which
 > exists on macOS only. Burnout detects an `.app` bundle, an
 > `InstallAssistant.pkg` or a compressed dmg and refuses with a sentence that
-> names the right tool, rather than writing a drive that starts nothing. This
-> is a non-goal and not a thing to come later.
-> [The milestones](docs/milestones.md) say why.
+> names the right tool, rather than writing a drive that starts nothing. It
+> is not planned, and [the milestones](docs/milestones.md) say why.
+> [The roadmap](docs/roadmap.md#later-maybe) keeps it as a later maybe.
 
 ---
 
