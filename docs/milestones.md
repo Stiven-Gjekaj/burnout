@@ -429,10 +429,12 @@ download come in.
 **Windows To Go waits.**
 It applies an image to a disk instead of copying an installer, so it is a
 third write mode and not an option on the second one.
+[P10 to P12 in the roadmap](roadmap.md#windows-to-go-p10-to-p12-toward-version-3)
+plan it for version 3.
 
 **macOS install media waits longest.**
-The section above says why. The roadmap keeps it, with a write to one
-partition, a graphical interface and a drive that holds many images, in
+The section above says why. The roadmap keeps it, with a graphical interface and a drive that holds
+many images, in
 [Later, maybe](roadmap.md#later-maybe).
 
 ---

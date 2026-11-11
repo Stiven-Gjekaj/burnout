@@ -1221,9 +1221,9 @@ runs the unit tests on both, but no person ran the command there.
 
 ---
 
-## Windows To Go: a far future, and a maybe
+## Windows To Go: P10 to P12, toward version 3
 
-Not planned. Reopen it only when many people ask for it.
+**Planned. The person who owns the project asked for it on 2026-11-11.**
 
 Windows To Go puts a Windows system that runs from the USB drive onto it, in
 place of an installer. So it is a third write mode, and not an option on
@@ -1246,6 +1246,52 @@ of the size of Burnout today.
   under the MIT licence.
 - Microsoft took Windows To Go out of Windows itself.
 - Each test applies an image of 5 to 10 GB and then starts Windows.
+
+So the work goes in three phases, and each one ships what it can show a
+person on its own, as a minor release of version 2. Version 3 is the release
+that writes a drive that Windows starts from.
+
+### P10. Read a WIM file
+
+**Size L. Depends on P5. Started.**
+
+The crate `burnout-wim` reads a WIM or ESD file from inside an ISO, through
+`IsoSource::open_file`, which seeks.
+
+1. **The header and the editions.** Done, and shipped as `burnout info`. The
+   XML is not compressed, so no decompressor was needed. Measured on
+   2026-11-11: the Windows 10 22H2 x64 and the Windows 11 25H2 x64 ISOs list
+   11 editions each, and the Windows 11 25H2 Arm64 ISO lists 3, as P6
+   counted. Each run took less than a quarter of a second.
+2. **The offset table and the resources.** Each stream, by its SHA-1, with its
+   place, its size and its chunks.
+3. **The decompressors.** XPRESS with Huffman codes, LZX, and LZMS, which an
+   ESD file and a solid resource use. Each one is new code from the public
+   description of the format. A test compares each decompressed stream with
+   its SHA-1.
+4. **The metadata resource.** The security descriptors and the tree of
+   directory entries of one edition, with hard links, reparse points,
+   alternate streams and extended attributes.
+5. **The exit test.** Each file of one edition of each of the three Windows
+   ISOs comes out with the SHA-1 that the WIM records for it.
+
+### P11. Write an NTFS volume
+
+**Size XL. Depends on P10.**
+
+An NTFS writer that takes the tree of P10: the MFT and its mirror, the
+attributes, the B+ tree indexes of large directories, the security
+descriptors, hard links, reparse points and extended attributes, and a clean
+log file. A drive image goes to Windows in a VM, and `chkdsk` finds no fault.
+
+### P12. Windows To Go
+
+**Size L. Depends on P8, P10 and P11. Ships as version 3.**
+
+`burnout write <image> <drive> --to-go --edition <n>` lays out the drive with
+an EFI system partition and an NTFS partition, applies the edition, and writes
+a BCD store and the boot files for UEFI and for a BIOS. The exit test is a
+drive image that starts Windows to its first-run setup in a VM.
 
 ---
 
@@ -1379,4 +1425,4 @@ Legacy BIOS boot, Windows To Go, a drive that holds many images, a write to a
 single partition, a graphical interface, and macOS install media.
 [The milestones](milestones.md) say why for each one.
 Legacy BIOS boot is now P8, a write to one partition is P9, and Windows To Go
-is a far-future maybe. The other three are in [Later, maybe](#later-maybe).
+is P10 to P12. The other three are in [Later, maybe](#later-maybe).
