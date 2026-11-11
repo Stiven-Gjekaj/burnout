@@ -58,3 +58,7 @@ open(f"{root}/Windows/System32/drivers/small.sys", "wb").write(b"small\n")
 os.link(f"{root}/Windows/System32/notepad.exe", f"{root}/Windows/notepad.exe")
 PY
 wimlib-imagex capture "$win" "$here/to-go.wim" "Windows Test" --compress=lzx --chunk-size=32768 --no-acls --norpfix >/dev/null
+
+# The same tree in one solid resource with LZMS, as an install.esd has it.
+# Burnout does not read LZMS, so this tests the refusal.
+wimlib-imagex capture "$win" "$here/lzms-solid.wim" "Windows Test" --compress=LZMS --solid --no-acls --norpfix >/dev/null

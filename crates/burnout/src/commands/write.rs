@@ -36,7 +36,7 @@ use burnout_layout::{
     unattend_xml, verify_windows, write_windows, InstallImage, Layout, Serials, Unattend,
     WindowsDrive, WindowsTree, UNATTEND_FILE,
 };
-use burnout_wim::{read_wim, Edition, Wim};
+use burnout_wim::{read_wim, Compression, Edition, Wim};
 
 use crate::cli::{ModeArg, WriteArgs};
 use crate::elevate::{self, Plan, State};
@@ -87,22 +87,58 @@ enum Job {
     ToGo(Box<ToGoJob>),
 }
 
-/// A Windows ISO and the edition of it that goes onto the drive.
+/// A Windows ISO or a WIM file, and the edition of it that goes onto the
+/// drive.
 struct ToGoJob {
-    source: IsoSource<File>,
-    wim_path: TreePath,
+    input: WimInput,
     wim: Wim,
     edition: Edition,
     /// The place of the edition in the install image, counted from 1.
     position: usize,
-    iso_bytes: u64,
+    image_bytes: u64,
     /// The drive, worked out when the drive is known.
     plan: Option<ToGo>,
 }
 
+/// Where the install image of `--to-go` is.
+enum WimInput {
+    /// `sources/install.wim` inside a Windows ISO.
+    Iso {
+        source: IsoSource<File>,
+        path: TreePath,
+    },
+    /// A WIM file of its own, such as the one that DISM exports from an
+    /// `install.esd`.
+    File(std::path::PathBuf),
+}
+
+/// Something that reads and seeks, for the two kinds of input.
+trait ReadSeek: Read + Seek {}
+impl<T: Read + Seek> ReadSeek for T {}
+
+impl WimInput {
+    fn open(&self) -> Result<Box<dyn ReadSeek + '_>> {
+        match self {
+            WimInput::Iso { source, path } => Ok(Box::new(source.open_file(path)?)),
+            WimInput::File(path) => Ok(Box::new(File::open(path).map_err(|e| Error::Image {
+                path: path.display().to_string(),
+                detail: e.to_string(),
+            })?)),
+        }
+    }
+
+    /// The name of the install image in a message.
+    fn name(&self) -> String {
+        match self {
+            WimInput::Iso { path, .. } => path.to_string(),
+            WimInput::File(path) => path.display().to_string(),
+        }
+    }
+}
+
 impl ToGoJob {
     fn name(&self) -> String {
-        format!("{}", self.wim_path)
+        self.input.name()
     }
 }
 
@@ -139,7 +175,7 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
         Job::Windows(w) => Some(w.tree.plan(chosen.size_bytes, chosen.logical_sector_size)?),
         Job::ToGo(t) => {
             let name = t.name();
-            let mut wim_file = t.source.open_file(&t.wim_path)?;
+            let mut wim_file = t.input.open()?;
             t.plan = Some(to_go::plan(
                 &mut wim_file,
                 &name,
@@ -269,7 +305,7 @@ fn write_to_go_mode<A: DriveAccess>(
     let name = t.name();
     let written = {
         let mut target = access.open(&drive.id)?;
-        let mut wim_file = t.source.open_file(&t.wim_path)?;
+        let mut wim_file = t.input.open()?;
         to_go::write(&mut target, plan, &mut wim_file, &t.wim, &name, bar)?
     };
     {
@@ -419,31 +455,50 @@ fn windows_job(args: &WriteArgs) -> Result<WindowsJob> {
     })
 }
 
-/// Read the install image of a Windows ISO, and find the edition that
-/// `--edition` names.
+/// Read the install image of a Windows ISO or a WIM file, and find the
+/// edition that `--edition` names.
 fn to_go_job(args: &WriteArgs) -> Result<ToGoJob> {
     let name = args.image.display().to_string();
     let unreadable = |detail: String| Error::Image {
         path: name.clone(),
         detail,
     };
-    let file = File::open(&args.image).map_err(|e| unreadable(e.to_string()))?;
-    let iso_bytes = file.metadata()?.len();
-    let source = IsoSource::new(file, &name)?.ok_or_else(|| {
-        unreadable("it holds neither UDF nor ISO 9660, so it is not a Windows ISO".to_string())
-    })?;
-    let tree = WindowsTree::new(&source).map_err(|e| match e {
-        Error::Source { path, detail } => unreadable(format!("{path}: {detail}")),
-        other => other,
-    })?;
-    if tree.image != InstallImage::Wim {
-        return Err(unreadable(format!(
-            "it holds {}, which LZMS compresses, and Burnout does not read LZMS",
-            tree.image_path()
-        )));
+    let mut file = File::open(&args.image).map_err(|e| unreadable(e.to_string()))?;
+    let image_bytes = file.metadata()?.len();
+    let mut magic = [0u8; 8];
+    let is_wim = file.read_exact(&mut magic).is_ok() && &magic == WIM_MAGIC;
+    file.seek(SeekFrom::Start(0))?;
+    let input = if is_wim {
+        WimInput::File(args.image.clone())
+    } else {
+        let source = IsoSource::new(file, &name)?.ok_or_else(|| {
+            unreadable(
+                "it holds neither UDF nor ISO 9660 nor a WIM header, so it is neither a \
+                 Windows ISO nor a WIM file"
+                    .to_string(),
+            )
+        })?;
+        let tree = WindowsTree::new(&source).map_err(|e| match e {
+            Error::Source { path, detail } => unreadable(format!("{path}: {detail}")),
+            other => other,
+        })?;
+        if tree.image != InstallImage::Wim {
+            return Err(unreadable(format!(
+                "it holds {}, which LZMS compresses, and Burnout does not read LZMS",
+                tree.image_path()
+            )));
+        }
+        WimInput::Iso {
+            path: tree.image_path().clone(),
+            source,
+        }
+    };
+    let wim = read_wim(input.open()?, &input.name())?;
+    if wim.header.compression() == Compression::Lzms {
+        return Err(unreadable(
+            "LZMS compresses it, and Burnout does not read LZMS".to_string(),
+        ));
     }
-    let wim_path = tree.image_path().clone();
-    let wim = read_wim(source.open_file(&wim_path)?, &format!("{name}: {wim_path}"))?;
     let text = args.edition.as_deref().unwrap_or_default();
     let edition = wim
         .find_edition(text)
@@ -460,15 +515,17 @@ fn to_go_job(args: &WriteArgs) -> Result<ToGoJob> {
         .expect("the edition is in the list")
         + 1;
     Ok(ToGoJob {
-        source,
-        wim_path,
+        input,
         wim,
         edition,
         position,
-        iso_bytes,
+        image_bytes,
         plan: None,
     })
 }
+
+/// The first bytes of a WIM file.
+const WIM_MAGIC: &[u8; 8] = b"MSWIM\0\0\0";
 
 /// The edition of the install image that `text` names, by its index or its
 /// name, as `burnout info` lists them.
@@ -1050,7 +1107,7 @@ fn confirm(
     let image_bytes = match job {
         Job::Raw { bytes, .. } => *bytes,
         Job::Windows(w) => w.iso_bytes,
-        Job::ToGo(t) => t.iso_bytes,
+        Job::ToGo(t) => t.image_bytes,
     };
     match partition {
         Some(p) => say!(
@@ -1176,6 +1233,52 @@ mod tests {
             edition: None,
             to_go: false,
         }
+    }
+
+    fn wim_fixture(name: &str) -> String {
+        format!(
+            "{}/../burnout-wim/tests/data/{name}",
+            env!("CARGO_MANIFEST_DIR")
+        )
+    }
+
+    fn to_go_args(image: &str, edition: &str) -> WriteArgs {
+        WriteArgs {
+            to_go: true,
+            edition: Some(edition.to_string()),
+            ..args(image)
+        }
+    }
+
+    #[test]
+    fn to_go_takes_a_wim_file_as_its_image() {
+        let image = wim_fixture("to-go.wim");
+        let job = to_go_job(&to_go_args(&image, "1")).unwrap();
+        assert!(matches!(&job.input, WimInput::File(p) if p.display().to_string() == image));
+        assert_eq!(job.edition.shown_name(), "Windows Test");
+        assert_eq!(job.position, 1);
+        assert_eq!(job.image_bytes, std::fs::metadata(&image).unwrap().len());
+        // The tree of the edition reads through the input.
+        let mut file = job.input.open().unwrap();
+        let plan = to_go::plan(&mut file, &job.name(), &job.wim, 1, 600 << 20, "t").unwrap();
+        assert_eq!(plan.boot_files, 3);
+    }
+
+    #[test]
+    fn to_go_names_the_editions_of_a_wim_file_that_lacks_the_one_asked_for() {
+        let Err(e) = to_go_job(&to_go_args(&wim_fixture("to-go.wim"), "Home")) else {
+            panic!("refused")
+        };
+        assert_eq!(e.kind(), "no_such_edition");
+        assert!(e.to_string().contains("1 Windows Test"), "{e}");
+    }
+
+    #[test]
+    fn to_go_refuses_a_wim_file_that_lzms_compresses() {
+        let Err(e) = to_go_job(&to_go_args(&wim_fixture("lzms-solid.wim"), "1")) else {
+            panic!("refused")
+        };
+        assert!(e.to_string().contains("LZMS"), "{e}");
     }
 
     #[test]

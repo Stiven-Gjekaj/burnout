@@ -125,8 +125,8 @@ pub struct WriteArgs {
     ///
     /// Burnout applies the edition that `--edition` names to an NTFS
     /// partition, and puts the boot files and a BCD store on an EFI system
-    /// partition. The drive starts through UEFI, with no Setup. The ISO must
-    /// hold sources/install.wim.
+    /// partition. The drive starts through UEFI, with no Setup. The image is
+    /// a Windows ISO that holds sources/install.wim, or a WIM file.
     #[arg(
         long,
         requires = "edition",
