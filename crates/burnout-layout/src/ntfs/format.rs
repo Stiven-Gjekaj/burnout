@@ -651,10 +651,8 @@ pub(crate) fn format(
                 return Err(format!("the name {name:?} does not fit NTFS"));
             }
             if let Some(p) = parent {
-                if p >= i || !new_files[p].directory {
-                    return Err(format!(
-                        "{name:?} names {p}, which is not a directory before it"
-                    ));
+                if p >= new_files.len() || p == i || !new_files[p].directory {
+                    return Err(format!("{name:?} names {p}, which is not a directory"));
                 }
             }
         }
@@ -1120,10 +1118,10 @@ mod tests {
     }
 
     #[test]
-    fn a_file_must_follow_its_directory() {
+    fn a_name_must_be_in_a_directory() {
         let list = [
             new_file(Some(1), "a", false, 1),
-            new_file(None, "d", true, 0),
+            new_file(None, "f", false, 0),
         ];
         let r = format(
             64 * 1024 * 1024,
@@ -1137,9 +1135,9 @@ mod tests {
             &[],
         );
         let Err(e) = r else {
-            panic!("a file before its directory was taken")
+            panic!("a name in a file was taken")
         };
-        assert!(e.contains("not a directory before it"), "{e}");
+        assert!(e.contains("which is not a directory"), "{e}");
     }
 
     pub(super) fn junction(target: &str) -> Vec<u8> {
