@@ -29,14 +29,14 @@ use burnout_core::{
     check_fits, check_same_drive, check_target, choose_partition, describe, force_phrase, grouped,
     has_boot_table, human_size, in_list_order, phrase_matches, read_table, size_column,
     verify_image, write_image, BlockTarget, DriveAccess, DriveInfo, Error, Force, Partition,
-    Progress, ProgressEvent, Result, Stage, Window, BOOT_SECTOR_BYTES, TABLE_BYTES,
+    Progress, ProgressEvent, Result, Stage, TreePath, Window, BOOT_SECTOR_BYTES, TABLE_BYTES,
 };
 use burnout_iso::{check_whole, mode_of_file, IsoSource, Mode};
 use burnout_layout::{
-    unattend_xml, verify_windows, write_windows, Layout, Serials, Unattend, WindowsDrive,
-    WindowsTree, UNATTEND_FILE,
+    unattend_xml, verify_windows, write_windows, InstallImage, Layout, Serials, Unattend,
+    WindowsDrive, WindowsTree, UNATTEND_FILE,
 };
-use burnout_wim::{read_wim, Edition};
+use burnout_wim::{read_wim, Edition, Wim};
 
 use crate::cli::{ModeArg, WriteArgs};
 use crate::elevate::{self, Plan, State};
@@ -45,6 +45,7 @@ use crate::json::Json;
 use crate::platform;
 use crate::report::{Bar, JsonProgress, Listener};
 use crate::stop::Tracked;
+use crate::to_go::{self, ToGo};
 
 /// Print one line of text for a person.
 ///
@@ -82,6 +83,27 @@ enum Job {
     },
     /// The layout of Windows mode, with the files of the ISO on it.
     Windows(Box<WindowsJob>),
+    /// One edition, applied for Windows To Go.
+    ToGo(Box<ToGoJob>),
+}
+
+/// A Windows ISO and the edition of it that goes onto the drive.
+struct ToGoJob {
+    source: IsoSource<File>,
+    wim_path: TreePath,
+    wim: Wim,
+    edition: Edition,
+    /// The place of the edition in the install image, counted from 1.
+    position: usize,
+    iso_bytes: u64,
+    /// The drive, worked out when the drive is known.
+    plan: Option<ToGo>,
+}
+
+impl ToGoJob {
+    fn name(&self) -> String {
+        format!("{}", self.wim_path)
+    }
 }
 
 /// A Windows ISO, read and split onto the two partitions.
@@ -100,7 +122,7 @@ struct WindowsJob {
 /// stream, and no progress line is drawn.
 pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
     crate::stop::on_stop(json);
-    let job = prepare(args)?;
+    let mut job = prepare(args)?;
 
     let force = if args.force { Force::Yes } else { Force::No };
     let (drives, chosen) = find_target(args)?;
@@ -109,12 +131,25 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
     // through a loop device, and nothing in between names the drive.
     let system_disk_known = drives.iter().any(|d| d.system);
     check_target(&chosen, force)?;
-    let layout = match &job {
+    let layout = match &mut job {
         Job::Raw { bytes, .. } => {
             check_fits(*bytes, chosen.size_bytes)?;
             None
         }
         Job::Windows(w) => Some(w.tree.plan(chosen.size_bytes, chosen.logical_sector_size)?),
+        Job::ToGo(t) => {
+            let name = t.name();
+            let mut wim_file = t.source.open_file(&t.wim_path)?;
+            t.plan = Some(to_go::plan(
+                &mut wim_file,
+                &name,
+                &t.wim,
+                t.position,
+                chosen.size_bytes,
+                &seed(&chosen),
+            )?);
+            None
+        }
     };
 
     let state = State {
@@ -205,12 +240,85 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
             write_windows_mode(&access, &again, &w, layout, &mut bar, json)
         }
         (Job::Windows(_), None) => unreachable!("Windows mode plans a layout"),
+        (Job::ToGo(t), _) => write_to_go_mode(&access, &again, &t, &mut bar, json),
     }
+}
+
+/// The seed of the GUIDs of a drive of Windows To Go: the drive and the
+/// time, so that two drives never share a GUID.
+fn seed(drive: &DriveInfo) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    format!(
+        "{}/{}/{now}",
+        drive.id.as_str(),
+        drive.serial.as_deref().unwrap_or("")
+    )
+}
+
+/// Apply the edition for Windows To Go, and read the drive back.
+fn write_to_go_mode<A: DriveAccess>(
+    access: &A,
+    drive: &DriveInfo,
+    t: &ToGoJob,
+    bar: &mut impl Progress,
+    json: bool,
+) -> Result<i32> {
+    let plan = t.plan.as_ref().expect("run plans the drive");
+    let name = t.name();
+    let written = {
+        let mut target = access.open(&drive.id)?;
+        let mut wim_file = t.source.open_file(&t.wim_path)?;
+        to_go::write(&mut target, plan, &mut wim_file, &t.wim, &name, bar)?
+    };
+    {
+        let mut target = open_again(access, drive, OPEN_TRIES, OPEN_PAUSE)?;
+        to_go::verify(&mut target, plan, &written, bar)?;
+    }
+    let ejected = access.eject(&drive.id);
+
+    say!(json);
+    say!(
+        json,
+        "Wrote {} to {}: {} files and directories and {} of streams onto partition 2, NTFS, and {} boot files and the BCD store onto partition 1, FAT32.",
+        plan.edition,
+        drive.name,
+        grouped(plan.files as u64),
+        size_column(plan.stream_bytes),
+        plan.boot_files
+    );
+    say!(
+        json,
+        "Checked the GPT, each boot file through a new mount of its volume, and each stream of \
+         Windows against the SHA-1 that the install image names for it."
+    );
+    offline_note(json);
+    eject_note(&ejected, json);
+    if json {
+        println!(
+            "{}",
+            Json::Object(vec![
+                ("event", Json::text("result")),
+                ("mode", Json::text("to_go")),
+                ("edition", edition_object(&t.edition)),
+                ("files", Json::Number(plan.files as u64)),
+                ("stream_bytes", Json::Number(plan.stream_bytes)),
+                ("boot_files", Json::Number(plan.boot_files as u64)),
+                ("ejected", Json::Bool(let_go(&ejected))),
+                ("offline", Json::Bool(cfg!(windows))),
+            ])
+        );
+    }
+    Ok(0)
 }
 
 /// Read the image and choose the mode, before anything needs privilege.
 fn prepare(args: &WriteArgs) -> Result<Job> {
     refuse_incomplete(&args.image)?;
+    if args.to_go {
+        return Ok(Job::ToGo(Box::new(to_go_job(args)?)));
+    }
     let mode = match (args.partition, args.mode) {
         (Some(_), Some(ModeArg::Windows)) => return Err(windows_in_partition(&args.image)),
         (Some(_), _) => partition_mode(mode_of_file(&args.image), &args.image)?,
@@ -308,6 +416,57 @@ fn windows_job(args: &WriteArgs) -> Result<WindowsJob> {
         unattend,
         iso_bytes,
         edition,
+    })
+}
+
+/// Read the install image of a Windows ISO, and find the edition that
+/// `--edition` names.
+fn to_go_job(args: &WriteArgs) -> Result<ToGoJob> {
+    let name = args.image.display().to_string();
+    let unreadable = |detail: String| Error::Image {
+        path: name.clone(),
+        detail,
+    };
+    let file = File::open(&args.image).map_err(|e| unreadable(e.to_string()))?;
+    let iso_bytes = file.metadata()?.len();
+    let source = IsoSource::new(file, &name)?.ok_or_else(|| {
+        unreadable("it holds neither UDF nor ISO 9660, so it is not a Windows ISO".to_string())
+    })?;
+    let tree = WindowsTree::new(&source).map_err(|e| match e {
+        Error::Source { path, detail } => unreadable(format!("{path}: {detail}")),
+        other => other,
+    })?;
+    if tree.image != InstallImage::Wim {
+        return Err(unreadable(format!(
+            "it holds {}, which LZMS compresses, and Burnout does not read LZMS",
+            tree.image_path()
+        )));
+    }
+    let wim_path = tree.image_path().clone();
+    let wim = read_wim(source.open_file(&wim_path)?, &format!("{name}: {wim_path}"))?;
+    let text = args.edition.as_deref().unwrap_or_default();
+    let edition = wim
+        .find_edition(text)
+        .cloned()
+        .ok_or_else(|| Error::NoSuchEdition {
+            path: name.clone(),
+            edition: text.to_string(),
+            editions: editions_text(&wim.editions),
+        })?;
+    let position = wim
+        .editions
+        .iter()
+        .position(|e| e.index == edition.index)
+        .expect("the edition is in the list")
+        + 1;
+    Ok(ToGoJob {
+        source,
+        wim_path,
+        wim,
+        edition,
+        position,
+        iso_bytes,
+        plan: None,
     })
 }
 
@@ -674,20 +833,26 @@ fn partition_number_json(p: Option<&Partition>) -> Json {
 fn edition_json(job: &Job) -> Json {
     match job {
         Job::Windows(w) => match &w.edition {
-            Some(e) => Json::Object(vec![
-                ("index", Json::Number(e.index as u64)),
-                ("name", Json::text(e.shown_name())),
-            ]),
+            Some(e) => edition_object(e),
             None => Json::Null,
         },
+        Job::ToGo(t) => edition_object(&t.edition),
         Job::Raw { .. } => Json::Null,
     }
+}
+
+fn edition_object(e: &Edition) -> Json {
+    Json::Object(vec![
+        ("index", Json::Number(e.index as u64)),
+        ("name", Json::text(e.shown_name())),
+    ])
 }
 
 fn mode_name(job: &Job) -> &'static str {
     match job {
         Job::Raw { .. } => "raw",
         Job::Windows(_) => "windows",
+        Job::ToGo(_) => "to_go",
     }
 }
 
@@ -698,6 +863,9 @@ fn let_go(ejected: &Result<()>) -> bool {
 
 /// What the write puts onto the drive, as the confirmation says it.
 fn what_goes_on(job: &Job, layout: Option<&Layout>) -> Vec<String> {
+    if let Job::ToGo(t) = job {
+        return to_go_lines(t);
+    }
     let w = match (job, layout) {
         (Job::Windows(w), Some(layout)) => (w, layout),
         (
@@ -715,6 +883,29 @@ fn what_goes_on(job: &Job, layout: Option<&Layout>) -> Vec<String> {
     };
     let (w, layout) = w;
     windows_lines(&w.tree, &w.unattend, w.edition.as_ref(), layout)
+}
+
+/// The lines of the confirmation for Windows To Go.
+fn to_go_lines(t: &ToGoJob) -> Vec<String> {
+    let plan = t.plan.as_ref().expect("run plans the drive");
+    vec![
+        format!(
+            "Burnout makes a drive of Windows To Go with edition {}, {}:",
+            t.edition.index, plan.edition
+        ),
+        format!(
+            "    partition 1  FAT32, {}, {} boot files and the BCD store",
+            human_size(to_go::EFI_SECTORS * 512),
+            plan.boot_files
+        ),
+        format!(
+            "    partition 2  NTFS, {}, {} files and directories, {} of streams",
+            human_size(plan.windows_bytes()),
+            grouped(plan.files as u64),
+            human_size(plan.stream_bytes)
+        ),
+        "The drive starts Windows through UEFI, with no Setup.".to_string(),
+    ]
 }
 
 /// The lines of the confirmation for Windows mode.
@@ -859,6 +1050,7 @@ fn confirm(
     let image_bytes = match job {
         Job::Raw { bytes, .. } => *bytes,
         Job::Windows(w) => w.iso_bytes,
+        Job::ToGo(t) => t.iso_bytes,
     };
     match partition {
         Some(p) => say!(
@@ -982,6 +1174,7 @@ mod tests {
             skip_hardware_checks: false,
             no_microsoft_account: false,
             edition: None,
+            to_go: false,
         }
     }
 

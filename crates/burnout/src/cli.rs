@@ -120,6 +120,19 @@ pub struct WriteArgs {
     /// be the end of the full name, such as Pro for Windows 11 Pro.
     #[arg(long, value_name = "EDITION")]
     pub edition: Option<String>,
+
+    /// Make a drive that starts Windows itself: Windows To Go.
+    ///
+    /// Burnout applies the edition that `--edition` names to an NTFS
+    /// partition, and puts the boot files and a BCD store on an EFI system
+    /// partition. The drive starts through UEFI, with no Setup. The ISO must
+    /// hold sources/install.wim.
+    #[arg(
+        long,
+        requires = "edition",
+        conflicts_with_all = ["partition", "mode", "skip_hardware_checks", "no_microsoft_account"]
+    )]
+    pub to_go: bool,
 }
 
 /// A mode that a person can choose.
@@ -129,4 +142,48 @@ pub enum ModeArg {
     Raw,
     /// Lay the drive out for Windows, and copy the files of the ISO onto it.
     Windows,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> std::result::Result<Cli, clap::Error> {
+        Cli::try_parse_from(std::iter::once("burnout").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn to_go_takes_an_edition() {
+        let cli = parse(&["write", "w.iso", "2", "--to-go", "--edition", "Pro"]).unwrap();
+        let Command::Write(w) = cli.command else {
+            panic!("write")
+        };
+        assert!(w.to_go);
+        assert_eq!(w.edition.as_deref(), Some("Pro"));
+    }
+
+    #[test]
+    fn to_go_without_an_edition_is_refused() {
+        let e = parse(&["write", "w.iso", "2", "--to-go"]).unwrap_err();
+        assert_eq!(e.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn to_go_refuses_the_options_of_the_other_modes() {
+        for extra in [
+            &["--partition", "1"][..],
+            &["--mode", "windows"],
+            &["--skip-hardware-checks"],
+            &["--no-microsoft-account"],
+        ] {
+            let mut args = vec!["write", "w.iso", "2", "--to-go", "--edition", "1"];
+            args.extend_from_slice(extra);
+            let e = parse(&args).unwrap_err();
+            assert_eq!(
+                e.kind(),
+                clap::error::ErrorKind::ArgumentConflict,
+                "{extra:?}"
+            );
+        }
+    }
 }

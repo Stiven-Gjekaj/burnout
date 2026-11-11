@@ -12,7 +12,9 @@
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 
-use burnout_core::{BlockTarget, Error, MemorySource, Result, SectorIo, Window};
+use burnout_core::{
+    BlockTarget, Error, MemorySource, Progress, ProgressEvent, Result, SectorIo, Stage, Window,
+};
 use burnout_layout::bcd::{store_bytes, BcdDrive};
 use burnout_layout::gpt::{gpt, GptPartition, BASIC_DATA, EFI_SYSTEM};
 use burnout_layout::ntfs::{format, Formatted, NewFile, NtfsOptions, Run, Times, CLUSTER};
@@ -396,6 +398,22 @@ fn gpt_for(
 }
 
 impl ToGo {
+    /// The size of the Windows partition.
+    pub fn windows_bytes(&self) -> u64 {
+        self.windows_bytes
+    }
+    /// The GPT of the drive.
+    fn table(&self) -> burnout_layout::gpt::Gpt {
+        gpt_for(
+            self.drive_bytes,
+            self.disk_id,
+            self.efi_id,
+            self.windows_id,
+            self.windows_bytes,
+        )
+        .expect("plan checked the table")
+    }
+
     /// The bytes that `write` puts on the drive and `verify` reads back,
     /// for a bar of progress.
     pub fn total_bytes(&self) -> u64 {
@@ -418,7 +436,7 @@ pub fn write<T: BlockTarget, R: Read + Seek>(
     wim_file: &mut R,
     wim: &Wim,
     name: &str,
-    tally: &mut dyn FnMut(u64),
+    progress: &mut dyn Progress,
 ) -> Result<Written> {
     if drive.logical_sector_size() != SECTOR {
         return Err(Error::SectorSize {
@@ -431,14 +449,19 @@ pub fn write<T: BlockTarget, R: Read + Seek>(
             found: format!("a drive of {} bytes", drive.length()),
         });
     }
-    let table = gpt_for(
-        plan.drive_bytes,
-        plan.disk_id,
-        plan.efi_id,
-        plan.windows_id,
-        plan.windows_bytes,
-    )
-    .map_err(|e| image_error(name, e))?;
+    let table = plan.table();
+    progress.report(ProgressEvent::Start {
+        stage: Stage::Write,
+        total_bytes: Some(plan.total_bytes()),
+    });
+    let mut done = 0;
+    let mut tally = |n: u64| {
+        done += n;
+        progress.report(ProgressEvent::Advance {
+            stage: Stage::Write,
+            bytes_done: done,
+        });
+    };
     {
         let mut io = SectorIo::new(&mut *drive);
         io.seek(SeekFrom::Start(0))?;
@@ -480,7 +503,21 @@ pub fn write<T: BlockTarget, R: Read + Seek>(
     }
     io.flush()?;
     drop(io);
+    // A byte count that reached the size of the edition is not a finished
+    // write, so the flush comes first and the end of the write after it.
+    progress.report(ProgressEvent::Start {
+        stage: Stage::Flush,
+        total_bytes: None,
+    });
     drive.sync()?;
+    progress.report(ProgressEvent::Done {
+        stage: Stage::Flush,
+        bytes_done: done,
+    });
+    progress.report(ProgressEvent::Done {
+        stage: Stage::Write,
+        bytes_done: done,
+    });
     Ok(Written { efi: manifest })
 }
 
@@ -506,8 +543,33 @@ pub fn verify<T: BlockTarget>(
     drive: &mut T,
     plan: &ToGo,
     written: &Written,
-    tally: &mut dyn FnMut(u64),
+    progress: &mut dyn Progress,
 ) -> Result<()> {
+    let table = plan.table();
+    let mut head = vec![0u8; table.head.len()];
+    drive.seek(SeekFrom::Start(0))?;
+    drive.read_exact(&mut head)?;
+    let mut tail = vec![0u8; table.tail.len()];
+    drive.seek(SeekFrom::Start(table.tail_sector * u64::from(SECTOR)))?;
+    drive.read_exact(&mut tail)?;
+    if head != table.head || tail != table.tail {
+        return Err(Error::VolumeDiffers {
+            path: "the partition table".to_string(),
+            detail: "the drive does not hold the GPT that Burnout wrote".to_string(),
+        });
+    }
+    progress.report(ProgressEvent::Start {
+        stage: Stage::Verify,
+        total_bytes: Some(plan.total_bytes()),
+    });
+    let mut done = 0;
+    let mut tally = |n: u64| {
+        done += n;
+        progress.report(ProgressEvent::Advance {
+            stage: Stage::Verify,
+            bytes_done: done,
+        });
+    };
     verify_fat32(efi_window(drive)?, &written.efi)?;
     let base = WINDOWS_FIRST_SECTOR * u64::from(SECTOR);
     let mut io = SectorIo::new(Window::new(&mut *drive, base, plan.windows_bytes)?);
@@ -553,13 +615,17 @@ pub fn verify<T: BlockTarget>(
         }
     }
     drop(io);
+    progress.report(ProgressEvent::Done {
+        stage: Stage::Verify,
+        bytes_done: done,
+    });
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use burnout_core::{read_table, FileTarget, PartitionType, TableKind};
+    use burnout_core::{read_table, FileTarget, PartitionType, Silent, TableKind};
     use std::fs::File;
     use std::path::PathBuf;
 
@@ -603,8 +669,8 @@ mod tests {
         assert_eq!((plan.files, plan.links), (12, 1));
         assert_eq!(plan.boot_files, 3);
         let (_keep, mut drive) = Drive::new("reads-back", bytes);
-        let written = write(&mut drive, &plan, &mut file, &wim, "to-go.wim", &mut |_| {}).unwrap();
-        verify(&mut drive, &plan, &written, &mut |_| {}).unwrap();
+        let written = write(&mut drive, &plan, &mut file, &wim, "to-go.wim", &mut Silent).unwrap();
+        verify(&mut drive, &plan, &written, &mut Silent).unwrap();
 
         let mut head = vec![0u8; MIB as usize];
         drive.seek(SeekFrom::Start(0)).unwrap();
@@ -638,7 +704,7 @@ mod tests {
         let bytes = 600 * MIB;
         let plan = plan(&mut file, "to-go.wim", &wim, 1, bytes, "test").unwrap();
         let (_keep, mut drive) = Drive::new("changed", bytes);
-        let written = write(&mut drive, &plan, &mut file, &wim, "to-go.wim", &mut |_| {}).unwrap();
+        let written = write(&mut drive, &plan, &mut file, &wim, "to-go.wim", &mut Silent).unwrap();
         let last = plan.fills.last().unwrap();
         let run = run_of(&plan, last).unwrap();
         let at = 512 * MIB + run.lcn.unwrap() * CLUSTER;
@@ -648,7 +714,7 @@ mod tests {
         sector[100] ^= 0xFF;
         drive.seek(SeekFrom::Start(at)).unwrap();
         drive.write_all(&sector).unwrap();
-        let e = verify(&mut drive, &plan, &written, &mut |_| {}).unwrap_err();
+        let e = verify(&mut drive, &plan, &written, &mut Silent).unwrap_err();
         assert!(matches!(e, Error::VolumeDiffers { .. }), "{e}");
         assert!(e.to_string().contains("SHA-1"), "{e}");
     }
