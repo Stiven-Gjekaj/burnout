@@ -11,6 +11,7 @@ pub mod json;
 pub mod platform;
 pub mod report;
 pub mod stop;
+pub mod to_go;
 
 use burnout_core::Error;
 use clap::Parser;
