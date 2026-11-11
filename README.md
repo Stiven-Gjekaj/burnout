@@ -345,21 +345,24 @@ holds it, and Spotlight then writes to it, so Burnout ejects the drive when
 the check ends. Windows holds the drive offline after the write, so the same
 place says that on Windows.
 
-A Windows ISO takes the same command. Two options change what Setup does, and
-Burnout writes nothing else into `autounattend.xml`:
+A Windows ISO takes the same command. Three options change what Setup does,
+and Burnout writes nothing else into `autounattend.xml`:
 
 - `--skip-hardware-checks` turns off the checks of Windows 11 for TPM, Secure
   Boot, RAM, CPU and storage.
 - `--no-microsoft-account` takes away the step of the Microsoft account. Setup
   then asks for a local account and its password, so Burnout holds no
   password.
+- `--edition` chooses the edition that Setup installs, by its index or its
+  name, as `burnout info` lists them. `--edition Pro` is enough for Windows
+  11 Pro. Setup then does not ask for an edition.
 
 ```bash
 burnout write Win11_25H2_English_Arm64_v2.iso 3 --skip-hardware-checks --no-microsoft-account
 ```
 
-Setup shows the editions in the image, and you choose one there.
-The report counts the files, and names the check:
+With no `--edition`, Setup shows the editions in the image, and you choose
+one there. The report counts the files, and names the check:
 
 ```
 Wrote 963 files of 8.0 GB (7,988,543,418 bytes) to Samsung Flash Drive: 962 onto partition 1, FAT32, and 1 onto partition 2, exFAT.
