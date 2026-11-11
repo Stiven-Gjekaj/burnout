@@ -1388,7 +1388,7 @@ wrote is the reference.
 
 ### P12. Windows To Go
 
-**Size L. Depends on P8, P10 and P11. Done for UEFI in version 3.0.0.**
+**Size L. Depends on P8, P10 and P11. Done for UEFI in version 3.0.0, and for a BIOS after it.**
 
 `burnout write <image> <drive> --to-go --edition <n>` lays out the drive with
 an EFI system partition and an NTFS partition, applies the edition, and writes
@@ -1428,12 +1428,38 @@ Measured on 2026-11-11:
    before the write, as on a used drive. QEMU started it alone, and Windows
    came to its first-run setup.
 
+**A BIOS, after version 3.0.0.** `write --to-go --bios` makes the drive for
+a BIOS. Windows starts from a BIOS only on an MBR disk, so the table is an
+MBR with the boot code of P8, and the FAT32 system partition is active. The
+FAT32 code of P8 loads `bootmgr`, so no NTFS boot code is necessary.
+
+1. The reference: in Windows PE, `bcdboot C:\Windows /s S: /f BIOS` wrote
+   the store and the files for an MBR disk with an active FAT32 partition
+   at 1 MiB and Windows 11 Pro x64 at 512 MiB. An MBR partition device is
+   the 88 bytes of a GPT one, with the first byte of the partition at byte
+   32, the style 1 at byte 52 and the disk signature at byte 56. The
+   loaders are `.exe` files, the boot manager has no path, and the memory
+   test is a tool of the boot manager.
+2. `burnout_layout::bcd` builds that store. Each object and each element is
+   the same as the one of `bcdboot`, and a test compares them when the
+   reference is at hand.
+3. `mbr_with` writes an MBR with the boot code of Burnout and any
+   partitions.
+4. `to_go::plan` takes the firmware. For a BIOS it copies
+   `Windows\Boot\PCAT`, `Fonts` and `Resources` to `\Boot`, with `bootmgr`
+   and `BOOTNXT` at the root, as `bcdboot` did. The first and the last MiB
+   of the drive go to zero, so no old GPT stays.
+
+Measured on 2026-11-11: `burnout write --to-go --bios --edition Pro` put
+Windows 11 25H2 Pro of the x64 ISO onto a disk image of 40 GiB and checked it
+in 124 s. QEMU with SeaBIOS started the image alone as a SATA disk, with
+x64 emulated in TCG. The Windows logo came in 30 s, and the first-run setup
+in about 37 minutes.
+
 Not done:
 
-- A BIOS does not start the drive. The NTFS boot code of Windows and
-  `bootmgr` for a BIOS are the next step.
-- No test started an x64 drive. HVF runs Arm64 only, and x64 in TCG takes
-  hours for one start.
+- No test started an x64 drive through UEFI. HVF runs Arm64 only. The BIOS
+  start above shows that TCG takes about 37 minutes, so this test fits now.
 - An `install.esd` waits for LZMS, as P10 says.
 - A drive with sectors of 4096 bytes is refused.
 
