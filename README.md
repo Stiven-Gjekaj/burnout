@@ -446,6 +446,7 @@ the partition back against the image.
 Burnout applies one edition of the install image to an NTFS partition, and
 puts the boot files and a BCD store on an EFI system partition. The drive
 starts through UEFI, and Windows then shows its first-run setup.
+The image is a Windows ISO, or a WIM file that holds the edition.
 
 ```bash
 burnout write Win11_25H2_English_Arm64_v2.iso 3 --to-go --edition Pro
@@ -470,8 +471,16 @@ Limits:
 
 - The drive starts through UEFI only. A computer that starts through a BIOS
   does not start it.
-- The ISO must hold `sources/install.wim`. An `install.esd` uses LZMS, which
-  Burnout does not read.
+- An `install.esd` uses LZMS, which Burnout does not read. An ISO that the
+  Media Creation Tool made holds one. Burnout refuses it and prints the
+  command that exports the edition to a WIM file: DISM on Windows, and
+  `wimlib-imagex` on macOS and Linux. Give Burnout that file in the place of
+  the ISO:
+
+  ```bash
+  dism /Export-Image /SourceImageFile:D:\sources\install.esd /SourceIndex:6 /DestinationImageFile:install.wim /Compress:max
+  burnout write install.wim 3 --to-go --edition 1
+  ```
 - The drive must have sectors of 512 bytes.
 - Windows 11 25H2 Pro of the Arm64 ISO started from such a drive in a VM. No
   test started an x64 drive yet.
