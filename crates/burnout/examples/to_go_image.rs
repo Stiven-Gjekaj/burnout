@@ -1,7 +1,9 @@
 //! Write a drive of Windows To Go into an image file, with the code of
 //! `burnout write --to-go`, and read it back.
 //!
-//!     cargo run --release -p burnout --example to_go_image -- <iso or wim> <edition> <image> <GiB>
+//!     cargo run --release -p burnout --example to_go_image -- <iso or wim> <edition> <image> <GiB> [bios]
+//!
+//! With `bios` at the end, the drive is for a BIOS, as `--bios` makes it.
 //!
 //! A test that cannot attach a virtual disk, because it has no privilege,
 //! uses this. A VM then starts the image. The image is raw, with sectors of
@@ -21,15 +23,23 @@ use burnout_wim::{read_wim, Compression};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.len() != 4 {
-        eprintln!("usage: to_go_image <iso or wim> <edition> <image> <GiB>");
+    let firmware = match args.get(4).map(String::as_str) {
+        None => to_go::Firmware::Uefi,
+        Some("bios") => to_go::Firmware::Bios,
+        Some(_) => {
+            eprintln!("usage: to_go_image <iso or wim> <edition> <image> <GiB> [bios]");
+            return ExitCode::from(2);
+        }
+    };
+    if args.len() < 4 {
+        eprintln!("usage: to_go_image <iso or wim> <edition> <image> <GiB> [bios]");
         return ExitCode::from(2);
     }
     let Ok(gib) = args[3].parse::<u64>() else {
         eprintln!("to_go_image: {} is not a number of GiB", args[3]);
         return ExitCode::from(2);
     };
-    match run(&args[0], &args[1], Path::new(&args[2]), gib) {
+    match run(&args[0], &args[1], Path::new(&args[2]), gib, firmware) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("to_go_image: {e}");
@@ -38,7 +48,13 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(image: &str, edition: &str, out: &Path, gib: u64) -> Result<(), String> {
+fn run(
+    image: &str,
+    edition: &str,
+    out: &Path,
+    gib: u64,
+    firmware: to_go::Firmware,
+) -> Result<(), String> {
     let start = Instant::now();
     let err = |e: burnout_core::Error| e.to_string();
     let mut file = File::open(image).map_err(|e| format!("{image}: {e}"))?;
@@ -84,16 +100,8 @@ fn run(image: &str, edition: &str, out: &Path, gib: u64) -> Result<(), String> {
 
     let bytes = gib * 1024 * 1024 * 1024;
     let seed = format!("{}/{:?}", out.display(), std::time::SystemTime::now());
-    let plan = to_go::plan(
-        &mut reader,
-        &name,
-        &wim,
-        position,
-        bytes,
-        &seed,
-        to_go::Firmware::Uefi,
-    )
-    .map_err(err)?;
+    let plan =
+        to_go::plan(&mut reader, &name, &wim, position, bytes, &seed, firmware).map_err(err)?;
     println!(
         "{}: {} files and directories, {} more names, {} bytes of streams, {} boot files",
         plan.edition, plan.files, plan.links, plan.stream_bytes, plan.boot_files

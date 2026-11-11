@@ -183,7 +183,11 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
                 t.position,
                 chosen.size_bytes,
                 &seed(&chosen),
-                to_go::Firmware::Uefi,
+                if args.bios {
+                    to_go::Firmware::Bios
+                } else {
+                    to_go::Firmware::Uefi
+                },
             )?);
             None
         }
@@ -327,8 +331,12 @@ fn write_to_go_mode<A: DriveAccess>(
     );
     say!(
         json,
-        "Checked the GPT, each boot file through a new mount of its volume, and each stream of \
-         Windows against the SHA-1 that the install image names for it."
+        "Checked the {}, each boot file through a new mount of its volume, and each stream of \
+         Windows against the SHA-1 that the install image names for it.",
+        match plan.firmware {
+            to_go::Firmware::Uefi => "GPT",
+            to_go::Firmware::Bios => "MBR",
+        }
     );
     offline_note(json);
     eject_note(&ejected, json);
@@ -338,6 +346,13 @@ fn write_to_go_mode<A: DriveAccess>(
             Json::Object(vec![
                 ("event", Json::text("result")),
                 ("mode", Json::text("to_go")),
+                (
+                    "firmware",
+                    Json::text(match plan.firmware {
+                        to_go::Firmware::Uefi => "uefi",
+                        to_go::Firmware::Bios => "bios",
+                    }),
+                ),
                 ("edition", edition_object(&t.edition)),
                 ("files", Json::Number(plan.files as u64)),
                 ("stream_bytes", Json::Number(plan.stream_bytes)),
@@ -952,9 +967,14 @@ fn to_go_lines(t: &ToGoJob) -> Vec<String> {
             t.edition.index, plan.edition
         ),
         format!(
-            "    partition 1  FAT32, {}, {} boot files and the BCD store",
+            "    partition 1  FAT32, {}, {} boot files and the BCD store{}",
             human_size(to_go::EFI_SECTORS * 512),
-            plan.boot_files
+            plan.boot_files,
+            if plan.firmware == to_go::Firmware::Bios {
+                ", active"
+            } else {
+                ""
+            }
         ),
         format!(
             "    partition 2  NTFS, {}, {} files and directories, {} of streams",
@@ -962,7 +982,13 @@ fn to_go_lines(t: &ToGoJob) -> Vec<String> {
             grouped(plan.files as u64),
             human_size(plan.stream_bytes)
         ),
-        "The drive starts Windows through UEFI, with no Setup.".to_string(),
+        match plan.firmware {
+            to_go::Firmware::Uefi => "The drive starts Windows through UEFI, with no Setup.",
+            to_go::Firmware::Bios => {
+                "The drive has an MBR, and starts Windows through a BIOS, with no Setup."
+            }
+        }
+        .to_string(),
     ]
 }
 
@@ -1233,6 +1259,7 @@ mod tests {
             no_microsoft_account: false,
             edition: None,
             to_go: false,
+            bios: false,
         }
     }
 

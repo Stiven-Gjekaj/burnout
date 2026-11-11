@@ -133,6 +133,14 @@ pub struct WriteArgs {
         conflicts_with_all = ["partition", "mode", "skip_hardware_checks", "no_microsoft_account"]
     )]
     pub to_go: bool,
+
+    /// Make the drive of --to-go for a BIOS, in the place of UEFI.
+    ///
+    /// The drive then has an MBR and an active system partition, and a PC
+    /// with a BIOS, or with UEFI in its compatibility mode, starts it. An
+    /// Arm64 edition has no boot manager for a BIOS.
+    #[arg(long, requires = "to_go")]
+    pub bios: bool,
 }
 
 /// A mode that a person can choose.
@@ -160,6 +168,17 @@ mod tests {
         };
         assert!(w.to_go);
         assert_eq!(w.edition.as_deref(), Some("Pro"));
+    }
+
+    #[test]
+    fn bios_goes_with_to_go_only() {
+        let cli = parse(&["write", "w.iso", "2", "--to-go", "--edition", "6", "--bios"]).unwrap();
+        let Command::Write(w) = cli.command else {
+            panic!("write")
+        };
+        assert!(w.bios);
+        let e = parse(&["write", "w.iso", "2", "--bios"]).unwrap_err();
+        assert_eq!(e.kind(), clap::error::ErrorKind::MissingRequiredArgument);
     }
 
     #[test]
