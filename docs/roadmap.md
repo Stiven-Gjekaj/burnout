@@ -1353,9 +1353,22 @@ Done, in `crates/burnout-layout/src/ntfs/`, measured on 2026-11-11:
    `fsutil hardlink list` gave the three names, and the content read back
    through each name.
 
-Next: the security descriptors of a WIM edition, which need index blocks in
-`$Secure`, named streams, a record that its names do not fit, which needs
-an attribute list, and then each edition of the three ISOs.
+6. **Descriptors and named streams.** 500 descriptors, so that `$SDH` and
+   `$SII` need blocks, and a stream `Zone.Identifier`. `chkdsk` found no
+   problems, `icacls` showed the descriptor of a file, and the stream read
+   back.
+7. **A whole edition of Windows.** The example `wim_ntfs` of `burnout-wim`
+   applied Windows 11 25H2 Pro of the Arm64 ISO to a disk image of 32 GiB:
+   127,048 files and directories, 43,485 more names and 15.1 GB of data in
+   64 s. `chkdsk` said that Windows found no problems, after 168,192 file
+   records, 1,413 records with attribute lists, 231,634 index entries and 2
+   reparse records, and `cmd.exe` of the volume ran in Windows PE. Two faults
+   came out on the way, and each has its test now: an index node with its
+   end entry alone, and a hard-linked file with a name in both namespaces.
+
+Next: each edition of the three ISOs, a volume larger than 2 TiB of
+clusters is not needed, and then P12: the partitions, the boot files and the
+BCD store that start Windows from the drive.
 
 ### P12. Windows To Go
 
