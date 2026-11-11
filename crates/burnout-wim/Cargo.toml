@@ -15,6 +15,8 @@ categories = ["filesystem", "parser-implementations"]
 [dependencies]
 burnout-core.workspace = true
 
-# The example reads a WIM file inside an ISO, so it needs the ISO reader.
+# The examples read a WIM file inside an ISO, so they need the ISO reader,
+# and one writes an NTFS volume with the layout crate.
 [dev-dependencies]
 burnout-iso.workspace = true
+burnout-layout.workspace = true
