@@ -60,7 +60,7 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "burnout"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "burnout-core",
  "burnout-iso",
@@ -76,18 +76,18 @@ dependencies = [
 
 [[package]]
 name = "burnout-core"
-version = "2.0.0"
+version = "2.1.0"
 
 [[package]]
 name = "burnout-iso"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "burnout-core",
 ]
 
 [[package]]
 name = "burnout-layout"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "burnout-core",
  "burnout-iso",
@@ -96,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "burnout-wim"
-version = "2.0.0"
+version = "2.1.0"
 dependencies = [
  "burnout-core",
  "burnout-iso",
