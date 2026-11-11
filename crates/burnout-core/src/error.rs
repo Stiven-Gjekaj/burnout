@@ -228,6 +228,46 @@ pub enum Error {
         /// What is wrong with the table.
         detail: String,
     },
+    /// The drive holds no partition table, so it has no partition to write.
+    NoPartitionTable {
+        /// The drive, as the list names it.
+        drive: String,
+    },
+    /// The table of the drive has no partition with this number.
+    NoSuchPartition {
+        /// The drive, as the list names it.
+        drive: String,
+        /// The number that the person gave.
+        number: u32,
+        /// The numbers that the table holds, as a person reads them.
+        numbers: String,
+    },
+    /// The partition is an extended partition of an MBR, which holds other
+    /// partitions.
+    ExtendedPartition {
+        /// The number of the partition.
+        number: u32,
+    },
+    /// The image does not fit in the partition.
+    PartitionTooSmallForImage {
+        /// The number of the partition.
+        number: u32,
+        /// The size of the image in bytes.
+        image_bytes: u64,
+        /// The size of the partition in bytes.
+        partition_bytes: u64,
+    },
+    /// The partition is not where it was when the person confirmed it.
+    PartitionChanged {
+        /// The number of the partition.
+        number: u32,
+    },
+    /// A Windows ISO cannot go into one partition, because Windows mode lays
+    /// out the whole drive.
+    WindowsInPartition {
+        /// The image, as the person gave it.
+        path: String,
+    },
 }
 
 /// The way past a lock switch, as a literal that `concat!` takes.
@@ -473,6 +513,57 @@ impl fmt::Display for Error {
                      with the tools of the host, or write the whole drive"
                 )
             }
+            Error::NoPartitionTable { drive } => {
+                write!(
+                    f,
+                    "{drive} holds no partition table, so it has no partition to write. Write \
+                     the whole drive, with no --partition"
+                )
+            }
+            Error::NoSuchPartition {
+                drive,
+                number,
+                numbers,
+            } => {
+                write!(
+                    f,
+                    "{drive} holds no partition {number}. Its partitions are {numbers}"
+                )
+            }
+            Error::ExtendedPartition { number } => {
+                write!(
+                    f,
+                    "partition {number} is an extended partition, and a write to it would erase \
+                     every partition inside it. Burnout writes a primary partition only"
+                )
+            }
+            Error::PartitionTooSmallForImage {
+                number,
+                image_bytes,
+                partition_bytes,
+            } => {
+                write!(
+                    f,
+                    "the image holds {}, and partition {number} holds {}. Use a larger \
+                     partition",
+                    size_column(*image_bytes),
+                    size_column(*partition_bytes)
+                )
+            }
+            Error::PartitionChanged { number } => {
+                write!(
+                    f,
+                    "partition {number} changed after the confirmation, so Burnout wrote \
+                     nothing. Run the command again"
+                )
+            }
+            Error::WindowsInPartition { path } => {
+                write!(
+                    f,
+                    "{path} is a Windows ISO, and Windows mode lays out the whole drive. Write it \
+                     with no --partition"
+                )
+            }
             Error::VolumeFull {
                 file_system,
                 needed_bytes,
@@ -589,6 +680,12 @@ impl Error {
             Error::PartitionTooSmall { .. } => "partition_too_small",
             Error::NeedsLargerDrive { .. } => "needs_larger_drive",
             Error::VolumeFull { .. } => "volume_full",
+            Error::WindowsInPartition { .. } => "windows_in_partition",
+            Error::PartitionChanged { .. } => "partition_changed",
+            Error::PartitionTooSmallForImage { .. } => "partition_too_small_for_image",
+            Error::ExtendedPartition { .. } => "extended_partition",
+            Error::NoSuchPartition { .. } => "no_such_partition",
+            Error::NoPartitionTable { .. } => "no_partition_table",
             Error::TableDamaged { .. } => "table_damaged",
         }
     }
@@ -1045,6 +1142,20 @@ mod tests {
                 free_bytes: 1,
             },
             Error::TableDamaged { detail: text() },
+            Error::NoPartitionTable { drive: text() },
+            Error::NoSuchPartition {
+                drive: text(),
+                number: 1,
+                numbers: text(),
+            },
+            Error::ExtendedPartition { number: 1 },
+            Error::PartitionTooSmallForImage {
+                number: 1,
+                image_bytes: 2,
+                partition_bytes: 1,
+            },
+            Error::PartitionChanged { number: 1 },
+            Error::WindowsInPartition { path: text() },
         ];
         // A new kind of error does not compile here until it is in the list
         // above, so it cannot miss the test below.
@@ -1079,7 +1190,13 @@ mod tests {
                 | Error::PartitionTooSmall { .. }
                 | Error::NeedsLargerDrive { .. }
                 | Error::VolumeFull { .. }
-                | Error::TableDamaged { .. } => {}
+                | Error::TableDamaged { .. }
+                | Error::NoPartitionTable { .. }
+                | Error::NoSuchPartition { .. }
+                | Error::ExtendedPartition { .. }
+                | Error::PartitionTooSmallForImage { .. }
+                | Error::PartitionChanged { .. }
+                | Error::WindowsInPartition { .. } => {}
             }
         }
         all

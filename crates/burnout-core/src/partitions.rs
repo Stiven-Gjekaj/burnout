@@ -223,6 +223,54 @@ fn read_gpt(head: &[u8], sector_size: u32, drive_bytes: u64) -> Result<Partition
     })
 }
 
+/// The partition `number` of `table`, checked for a write of `image_bytes`.
+///
+/// `drive` names the drive in a message. A drive with no table, a number that
+/// the table does not hold, an extended partition, and a partition smaller
+/// than the image are each refused.
+pub fn choose_partition(
+    table: Option<&PartitionTable>,
+    number: u32,
+    drive: &str,
+    image_bytes: u64,
+) -> Result<Partition> {
+    let table = table.ok_or_else(|| Error::NoPartitionTable {
+        drive: drive.to_string(),
+    })?;
+    let partition = table
+        .partition(number)
+        .ok_or_else(|| Error::NoSuchPartition {
+            drive: drive.to_string(),
+            number,
+            numbers: numbers_text(table),
+        })?;
+    if partition.kind.is_extended() {
+        return Err(Error::ExtendedPartition { number });
+    }
+    if image_bytes > partition.bytes {
+        return Err(Error::PartitionTooSmallForImage {
+            number,
+            image_bytes,
+            partition_bytes: partition.bytes,
+        });
+    }
+    Ok(partition.clone())
+}
+
+/// The numbers of a table as a person reads them: "1, 2 and 4".
+fn numbers_text(table: &PartitionTable) -> String {
+    let n: Vec<String> = table
+        .partitions
+        .iter()
+        .map(|p| p.number.to_string())
+        .collect();
+    match n.len() {
+        0 => "none".to_string(),
+        1 => n[0].clone(),
+        _ => format!("{} and {}", n[..n.len() - 1].join(", "), n[n.len() - 1]),
+    }
+}
+
 fn check_inside(p: &Partition, drive_bytes: u64) -> Result<()> {
     if p.bytes == 0 || p.first_byte.saturating_add(p.bytes) > drive_bytes {
         return Err(damaged(&format!(
@@ -467,6 +515,33 @@ mod tests {
         let head = mbr(&[(PROTECTIVE, 1, 1000)]);
         let e = read_table(&head, 512, 64 * MIB).unwrap_err();
         assert!(e.to_string().contains("no GPT header"), "{e}");
+    }
+
+    #[test]
+    fn a_partition_is_chosen_by_its_number_and_checked() {
+        let head = mbr(&[(0x0C, 2048, 2048), (0x0F, 4096, 4096), (0x83, 8192, 2048)]);
+        let t = read_table(&head, 512, 64 * MIB).unwrap();
+        let p = choose_partition(t.as_ref(), 3, "SanDisk", MIB).unwrap();
+        assert_eq!(p.first_byte, 8192 * 512);
+
+        let e = choose_partition(t.as_ref(), 4, "SanDisk", 1).unwrap_err();
+        assert_eq!(
+            e.to_string(),
+            "SanDisk holds no partition 4. Its partitions are 1, 2 and 3"
+        );
+        let e = choose_partition(t.as_ref(), 2, "SanDisk", 1).unwrap_err();
+        assert_eq!(e.kind(), "extended_partition");
+        let e = choose_partition(t.as_ref(), 1, "SanDisk", MIB + 1).unwrap_err();
+        assert_eq!(e.kind(), "partition_too_small_for_image");
+        let e = choose_partition(None, 1, "SanDisk", 1).unwrap_err();
+        assert_eq!(e.kind(), "no_partition_table");
+    }
+
+    #[test]
+    fn an_image_that_fills_the_partition_exactly_fits() {
+        let head = mbr(&[(0x0C, 2048, 2048)]);
+        let t = read_table(&head, 512, 64 * MIB).unwrap();
+        assert!(choose_partition(t.as_ref(), 1, "d", MIB).is_ok());
     }
 
     #[test]
