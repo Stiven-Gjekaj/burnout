@@ -19,6 +19,7 @@ mod lzx;
 mod resource;
 pub mod sha1;
 mod xml;
+mod xpress;
 
 use std::io::{Read, Seek, SeekFrom};
 

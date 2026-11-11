@@ -34,3 +34,5 @@ PY
 
 wimlib-imagex capture "$tree" "$here/lzx-32k.wim" "Test" --compress=lzx --chunk-size=32768 --no-acls --norpfix >/dev/null
 wimlib-imagex capture "$tree" "$here/lzx-64k.wim" "Test" --compress=lzx --chunk-size=65536 --no-acls --norpfix >/dev/null
+wimlib-imagex capture "$tree" "$here/xpress-32k.wim" "Test" --compress=xpress --chunk-size=32768 --no-acls --norpfix >/dev/null
+wimlib-imagex capture "$tree" "$here/xpress-64k.wim" "Test" --compress=xpress --chunk-size=65536 --no-acls --norpfix >/dev/null

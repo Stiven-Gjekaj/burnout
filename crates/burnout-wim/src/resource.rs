@@ -10,13 +10,14 @@ use std::io::{Read, Seek, SeekFrom};
 use burnout_core::{Error, Result};
 
 use crate::header::{Compression, Header, Resource};
-use crate::lzx;
+use crate::{lzx, xpress};
 
 /// The decompressor of the chunks, and what it needs.
 #[derive(Clone, Copy)]
 enum Decoder {
     /// LZX, with the order of its window.
     Lzx(u32),
+    Xpress,
 }
 
 /// The largest resource that this reader holds in memory at once.
@@ -81,6 +82,7 @@ fn decompress_chunks(
             lzx::window_order(header.chunk_bytes)
                 .ok_or_else(|| format!("LZX with chunks of {} bytes", header.chunk_bytes))?,
         ),
+        Compression::Xpress => Decoder::Xpress,
         Compression::None => {
             return Err(
                 "the resource is compressed, and the WIM header names no compression".to_string(),
@@ -127,6 +129,7 @@ fn decompress_chunks(
         } else {
             match decoder {
                 Decoder::Lzx(order) => lzx::decompress(input, target, order),
+                Decoder::Xpress => xpress::decompress(input, target),
             }
             .map_err(|e| format!("chunk {i}: {e}"))?;
         }
