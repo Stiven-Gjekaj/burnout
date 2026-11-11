@@ -109,11 +109,12 @@ choice for the person.
 
 ---
 
-## macOS install media is a non-goal
+## macOS install media is not planned
 
 Linux and BSD ship a hybrid ISO, which is already a bootable disk image.
 macOS is a third category, and it fits neither mode.
-Burnout does not make a macOS installer, and it is not a thing to add later.
+Burnout does not make a macOS installer. The roadmap keeps it as a later
+maybe, and the reasons below say what it would cost.
 
 **Apple ships no ISO.**
 You get `Install macOS <name>.app` from the App Store, or an
@@ -409,7 +410,7 @@ that refuses a machine with no TPM 2.0 never appears.
 | Windows mode, UEFI boot | Windows To Go |
 | The mode chosen from the image | A write to one partition |
 | `list` and `write` | A drive that holds many images |
-| Refusing a macOS installer clearly | macOS install media, ever |
+| Refusing a macOS installer clearly | macOS install media |
 | The `autounattend.xml` options | A graphical interface |
 | Verification, named per mode | |
 | Elevation on all three hosts | |
@@ -426,8 +427,10 @@ download come in.
 It applies an image to a disk instead of copying an installer, so it is a
 third write mode and not an option on the second one.
 
-**macOS install media does not wait.**
-It is a non-goal, and the section above says why.
+**macOS install media waits longest.**
+The section above says why. The roadmap keeps it, with a write to one
+partition, a graphical interface and a drive that holds many images, in
+[Later, maybe](roadmap.md#later-maybe).
 
 ---
 
