@@ -426,11 +426,11 @@ download come in.
 **A write to one partition came in version 2.**
 [P9 in the roadmap](roadmap.md#p9-a-write-to-one-partition) does it.
 
-**Windows To Go waits.**
+**Windows To Go came in version 3, for UEFI.**
 It applies an image to a disk instead of copying an installer, so it is a
 third write mode and not an option on the second one.
 [P10 to P12 in the roadmap](roadmap.md#windows-to-go-p10-to-p12-toward-version-3)
-plan it for version 3.
+do it.
 
 **macOS install media waits longest.**
 The section above says why. The roadmap keeps it, with a graphical interface and a drive that holds
