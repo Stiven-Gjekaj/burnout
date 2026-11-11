@@ -152,6 +152,14 @@ pub fn unattend_xml(u: &Unattend) -> String {
         x.push_str("            </MetaData>\n");
     }
     x.push_str("          </InstallFrom>\n        </OSImage>\n      </ImageInstall>\n");
+    // Windows 10 Setup reads the key from this file once the file names the
+    // image, and stops with "Windows cannot read the <ProductKey> setting"
+    // when it finds none. An empty key that Setup always asks for gives the
+    // page that Setup shows with no file, with "I don't have a product key"
+    // on it. Measured with Windows 10 22H2 x64 in QEMU.
+    x.push_str("      <UserData>\n        <ProductKey>\n");
+    x.push_str("          <Key></Key>\n          <WillShowUI>Always</WillShowUI>\n");
+    x.push_str("        </ProductKey>\n      </UserData>\n");
     x.push_str("    </component>\n  </settings>\n");
     if u.no_microsoft_account {
         // The key goes in before the first-run setup starts, in the pass
@@ -240,7 +248,12 @@ mod tests {
         assert!(!xml.contains("MetaData"));
         assert!(!xml.contains("LabConfig"));
         assert!(!xml.contains("oobeSystem"));
-        assert!(!xml.contains("ProductKey"), "Setup asks for the key");
+        assert!(
+            xml.contains(
+                "<ProductKey>\n          <Key></Key>\n          <WillShowUI>Always</WillShowUI>"
+            ),
+            "Setup asks for the key itself"
+        );
         let names = elements(&xml);
         assert_eq!(
             names
