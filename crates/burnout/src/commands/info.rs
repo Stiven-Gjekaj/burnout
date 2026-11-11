@@ -148,7 +148,9 @@ fn info_lines(info: &Info) -> Vec<String> {
             lines.push(edition_line(e, width));
         }
         lines.push(String::new());
-        lines.push("Setup shows these editions, and you choose one there.".to_string());
+        lines.push(
+            "Setup asks for one of these editions, or write --edition chooses one.".to_string(),
+        );
     }
     lines
 }
