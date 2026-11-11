@@ -19,6 +19,7 @@ mod dot_entries;
 mod drive;
 mod exfat;
 mod fat32;
+pub mod hive;
 mod manifest;
 mod mbr;
 pub mod ntfs;
