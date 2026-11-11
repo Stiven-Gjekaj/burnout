@@ -18,7 +18,7 @@ pub(crate) mod file_attribute {
 
 /// The four times of a file, in 100 ns units since 1601, as Windows counts.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct Times {
+pub struct Times {
     pub creation: u64,
     pub modification: u64,
     /// The time that the record of the file changed.
@@ -28,7 +28,7 @@ pub(crate) struct Times {
 
 impl Times {
     /// The same time for each of the four.
-    pub(crate) fn all(time: u64) -> Times {
+    pub fn all(time: u64) -> Times {
         Times {
             creation: time,
             modification: time,

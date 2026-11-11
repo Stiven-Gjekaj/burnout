@@ -4,7 +4,7 @@ use crate::ntfs::record::RECORD_BYTES;
 
 /// The shape of a volume, as the boot sector gives it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Geometry {
+pub struct Geometry {
     pub sector_bytes: u32,
     pub cluster_bytes: u32,
     /// The sectors of the partition. The last one holds the copy of the boot

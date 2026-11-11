@@ -20,7 +20,7 @@ use crate::ntfs::secure::{secure, FIRST_ID};
 use crate::ntfs::split::split;
 use crate::ntfs::values::{file_attribute as fa, standard_information, FileName, Namespace, Times};
 
-pub(crate) const CLUSTER: u64 = 4096;
+pub const CLUSTER: u64 = 4096;
 const SECTOR: u64 = 512;
 const INDEX_BLOCK: usize = 4096;
 /// The records that the master file table starts with.
@@ -47,7 +47,7 @@ const FLAG_EXTEND_FILE: u16 = 0x0004;
 
 /// What the person chooses for a new volume.
 #[derive(Clone, Debug)]
-pub(crate) struct NtfsOptions {
+pub struct NtfsOptions {
     pub label: String,
     pub serial: u64,
     /// The time of each file, in 100 ns units since 1601.
@@ -56,7 +56,7 @@ pub(crate) struct NtfsOptions {
 
 /// A file or a directory to put on a new volume.
 #[derive(Clone, Debug)]
-pub(crate) struct NewFile {
+pub struct NewFile {
     /// The directory that holds it, as an index into the list, or `None`
     /// for the root. A directory comes before what it holds.
     pub parent: Option<usize>,
@@ -79,7 +79,7 @@ pub(crate) struct NewFile {
 
 /// A new volume: the bytes to write, each at its byte of the volume.
 #[derive(Clone, Debug)]
-pub(crate) struct Formatted {
+pub struct Formatted {
     pub geometry: Geometry,
     pub writes: Vec<(u64, Vec<u8>)>,
     /// The clusters of the volume, and the first one that no file holds.
@@ -395,7 +395,7 @@ fn quota_entries(time: u64) -> (Vec<Entry>, Vec<Entry>) {
 
 /// Lay out an empty volume on a partition of `partition_bytes`, which starts
 /// at sector `hidden_sectors` of the drive.
-pub(crate) fn format(
+pub fn format(
     partition_bytes: u64,
     hidden_sectors: u32,
     options: &NtfsOptions,

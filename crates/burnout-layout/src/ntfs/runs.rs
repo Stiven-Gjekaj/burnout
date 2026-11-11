@@ -14,7 +14,7 @@
 /// One run: its first cluster, or `None` for a sparse run, and its count of
 /// clusters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Run {
+pub struct Run {
     pub lcn: Option<u64>,
     pub clusters: u64,
 }

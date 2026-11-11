@@ -21,7 +21,7 @@ mod exfat;
 mod fat32;
 mod manifest;
 mod mbr;
-mod ntfs;
+pub mod ntfs;
 mod plan;
 mod stream;
 #[cfg(test)]
