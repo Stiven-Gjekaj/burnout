@@ -72,6 +72,8 @@ pub(crate) struct NewFile {
     pub links: Vec<(Option<usize>, String)>,
     /// The reparse data, from the tag on, for a reparse point.
     pub reparse: Option<Vec<u8>>,
+    /// The named streams of the file, each with its size.
+    pub streams: Vec<(String, u64)>,
 }
 
 /// A new volume: the bytes to write, each at its byte of the volume.
@@ -85,6 +87,9 @@ pub(crate) struct Formatted {
     /// The clusters of the data of each new file, in the order of the list.
     /// A directory and an empty file have none.
     pub placements: Vec<Option<Run>>,
+    /// The clusters of each named stream of each new file, in the order
+    /// of its streams. An empty stream has none.
+    pub stream_placements: Vec<Vec<Option<Run>>>,
 }
 
 /// Hands out clusters from the start of the volume.
@@ -636,6 +641,7 @@ pub(crate) fn format(
     let mut user: Vec<File> = Vec::with_capacity(new_files.len());
     let mut placements = Vec::with_capacity(new_files.len());
     let mut reparse_entries: Vec<Entry> = Vec::new();
+    let mut stream_placements = Vec::with_capacity(new_files.len());
     let record_of = |p: Option<usize>| p.map_or(ROOT, |p| FIRST_FREE_RECORD + p as u64);
     for (i, f) in new_files.iter().enumerate() {
         let names =
@@ -676,6 +682,24 @@ pub(crate) fn format(
             )
         };
         let mut others = others;
+        let mut runs = Vec::with_capacity(f.streams.len());
+        for (name, size) in &f.streams {
+            if name.is_empty() || name.encode_utf16().count() > 255 {
+                return Err(format!(
+                    "the stream {name:?} of {:?} does not fit NTFS",
+                    f.name
+                ));
+            }
+            if *size == 0 {
+                others.push(Attribute::resident(kind::DATA, name, Vec::new()));
+                runs.push(None);
+            } else {
+                let run = clusters.take(clusters_for(*size))?;
+                others.push(non_resident(kind::DATA, name, run, *size));
+                runs.push(Some(run));
+            }
+        }
+        stream_placements.push(runs);
         if let Some(data) = &f.reparse {
             if data.len() < 8 {
                 return Err(format!(
@@ -920,6 +944,7 @@ pub(crate) fn format(
         clusters: total,
         first_free_cluster: used,
         placements,
+        stream_placements,
     })
 }
 
@@ -1031,6 +1056,7 @@ mod tests {
             security: None,
             links: Vec::new(),
             reparse: None,
+            streams: Vec::new(),
         }
     }
 
