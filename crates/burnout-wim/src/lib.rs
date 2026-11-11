@@ -31,7 +31,7 @@ pub use header::{Compression, Header, Resource, HEADER_BYTES};
 pub use metadata::{
     parse_metadata, Dentry, ExtraStream, Metadata, ATTRIBUTE_DIRECTORY, ATTRIBUTE_REPARSE_POINT,
 };
-pub use resource::read_resource;
+pub use resource::{copy_resource, read_resource};
 
 /// The largest XML that Burnout reads. An image with many editions holds
 /// some tens of KB.

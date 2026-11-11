@@ -5,7 +5,7 @@
 //! table. An entry has 4 bytes, or 8 when the resource holds more than
 //! 4 GiB. A chunk that compression did not make smaller is stored as it is.
 
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 
 use burnout_core::{Error, Result};
 
@@ -20,7 +20,8 @@ enum Decoder {
     Xpress,
 }
 
-/// The largest resource that this reader holds in memory at once.
+/// The largest resource that `read_resource` holds in memory at once.
+/// `copy_resource` takes any size.
 const MEMORY_LIMIT: u64 = 1 << 32;
 
 /// Read and decompress `resource` of the WIM file that `reader` gives.
@@ -31,110 +32,126 @@ pub fn read_resource<R: Read + Seek>(
     resource: &Resource,
     name: &str,
 ) -> Result<Vec<u8>> {
-    let fault = |detail: String| Error::Image {
-        path: name.to_string(),
-        detail,
-    };
-    let at = resource.offset;
-    if resource.flags & Resource::SOLID != 0 {
-        return Err(fault(format!(
-            "the resource at byte {at} is solid, and Burnout does not read a solid resource yet"
-        )));
-    }
     if resource.original_bytes > MEMORY_LIMIT {
-        return Err(fault(format!(
-            "the resource at byte {at} holds {} bytes, more than Burnout reads at once",
-            resource.original_bytes
-        )));
+        return Err(Error::Image {
+            path: name.to_string(),
+            detail: format!(
+                "the resource at byte {} holds {} bytes, more than Burnout reads at once",
+                resource.offset, resource.original_bytes
+            ),
+        });
     }
-    let mut stored = vec![0u8; resource.stored_bytes as usize];
-    reader.seek(SeekFrom::Start(at))?;
-    reader.read_exact(&mut stored).map_err(|_| {
-        fault(format!(
-            "it ends before the end of the resource at byte {at}"
-        ))
-    })?;
-    if !resource.is_compressed() {
-        if resource.stored_bytes != resource.original_bytes {
-            return Err(fault(format!(
-                "the resource at byte {at} is not compressed, and its two sizes differ"
-            )));
-        }
-        return Ok(stored);
-    }
-    decompress_chunks(&stored, header, resource.original_bytes)
-        .map_err(|e| fault(format!("the resource at byte {at}: {e}")))
+    let mut out = Vec::with_capacity(resource.original_bytes as usize);
+    copy_resource(reader, header, resource, name, &mut out)?;
+    Ok(out)
 }
 
-/// The bytes of a compressed resource, from its stored bytes.
-fn decompress_chunks(
-    stored: &[u8],
+/// Decompress `resource` of the WIM file that `reader` gives into `out`, one
+/// chunk at a time, so a resource of any size takes the memory of one chunk.
+/// `name` names the file in an error.
+pub fn copy_resource<R: Read + Seek, W: Write>(
+    reader: &mut R,
     header: &Header,
-    original: u64,
-) -> std::result::Result<Vec<u8>, String> {
-    let chunk = header.chunk_bytes as u64;
-    if chunk == 0 {
-        return Err("the WIM header gives chunks of 0 bytes".to_string());
-    }
-    let compression = header.compression();
-    let decoder = match compression {
-        Compression::Lzx => Decoder::Lzx(
-            lzx::window_order(header.chunk_bytes)
-                .ok_or_else(|| format!("LZX with chunks of {} bytes", header.chunk_bytes))?,
-        ),
-        Compression::Xpress => Decoder::Xpress,
-        Compression::None => {
-            return Err(
-                "the resource is compressed, and the WIM header names no compression".to_string(),
-            )
-        }
-        other => {
-            return Err(format!(
-                "Burnout does not read {} compression yet",
-                other.name()
-            ))
-        }
+    resource: &Resource,
+    name: &str,
+    out: &mut W,
+) -> Result<()> {
+    let at = resource.offset;
+    let fault = |detail: String| Error::Image {
+        path: name.to_string(),
+        detail: format!("the resource at byte {at}: {detail}"),
     };
-    let count = original.div_ceil(chunk) as usize;
-    let entry = if original > u32::MAX as u64 { 8 } else { 4 };
-    let table = (count.saturating_sub(1)) * entry;
-    if table > stored.len() {
-        return Err("its table of chunks is larger than the resource".to_string());
+    let short = || fault("the file ends before the resource does".to_string());
+    if resource.flags & Resource::SOLID != 0 {
+        return Err(fault(
+            "it is solid, and Burnout does not read a solid resource yet".to_string(),
+        ));
     }
-    let data = &stored[table..];
-    let mut starts = Vec::with_capacity(count + 1);
+    reader.seek(SeekFrom::Start(at))?;
+    if !resource.is_compressed() {
+        if resource.stored_bytes != resource.original_bytes {
+            return Err(fault(
+                "it is not compressed, and its two sizes differ".to_string(),
+            ));
+        }
+        let copied = io::copy(&mut reader.take(resource.stored_bytes), out)?;
+        if copied != resource.stored_bytes {
+            return Err(short());
+        }
+        return Ok(());
+    }
+
+    let decoder = decoder(header).map_err(fault)?;
+    let chunk = header.chunk_bytes as u64;
+    let original = resource.original_bytes;
+    let count = original.div_ceil(chunk);
+    let entry: u64 = if original > u32::MAX as u64 { 8 } else { 4 };
+    let table = count.saturating_sub(1) * entry;
+    if table > resource.stored_bytes {
+        return Err(fault(
+            "its table of chunks is larger than the resource".to_string(),
+        ));
+    }
+    let data_bytes = resource.stored_bytes - table;
+    let mut table_bytes = vec![0u8; table as usize];
+    reader.read_exact(&mut table_bytes).map_err(|_| short())?;
+    let mut starts = Vec::with_capacity(count as usize + 1);
     starts.push(0u64);
-    for e in stored[..table].chunks_exact(entry) {
+    for e in table_bytes.chunks_exact(entry as usize) {
         starts.push(match entry {
             4 => u32::from_le_bytes(e.try_into().unwrap()) as u64,
             _ => u64::from_le_bytes(e.try_into().unwrap()),
         });
     }
-    starts.push(data.len() as u64);
+    starts.push(data_bytes);
 
-    let mut out = vec![0u8; original as usize];
-    for i in 0..count {
+    let mut input = Vec::new();
+    let mut output = vec![0u8; chunk as usize];
+    for i in 0..count as usize {
         let (from, to) = (starts[i], starts[i + 1]);
-        if from > to || to > data.len() as u64 {
-            return Err(format!("chunk {i} has a place that its table cannot give"));
+        if from > to || to > data_bytes {
+            return Err(fault(format!(
+                "chunk {i} has a place that its table cannot give"
+            )));
         }
-        let input = &data[from as usize..to as usize];
-        let first = i * chunk as usize;
-        let size = (original - first as u64).min(chunk) as usize;
-        let target = &mut out[first..first + size];
+        input.resize((to - from) as usize, 0);
+        reader.read_exact(&mut input).map_err(|_| short())?;
+        let size = (original - i as u64 * chunk).min(chunk) as usize;
+        let target = &mut output[..size];
         if input.len() == size {
-            target.copy_from_slice(input);
+            target.copy_from_slice(&input);
         } else if input.len() > size {
-            return Err(format!("chunk {i} is stored larger than it is"));
+            return Err(fault(format!("chunk {i} is stored larger than it is")));
         } else {
             match decoder {
-                Decoder::Lzx(order) => lzx::decompress(input, target, order),
-                Decoder::Xpress => xpress::decompress(input, target),
+                Decoder::Lzx(order) => lzx::decompress(&input, target, order),
+                Decoder::Xpress => xpress::decompress(&input, target),
             }
-            .map_err(|e| format!("chunk {i}: {e}"))?;
+            .map_err(|e| fault(format!("chunk {i}: {e}")))?;
         }
+        out.write_all(target)?;
     }
-    Ok(out)
+    Ok(())
+}
+
+/// The decompressor that the header names.
+fn decoder(header: &Header) -> std::result::Result<Decoder, String> {
+    if header.chunk_bytes == 0 {
+        return Err("the WIM header gives chunks of 0 bytes".to_string());
+    }
+    match header.compression() {
+        Compression::Lzx => lzx::window_order(header.chunk_bytes)
+            .map(Decoder::Lzx)
+            .ok_or_else(|| format!("LZX with chunks of {} bytes", header.chunk_bytes)),
+        Compression::Xpress => Ok(Decoder::Xpress),
+        Compression::None => {
+            Err("it is compressed, and the WIM header names no compression".to_string())
+        }
+        other => Err(format!(
+            "Burnout does not read {} compression yet",
+            other.name()
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -188,10 +205,7 @@ mod tests {
         let cases = [
             (resource(0, 4, 4, Resource::SOLID), "is solid"),
             (resource(0, 4, 5, 0), "two sizes differ"),
-            (
-                resource(0, 100, 100, 0),
-                "ends before the end of the resource",
-            ),
+            (resource(0, 100, 100, 0), "ends before the resource does"),
             (
                 resource(0, 4, 70000, Resource::COMPRESSED),
                 "larger than the resource",
