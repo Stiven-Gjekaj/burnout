@@ -467,10 +467,22 @@ Burnout writes NTFS, the boot files and the BCD store itself, and calls no
 tool of Windows. The check reads back the GPT, each boot file, and each
 stream of Windows against the SHA-1 that the install image names for it.
 
+`--bios` makes the drive for a BIOS, or for UEFI in its compatibility mode,
+in the place of UEFI:
+
+```bash
+burnout write Win11_25H2_English_x64_v2.iso 3 --to-go --bios --edition Pro
+```
+
+The drive then has an MBR with the boot code of Burnout, and partition 1 is
+active. It holds `bootmgr` and `\Boot\BCD`, as `bcdboot /f BIOS` puts them.
+One drive starts through UEFI or through a BIOS, and not both: Windows
+starts from a BIOS only on an MBR disk, and from UEFI on this layout only on
+a GPT disk.
+
 Limits:
 
-- The drive starts through UEFI only. A computer that starts through a BIOS
-  does not start it.
+- An Arm64 edition has no boot manager for a BIOS, so `--bios` refuses it.
 - An `install.esd` uses LZMS, which Burnout does not read. An ISO that the
   Media Creation Tool made holds one. Burnout refuses it and prints the
   command that exports the edition to a WIM file: DISM on Windows, and
@@ -482,8 +494,9 @@ Limits:
   burnout write install.wim 3 --to-go --edition 1
   ```
 - The drive must have sectors of 512 bytes.
-- Windows 11 25H2 Pro of the Arm64 ISO started from such a drive in a VM. No
-  test started an x64 drive yet.
+- Measured in VMs: Windows 11 25H2 Pro of the Arm64 ISO started through
+  UEFI, and Windows 11 25H2 Pro of the x64 ISO started through a BIOS. No
+  test started an x64 drive through UEFI yet.
 
 ### A write that stops
 
