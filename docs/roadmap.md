@@ -1366,9 +1366,8 @@ Done, in `crates/burnout-layout/src/ntfs/`, measured on 2026-11-11:
    came out on the way, and each has its test now: an index node with its
    end entry alone, and a hard-linked file with a name in both namespaces.
 
-Next: each edition of the three ISOs, a volume larger than 2 TiB of
-clusters is not needed, and then P12: the partitions, the boot files and the
-BCD store that start Windows from the drive.
+Next: each edition of the three ISOs, and then P12: the partitions, the boot
+files and the BCD store that start Windows from the drive.
 
 ### P12. Windows To Go
 
