@@ -68,6 +68,10 @@ pub(crate) struct NewFile {
     pub times: Times,
     /// The descriptor, as an index into the descriptors of the files.
     pub security: Option<usize>,
+    /// The other names of the file, each in its directory: hard links.
+    pub links: Vec<(Option<usize>, String)>,
+    /// The reparse data, from the tag on, for a reparse point.
+    pub reparse: Option<Vec<u8>>,
 }
 
 /// A new volume: the bytes to write, each at its byte of the volume.
@@ -149,10 +153,20 @@ struct File {
     /// The sizes that its file name gives.
     sizes: (u64, u64),
     others: Vec<Attribute>,
+    /// Its other names, each with the record of its directory.
+    extra_names: Vec<(u64, String)>,
+    /// The tag of a reparse point, or 0.
+    reparse_tag: u32,
 }
 
 impl File {
     fn file_name(&self) -> FileName {
+        self.file_name_as(self.parent, &self.name, self.namespace)
+    }
+
+    /// The file name with this parent and name, with the sizes and the
+    /// attributes of the file.
+    fn file_name_as(&self, parent: u64, name: &str, namespace: Namespace) -> FileName {
         let times = self.times;
         let name_attributes = self.attributes
             | if self.flags & FLAG_DIRECTORY != 0 {
@@ -161,14 +175,14 @@ impl File {
                 0
             };
         FileName {
-            parent: reference(self.parent, sequence(self.parent)),
+            parent: reference(parent, sequence(parent)),
             times,
             allocated: self.sizes.0,
             size: self.sizes.1,
             attributes: name_attributes,
-            reparse_or_ea: 0,
-            name: utf16(&self.name),
-            namespace: self.namespace,
+            reparse_or_ea: self.reparse_tag,
+            name: utf16(name),
+            namespace,
         }
     }
 
@@ -182,12 +196,16 @@ impl File {
             ),
             Attribute::resident(kind::FILE_NAME, "", self.file_name().to_bytes()),
         ];
+        for (parent, name) in &self.extra_names {
+            let link = self.file_name_as(*parent, name, namespace_for(name));
+            attributes.push(Attribute::resident(kind::FILE_NAME, "", link.to_bytes()));
+        }
         attributes.extend(self.others.iter().cloned());
         Record {
             number: self.number as u32,
             sequence: sequence(self.number),
             flags: FLAG_IN_USE | self.flags,
-            links: 1,
+            links: 1 + self.extra_names.len() as u16,
             base: 0,
             attributes,
         }
@@ -232,6 +250,25 @@ const FIRST_RECORD_BYTES: usize = 0x38 + 8;
 
 fn align8(n: usize) -> usize {
     (n + 7) & !7
+}
+
+/// The entries of each name of `file`, with the record of the directory
+/// that holds each name.
+fn name_entries(file: &File) -> Vec<(u64, Entry)> {
+    let mut out = vec![(file.parent, name_entry(file))];
+    for (parent, name) in &file.extra_names {
+        out.push((
+            *parent,
+            Entry {
+                file: reference(file.number, sequence(file.number)),
+                key: file
+                    .file_name_as(*parent, name, namespace_for(name))
+                    .to_bytes(),
+                data: Vec::new(),
+            },
+        ));
+    }
+    out
 }
 
 /// The entry of `file` in the index of its directory.
@@ -386,6 +423,8 @@ pub(crate) fn format(
             security: SD_READ,
             flags: 0,
             namespace: Namespace::Win32AndDos,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (mft_records * 1024, mft_records * 1024),
             others: vec![
                 non_resident(kind::DATA, "", mft_run, mft_records * RECORD_BYTES as u64),
@@ -401,6 +440,8 @@ pub(crate) fn format(
             security: SD_READ,
             flags: 0,
             namespace: Namespace::Win32AndDos,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (CLUSTER, CLUSTER),
             others: vec![non_resident(kind::DATA, "", mirror_run, CLUSTER)],
         },
@@ -413,6 +454,8 @@ pub(crate) fn format(
             security: SD_READ,
             flags: 0,
             namespace: Namespace::Win32AndDos,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (log_clusters * CLUSTER, log_clusters * CLUSTER),
             others: vec![non_resident(
                 kind::DATA,
@@ -430,6 +473,8 @@ pub(crate) fn format(
             security: SD_READ_WRITE,
             flags: 0,
             namespace: Namespace::Win32AndDos,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (0, 0),
             others: vec![
                 Attribute::resident(
@@ -457,6 +502,8 @@ pub(crate) fn format(
             security: SD_READ,
             flags: 0,
             namespace: Namespace::Win32AndDos,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (CLUSTER, ATTRDEF_BYTES as u64),
             others: vec![non_resident(
                 kind::DATA,
@@ -474,6 +521,8 @@ pub(crate) fn format(
             security: SD_READ,
             flags: 0,
             namespace: Namespace::Win32AndDos,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (bitmap_run.clusters * CLUSTER, bitmap_bytes),
             others: vec![non_resident(kind::DATA, "", bitmap_run, bitmap_bytes)],
         },
@@ -486,6 +535,8 @@ pub(crate) fn format(
             security: SD_READ,
             flags: 0,
             namespace: Namespace::Win32AndDos,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (2 * CLUSTER, 2 * CLUSTER),
             others: vec![non_resident(kind::DATA, "", boot_run, 2 * CLUSTER)],
         },
@@ -498,6 +549,8 @@ pub(crate) fn format(
             security: SD_READ,
             flags: 0,
             namespace: Namespace::Win32AndDos,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (0, 0),
             others: vec![
                 Attribute::resident(kind::DATA, "", Vec::new()),
@@ -525,6 +578,8 @@ pub(crate) fn format(
             security: SD_READ,
             flags: 0,
             namespace: Namespace::Win32AndDos,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (upcase.len() as u64, upcase.len() as u64),
             others: vec![non_resident(
                 kind::DATA,
@@ -555,6 +610,8 @@ pub(crate) fn format(
         security: SD_READ_WRITE,
         flags: FLAG_VIEW_INDEX,
         namespace: Namespace::Win32AndDos,
+        extra_names: Vec::new(),
+        reparse_tag: 0,
         sizes: (0, 0),
         others: secure_others,
     });
@@ -574,6 +631,117 @@ pub(crate) fn format(
         &mut clusters,
         &mut writes,
     )?);
+    // The new files: a record each from record 27 on, the data of each file
+    // in clusters of its own, and an index for each directory.
+    let mut user: Vec<File> = Vec::with_capacity(new_files.len());
+    let mut placements = Vec::with_capacity(new_files.len());
+    let mut reparse_entries: Vec<Entry> = Vec::new();
+    let record_of = |p: Option<usize>| p.map_or(ROOT, |p| FIRST_FREE_RECORD + p as u64);
+    for (i, f) in new_files.iter().enumerate() {
+        let names =
+            std::iter::once((f.parent, &f.name)).chain(f.links.iter().map(|(p, n)| (*p, n)));
+        for (parent, name) in names {
+            if name.encode_utf16().count() > 255 || name.is_empty() {
+                return Err(format!("the name {name:?} does not fit NTFS"));
+            }
+            if let Some(p) = parent {
+                if p >= i || !new_files[p].directory {
+                    return Err(format!(
+                        "{name:?} names {p}, which is not a directory before it"
+                    ));
+                }
+            }
+        }
+        let extra_names: Vec<(u64, String)> = f
+            .links
+            .iter()
+            .map(|(p, n)| (record_of(*p), n.clone()))
+            .collect();
+        let mut attributes = f.attributes & !fa::DIRECTORY;
+        let mut reparse_tag = 0;
+        let (others, sizes, run) = if f.directory {
+            (Vec::new(), (0, 0), None)
+        } else if f.size == 0 {
+            (
+                vec![Attribute::resident(kind::DATA, "", Vec::new())],
+                (0, 0),
+                None,
+            )
+        } else {
+            let run = clusters.take(clusters_for(f.size))?;
+            (
+                vec![non_resident(kind::DATA, "", run, f.size)],
+                (run.clusters * CLUSTER, f.size),
+                Some(run),
+            )
+        };
+        let mut others = others;
+        if let Some(data) = &f.reparse {
+            if data.len() < 8 {
+                return Err(format!(
+                    "the reparse data of {:?} is shorter than its header",
+                    f.name
+                ));
+            }
+            reparse_tag = u32::from_le_bytes(data[0..4].try_into().unwrap());
+            attributes |= fa::REPARSE_POINT;
+            others.push(Attribute::resident(kind::REPARSE_POINT, "", data.clone()));
+            let file = reference(FIRST_FREE_RECORD + i as u64, 1);
+            let mut key = reparse_tag.to_le_bytes().to_vec();
+            key.extend_from_slice(&file.to_le_bytes());
+            reparse_entries.push(Entry {
+                file: 0,
+                key,
+                data: Vec::new(),
+            });
+        }
+        placements.push(run);
+        user.push(File {
+            number: FIRST_FREE_RECORD + i as u64,
+            name: f.name.clone(),
+            times: f.times,
+            parent: record_of(f.parent),
+            attributes: if attributes == 0 {
+                fa::NORMAL
+            } else {
+                attributes
+            },
+            security: f
+                .security
+                .map_or(SD_READ_WRITE, |s| FIRST_ID + 2 + s as u32),
+            flags: if f.directory { FLAG_DIRECTORY } else { 0 },
+            namespace: namespace_for(&f.name),
+            sizes,
+            others,
+            extra_names,
+            reparse_tag,
+        });
+    }
+    // $R keeps its entries in the order of the tag, then of the file, each
+    // as 32-bit numbers.
+    reparse_entries.sort_by_key(|e| {
+        let w = |i: usize| u32::from_le_bytes(e.key[i..i + 4].try_into().unwrap());
+        (w(0), w(4), w(8))
+    });
+    let mut by_parent: std::collections::BTreeMap<u64, Vec<Entry>> = Default::default();
+    for (parent, entry) in user.iter().flat_map(name_entries) {
+        by_parent.entry(parent).or_default().push(entry);
+    }
+    for i in 0..new_files.len() {
+        if !new_files[i].directory {
+            continue;
+        }
+        let mut entries = by_parent
+            .remove(&(FIRST_FREE_RECORD + i as u64))
+            .unwrap_or_default();
+        sort_names(&mut entries, &up);
+        let units = user[i].name.encode_utf16().count();
+        let index = build(entries, &shape(0x30, COLLATE_FILE_NAME, root_space(units)));
+        user[i]
+            .others
+            .extend(index_attributes("$I30", index, &mut clusters, &mut writes)?);
+    }
+
     let empty_view = |name: &str, clusters: &mut Clusters, writes: &mut Vec<_>| {
         index_attributes(
             name,
@@ -592,6 +760,8 @@ pub(crate) fn format(
             security: SD_READ_WRITE,
             flags: FLAG_VIEW_INDEX | FLAG_EXTEND_FILE,
             namespace: Namespace::Posix,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (0, 0),
             others: quota_others,
         },
@@ -604,6 +774,8 @@ pub(crate) fn format(
             security: SD_READ_WRITE,
             flags: FLAG_VIEW_INDEX | FLAG_EXTEND_FILE,
             namespace: Namespace::Posix,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (0, 0),
             others: empty_view("$O", &mut clusters, &mut writes)?,
         },
@@ -616,8 +788,15 @@ pub(crate) fn format(
             security: SD_READ_WRITE,
             flags: FLAG_VIEW_INDEX | FLAG_EXTEND_FILE,
             namespace: Namespace::Posix,
+            extra_names: Vec::new(),
+            reparse_tag: 0,
             sizes: (0, 0),
-            others: empty_view("$R", &mut clusters, &mut writes)?,
+            others: index_attributes(
+                "$R",
+                build(reparse_entries, &shape(0, COLLATE_ULONGS, 300)),
+                &mut clusters,
+                &mut writes,
+            )?,
         },
     ];
     let mut extend_entries: Vec<Entry> = extend_files.iter().map(name_entry).collect();
@@ -632,77 +811,11 @@ pub(crate) fn format(
         security: SD_READ_WRITE,
         flags: FLAG_DIRECTORY,
         namespace: Namespace::Win32AndDos,
+        extra_names: Vec::new(),
+        reparse_tag: 0,
         sizes: (0, 0),
         others: index_attributes("$I30", extend_index, &mut clusters, &mut writes)?,
     });
-
-    // The new files: a record each from record 27 on, the data of each file
-    // in clusters of its own, and an index for each directory.
-    let mut user: Vec<File> = Vec::with_capacity(new_files.len());
-    let mut placements = Vec::with_capacity(new_files.len());
-    let mut children: Vec<Vec<usize>> = vec![Vec::new(); new_files.len()];
-    let mut top: Vec<usize> = Vec::new();
-    for (i, f) in new_files.iter().enumerate() {
-        if f.name.encode_utf16().count() > 255 || f.name.is_empty() {
-            return Err(format!("the name {:?} does not fit NTFS", f.name));
-        }
-        match f.parent {
-            Some(p) if p < i && new_files[p].directory => children[p].push(i),
-            Some(p) => {
-                return Err(format!(
-                    "{:?} names {p}, which is not a directory before it",
-                    f.name
-                ))
-            }
-            None => top.push(i),
-        }
-        let attributes = f.attributes & !fa::DIRECTORY;
-        let (others, sizes, run) = if f.directory {
-            (Vec::new(), (0, 0), None)
-        } else if f.size == 0 {
-            (
-                vec![Attribute::resident(kind::DATA, "", Vec::new())],
-                (0, 0),
-                None,
-            )
-        } else {
-            let run = clusters.take(clusters_for(f.size))?;
-            (
-                vec![non_resident(kind::DATA, "", run, f.size)],
-                (run.clusters * CLUSTER, f.size),
-                Some(run),
-            )
-        };
-        placements.push(run);
-        user.push(File {
-            number: FIRST_FREE_RECORD + i as u64,
-            name: f.name.clone(),
-            times: f.times,
-            parent: f.parent.map_or(ROOT, |p| FIRST_FREE_RECORD + p as u64),
-            attributes: if attributes == 0 {
-                fa::NORMAL
-            } else {
-                attributes
-            },
-            security: f
-                .security
-                .map_or(SD_READ_WRITE, |s| FIRST_ID + 2 + s as u32),
-            flags: if f.directory { FLAG_DIRECTORY } else { 0 },
-            namespace: namespace_for(&f.name),
-            sizes,
-            others,
-        });
-    }
-    for i in 0..new_files.len() {
-        if !new_files[i].directory {
-            continue;
-        }
-        let mut entries: Vec<Entry> = children[i].iter().map(|c| name_entry(&user[*c])).collect();
-        sort_names(&mut entries, &up);
-        let units = user[i].name.encode_utf16().count();
-        let index = build(entries, &shape(0x30, COLLATE_FILE_NAME, root_space(units)));
-        user[i].others = index_attributes("$I30", index, &mut clusters, &mut writes)?;
-    }
 
     // The root directory, whose index names each system file and itself.
     let mut root = File {
@@ -714,12 +827,14 @@ pub(crate) fn format(
         security: SD_READ_WRITE,
         flags: FLAG_DIRECTORY,
         namespace: Namespace::Win32AndDos,
+        extra_names: Vec::new(),
+        reparse_tag: 0,
         sizes: (0, 0),
         others: Vec::new(),
     };
     let mut root_entries: Vec<Entry> = files.iter().map(name_entry).collect();
     root_entries.push(name_entry(&root));
-    root_entries.extend(top.iter().map(|i| name_entry(&user[*i])));
+    root_entries.extend(by_parent.remove(&ROOT).unwrap_or_default());
     sort_names(&mut root_entries, &up);
     let root_index = build(root_entries, &shape(0x30, COLLATE_FILE_NAME, root_space(1)));
     root.others = index_attributes("$I30", root_index, &mut clusters, &mut writes)?;
@@ -914,6 +1029,8 @@ mod tests {
             },
             times: Times::all(5),
             security: None,
+            links: Vec::new(),
+            reparse: None,
         }
     }
 
@@ -997,5 +1114,74 @@ mod tests {
             panic!("a file before its directory was taken")
         };
         assert!(e.contains("not a directory before it"), "{e}");
+    }
+
+    pub(super) fn junction(target: &str) -> Vec<u8> {
+        let subst: Vec<u8> = format!("\\??\\{target}")
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect();
+        let print: Vec<u8> = target
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect();
+        let mut body = Vec::new();
+        body.extend_from_slice(&0u16.to_le_bytes());
+        body.extend_from_slice(&(subst.len() as u16).to_le_bytes());
+        body.extend_from_slice(&((subst.len() + 2) as u16).to_le_bytes());
+        body.extend_from_slice(&(print.len() as u16).to_le_bytes());
+        body.extend_from_slice(&subst);
+        body.extend_from_slice(&[0, 0]);
+        body.extend_from_slice(&print);
+        body.extend_from_slice(&[0, 0]);
+        let mut data = 0xA000_0003u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&(body.len() as u16).to_le_bytes());
+        data.extend_from_slice(&[0, 0]);
+        data.extend_from_slice(&body);
+        data
+    }
+
+    #[test]
+    fn a_hard_link_and_a_junction_get_their_names_and_their_reparse_entry() {
+        let mut linked = new_file(Some(0), "hosts", false, 10);
+        linked.links = vec![
+            (None, "hosts.txt".to_string()),
+            (Some(0), "HOSTS2".to_string()),
+        ];
+        let mut docs = new_file(None, "Documents and Settings", true, 0);
+        docs.reparse = Some(junction("C:\\Users"));
+        docs.attributes |= fa::HIDDEN | fa::SYSTEM;
+        let list = vec![new_file(None, "etc", true, 0), linked, docs];
+        let f = format(
+            64 * 1024 * 1024,
+            0,
+            &NtfsOptions {
+                label: String::new(),
+                serial: 1,
+                time: 1,
+            },
+            &list,
+            &[],
+        )
+        .unwrap();
+        let mut img = vec![0u8; 64 * 1024 * 1024];
+        for (at, b) in &f.writes {
+            img[*at as usize..*at as usize + b.len()].copy_from_slice(b);
+        }
+        let r = record(&img, &f, 28);
+        assert_eq!(u16::from_le_bytes([r[0x12], r[0x13]]), 3, "three names");
+        let names = r.windows(4).filter(|w| *w == [0x30, 0, 0, 0]).count();
+        assert!(names >= 3, "{names} file names");
+        let d = record(&img, &f, 29);
+        assert!(
+            d.windows(4).any(|w| w == [0xC0, 0, 0, 0]),
+            "a reparse point"
+        );
+        // $Reparse:$R holds the tag and the file.
+        let rp = record(&img, &f, 26);
+        assert!(
+            rp.windows(4).any(|w| w == 0xA000_0003u32.to_le_bytes()),
+            "the tag in $R"
+        );
     }
 }
