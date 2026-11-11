@@ -237,11 +237,10 @@ record the reason for each.
   needs no wimlib.
 - **MBR, and not GPT.** Burnout writes the table itself, so the spare EFI
   partition that `diskutil` adds on macOS never appears. It also lets a BIOS
-  start the drive: on `main`, the MBR and partition 1 carry boot code of
-  Burnout's own that loads `bootmgr`. A test in QEMU proves the boot code, and
-  a start of Windows from it waits for its test.
-  [P8 in the roadmap](docs/roadmap.md#p8-legacy-bios-boot) says what is
-  done.
+  start the drive: the MBR and partition 1 carry boot code of Burnout's own
+  that loads `bootmgr`. Windows 10 Setup starts from it in QEMU with SeaBIOS.
+  [P8 in the roadmap](docs/roadmap.md#p8-legacy-bios-boot) records the
+  test.
 
 ---
 
