@@ -1464,7 +1464,31 @@ Windows, `burnout write --to-go` of the same edition wrote a VHDX in about
 3.5 minutes, and Hyper-V started it in a VM of generation 2 with Secure
 Boot on. At 5 minutes Windows answered the heartbeat of Hyper-V; the screen
 was not captured.
-- An `install.esd` waits for LZMS, as P10 says.
+
+**On a PC with Windows, measured on 2026-11-11.** Each drive was a VHDX
+that `diskpart` attached, and Hyper-V started it in a VM of generation 2
+with Secure Boot on, 4 processors and 4 GB.
+- `burnout list` showed the VHDX as `Msft Virtual Disk 42.9 GB Virtual`.
+  Without `--force`, Burnout refused it. With `--force`, it asked for the
+  model and the size. It then wrote Windows 11 Pro, build 26300.9457: 140,067
+  files and directories and 15.5 GB of streams. The first-run setup came
+  within 5 minutes.
+- The ISO of the Media Creation Tool for Windows 10 holds `install.esd`.
+  `burnout write --to-go --edition Pro` refused it with the kind
+  `lzms_image`, and printed the DISM command for index 6, which is Pro. The
+  command ran, and `--to-go --edition 1` wrote the WIM file that came out:
+  101,926 entries and 9.6 GB of streams. Windows 10 came to its first-run
+  setup within 5 minutes.
+- An ESD that DISM made with `/Compress:recovery` went the same way, and
+  Windows 11 came to its first-run setup.
+- Windows mode on a VHDX of 16 GB: 977 files on FAT32 and `install.wim` on
+  exFAT, checked by SHA-256. Windows 11 Setup started.
+- `--to-go --bios` on a VHDX: QEMU with SeaBIOS 1.17.0 started it as a SATA
+  disk, and Windows ran. As an NVMe disk, SeaBIOS said "could not read the
+  boot disk". A drive for a BIOS needs a firmware that reads the bus of the
+  drive, and SeaBIOS does not read NVMe.
+- An `install.esd` goes through the export to a WIM file. Burnout does not
+  read LZMS itself, as P10 says.
 - A drive with sectors of 4096 bytes is refused.
 
 ---
