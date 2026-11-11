@@ -222,6 +222,12 @@ pub enum Error {
         /// What the volume holds for files, in bytes.
         free_bytes: u64,
     },
+    /// The partition table of the drive contradicts itself, so no partition
+    /// of it can be trusted.
+    TableDamaged {
+        /// What is wrong with the table.
+        detail: String,
+    },
 }
 
 /// The way past a lock switch, as a literal that `concat!` takes.
@@ -460,6 +466,13 @@ impl fmt::Display for Error {
                     size_column(*drive_bytes)
                 )
             }
+            Error::TableDamaged { detail } => {
+                write!(
+                    f,
+                    "the partition table of the drive is damaged: {detail}. Repair the table \
+                     with the tools of the host, or write the whole drive"
+                )
+            }
             Error::VolumeFull {
                 file_system,
                 needed_bytes,
@@ -576,6 +589,7 @@ impl Error {
             Error::PartitionTooSmall { .. } => "partition_too_small",
             Error::NeedsLargerDrive { .. } => "needs_larger_drive",
             Error::VolumeFull { .. } => "volume_full",
+            Error::TableDamaged { .. } => "table_damaged",
         }
     }
 }
@@ -1030,6 +1044,7 @@ mod tests {
                 needed_bytes: 2,
                 free_bytes: 1,
             },
+            Error::TableDamaged { detail: text() },
         ];
         // A new kind of error does not compile here until it is in the list
         // above, so it cannot miss the test below.
@@ -1063,7 +1078,8 @@ mod tests {
                 | Error::VolumeDiffers { .. }
                 | Error::PartitionTooSmall { .. }
                 | Error::NeedsLargerDrive { .. }
-                | Error::VolumeFull { .. } => {}
+                | Error::VolumeFull { .. }
+                | Error::TableDamaged { .. } => {}
             }
         }
         all

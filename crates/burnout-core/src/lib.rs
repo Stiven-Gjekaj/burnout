@@ -13,6 +13,7 @@ mod file_target;
 mod image;
 mod listing;
 mod memory_target;
+mod partitions;
 mod progress;
 mod safety;
 mod sector_io;
@@ -33,6 +34,9 @@ pub use file_target::FileTarget;
 pub use image::{has_boot_table, BOOT_SECTOR_BYTES};
 pub use listing::{by_index, in_list_order, natural_cmp, DriveList};
 pub use memory_target::MemoryTarget;
+pub use partitions::{
+    read_table, Partition, PartitionTable, PartitionType, TableKind, TABLE_BYTES,
+};
 pub use progress::{Progress, ProgressEvent, Silent, Stage};
 pub use safety::{
     check_fits, check_same_drive, check_target, describe, force_phrase, phrase_matches, Force,
