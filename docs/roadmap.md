@@ -1456,10 +1456,14 @@ in 124 s. QEMU with SeaBIOS started the image alone as a SATA disk, with
 x64 emulated in TCG. The Windows logo came in 30 s, and the first-run setup
 in about 37 minutes.
 
-Not done:
-
-- No test started an x64 drive through UEFI. HVF runs Arm64 only. The BIOS
-  start above shows that TCG takes about 37 minutes, so this test fits now.
+**x64 through UEFI, measured on 2026-11-11.** The example `to_go_image`
+wrote Windows 11 25H2 Pro of the x64 ISO into a disk image of 40 GiB. QEMU
+with OVMF started it alone as an NVMe disk, with x64 emulated in TCG, and
+Windows came to its first-run setup in about 45 minutes. On a PC with
+Windows, `burnout write --to-go` of the same edition wrote a VHDX in about
+3.5 minutes, and Hyper-V started it in a VM of generation 2 with Secure
+Boot on. At 5 minutes Windows answered the heartbeat of Hyper-V; the screen
+was not captured.
 - An `install.esd` waits for LZMS, as P10 says.
 - A drive with sectors of 4096 bytes is refused.
 

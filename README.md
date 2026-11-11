@@ -495,8 +495,9 @@ Limits:
   ```
 - The drive must have sectors of 512 bytes.
 - Measured in VMs: Windows 11 25H2 Pro of the Arm64 ISO started through
-  UEFI, and Windows 11 25H2 Pro of the x64 ISO started through a BIOS. No
-  test started an x64 drive through UEFI yet.
+  UEFI, and Windows 11 25H2 Pro of the x64 ISO started through UEFI and
+  through a BIOS. Each came to its first-run setup. Hyper-V on Windows
+  started an x64 drive with Secure Boot on.
 
 ### A write that stops
 
