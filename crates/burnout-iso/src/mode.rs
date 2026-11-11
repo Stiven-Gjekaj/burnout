@@ -9,8 +9,9 @@
 //!   which starts from a disc and from a drive.
 //! - An ISO with `sources/install.wim` or `sources/install.esd` is Windows
 //!   mode.
-//! - Anything else fits neither mode. A byte copy of it may start nothing,
-//!   and a compressed image is one of these.
+//! - A file that xz, gzip, bzip2, zstd, zip or 7-Zip made is refused, with
+//!   the command that decompresses it. A byte copy of it starts nothing.
+//! - Anything else fits neither mode. A byte copy of it may start nothing.
 
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
@@ -60,6 +61,13 @@ pub fn mode_of_file(path: &Path) -> Result<Mode> {
 pub fn mode_of<R: Read + Seek>(mut reader: R, name: &str) -> Result<Mode> {
     let length = reader.seek(SeekFrom::End(0))?;
     let first = read_at(&mut reader, 0, length.min(BOOT_SECTOR_BYTES as u64))?;
+    if let Some((format, command)) = compression(&first) {
+        return Err(Error::CompressedImage {
+            path: name.to_string(),
+            format,
+            command,
+        });
+    }
     if first.starts_with(b"xar!") {
         return Err(macos(name, "an installer package"));
     }
@@ -93,6 +101,24 @@ pub fn mode_of<R: Read + Seek>(mut reader: R, name: &str) -> Result<Mode> {
         true => Mode::Windows,
         false => Mode::Neither,
     })
+}
+
+/// The compression format whose mark starts `first`, and a command that
+/// undoes it. An ISO starts with zeros or with boot code, and a disk image
+/// with boot code or zeros, so none of these marks starts one.
+fn compression(first: &[u8]) -> Option<(&'static str, &'static str)> {
+    const MARKS: [(&[u8], &str, &str); 6] = [
+        (&[0xFD, b'7', b'z', b'X', b'Z', 0x00], "xz", "xz -d"),
+        (&[0x1F, 0x8B], "gzip", "gunzip"),
+        (&[0x28, 0xB5, 0x2F, 0xFD], "zstd", "zstd -d"),
+        (b"BZh", "bzip2", "bunzip2"),
+        (b"PK\x03\x04", "zip", "unzip"),
+        (&[b'7', b'z', 0xBC, 0xAF, 0x27, 0x1C], "7-Zip", "7z x"),
+    ];
+    MARKS
+        .iter()
+        .find(|(mark, _, _)| first.starts_with(mark))
+        .map(|(_, format, command)| (*format, *command))
 }
 
 fn macos(name: &str, what: &'static str) -> Error {
@@ -198,6 +224,34 @@ mod tests {
         }
         let iso = iso9660(&[Item::File("a.txt", b"a")], Iso::default());
         assert_eq!(mode(iso).unwrap(), Mode::Neither);
+    }
+
+    #[test]
+    fn a_compressed_image_is_refused_with_its_command() {
+        for (mark, says) in [
+            (
+                &[0xFD, b'7', b'z', b'X', b'Z', 0x00][..],
+                "compressed with xz",
+            ),
+            (&[0x1F, 0x8B, 8][..], "compressed with gzip"),
+            (&[0x28, 0xB5, 0x2F, 0xFD][..], "compressed with zstd"),
+            (&b"BZh9"[..], "compressed with bzip2"),
+            (&b"PK\x03\x04"[..], "compressed with zip"),
+            (
+                &[b'7', b'z', 0xBC, 0xAF, 0x27, 0x1C][..],
+                "compressed with 7-Zip",
+            ),
+        ] {
+            let mut image = mark.to_vec();
+            image.resize(4096, 0);
+            let e = mode(image).unwrap_err();
+            assert_eq!(e.kind(), "compressed_image");
+            assert!(e.to_string().contains(says), "{e}");
+        }
+        // Part of a mark is not the mark.
+        let mut image = vec![0xFD, b'7', b'z'];
+        image.resize(4096, 0);
+        assert_eq!(mode(image).unwrap(), Mode::Neither);
     }
 
     #[test]

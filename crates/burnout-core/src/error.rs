@@ -278,6 +278,15 @@ pub enum Error {
         /// The editions that the image holds, as a person reads them.
         editions: String,
     },
+    /// The image is a compressed file, and not the image inside it.
+    CompressedImage {
+        /// The image, as the person gave it.
+        path: String,
+        /// The format, such as xz.
+        format: &'static str,
+        /// A command that decompresses it.
+        command: &'static str,
+    },
 }
 
 /// The way past a lock switch, as a literal that `concat!` takes.
@@ -584,6 +593,16 @@ impl fmt::Display for Error {
                     "{path} holds no edition {edition}. Its editions are {editions}. Give the index or the name that burnout info shows"
                 )
             }
+            Error::CompressedImage {
+                path,
+                format,
+                command,
+            } => {
+                write!(
+                    f,
+                    "{path} is compressed with {format}, so it holds the image and is not the image. Decompress it first, for example with {command}, and give Burnout the file that comes out"
+                )
+            }
             Error::VolumeFull {
                 file_system,
                 needed_bytes,
@@ -700,6 +719,7 @@ impl Error {
             Error::PartitionTooSmall { .. } => "partition_too_small",
             Error::NeedsLargerDrive { .. } => "needs_larger_drive",
             Error::VolumeFull { .. } => "volume_full",
+            Error::CompressedImage { .. } => "compressed_image",
             Error::NoSuchEdition { .. } => "no_such_edition",
             Error::WindowsInPartition { .. } => "windows_in_partition",
             Error::PartitionChanged { .. } => "partition_changed",
@@ -1182,6 +1202,11 @@ mod tests {
                 edition: text(),
                 editions: text(),
             },
+            Error::CompressedImage {
+                path: text(),
+                format: "xz",
+                command: "xz -d",
+            },
         ];
         // A new kind of error does not compile here until it is in the list
         // above, so it cannot miss the test below.
@@ -1223,7 +1248,8 @@ mod tests {
                 | Error::PartitionTooSmallForImage { .. }
                 | Error::PartitionChanged { .. }
                 | Error::WindowsInPartition { .. }
-                | Error::NoSuchEdition { .. } => {}
+                | Error::NoSuchEdition { .. }
+                | Error::CompressedImage { .. } => {}
             }
         }
         all
