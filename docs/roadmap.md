@@ -72,7 +72,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P8 | Legacy BIOS boot | M | **v1.1.0** |
 | P9 | A write to one partition | S to M | **v2.0.0** |
 | P10 | Read a WIM file | L | **v2.1.0 and v2.2.0** |
-| P11 | Write an NTFS volume | XL | started |
+| P11 | Write an NTFS volume | XL | **v2.3.0** |
 | P12 | Windows To Go | L | planned, v3.0.0 |
 
 ---
@@ -1371,8 +1371,19 @@ Done, in `crates/burnout-layout/src/ntfs/`, measured on 2026-11-11:
    Windows 10 22H2 Pro of the x64 ISO, 100,491 files and directories and
    9.5 GB in 40 s. `chkdsk` found no problems in each.
 
-Next: P12, the partitions, the boot files and the BCD store that start
-Windows from the drive.
+9. **Windows starts from it.** On 2026-11-11 the example applied Windows 11
+   25H2 Pro of the Arm64 ISO to a disk image with a GPT: an EFI system
+   partition from 1 MiB and the NTFS partition from 512 MiB. Windows PE
+   formatted the EFI partition and ran `bcdboot`. QEMU then started the disk
+   alone with UEFI: the boot manager, `winload`, the kernel and the drivers
+   came from the volume of Burnout, the specialize pass ran, and Windows
+   showed the first page of its first-run setup. With an MBR, the
+   specialize pass stopped with "Failed to get system partition", also with
+   partition type 0xEF, so a drive of Windows To Go for UEFI takes a GPT.
+
+Next: P12. Burnout writes the EFI partition, the boot files and the BCD
+store itself, in the place of `bcdboot`, and the store that `bcdboot`
+wrote is the reference.
 
 ### P12. Windows To Go
 
