@@ -371,7 +371,7 @@ fn mbr_type_name(t: u8) -> Option<&'static str> {
 }
 
 /// The CRC-32 of IEEE 802.3, which a GPT uses.
-fn crc32(bytes: &[u8]) -> u32 {
+pub fn crc32(bytes: &[u8]) -> u32 {
     let mut crc = 0xFFFF_FFFFu32;
     for b in bytes {
         crc ^= *b as u32;

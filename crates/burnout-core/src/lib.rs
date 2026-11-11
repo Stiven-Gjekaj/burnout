@@ -35,7 +35,8 @@ pub use image::{has_boot_table, BOOT_SECTOR_BYTES};
 pub use listing::{by_index, in_list_order, natural_cmp, DriveList};
 pub use memory_target::MemoryTarget;
 pub use partitions::{
-    choose_partition, read_table, Partition, PartitionTable, PartitionType, TableKind, TABLE_BYTES,
+    choose_partition, crc32, read_table, Partition, PartitionTable, PartitionType, TableKind,
+    TABLE_BYTES,
 };
 pub use progress::{Progress, ProgressEvent, Silent, Stage};
 pub use safety::{
