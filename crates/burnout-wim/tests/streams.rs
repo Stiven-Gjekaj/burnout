@@ -5,7 +5,7 @@ use std::fs::File;
 use std::path::Path;
 
 use burnout_wim::sha1::sha1;
-use burnout_wim::{read_blobs, read_resource, read_wim, Compression};
+use burnout_wim::{parse_metadata, read_blobs, read_resource, read_wim, Compression};
 
 fn check(file: &str, compression: Compression, chunk: u32) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -35,6 +35,31 @@ fn check(file: &str, compression: Compression, chunk: u32) {
         compressed += blob.resource.is_compressed() as usize;
     }
     assert!(compressed >= 3, "only {compressed} streams were compressed");
+
+    // The tree of the edition names each file, and each file with bytes
+    // names a stream of the table.
+    let meta = blobs.iter().find(|b| b.is_metadata()).unwrap();
+    let bytes = read_resource(&mut reader, &wim.header, &meta.resource, file).unwrap();
+    let tree = parse_metadata(&bytes).unwrap();
+    let paths: Vec<&str> = tree.entries.iter().map(|e| e.path.as_str()).collect();
+    assert_eq!(
+        paths,
+        [
+            "",
+            "calls.bin",
+            "docs",
+            "empty.txt",
+            "noise.bin",
+            "docs/deep",
+            "docs/text.txt",
+            "docs/deep/small.txt"
+        ]
+    );
+    for e in &tree.entries {
+        let named = e.data_hash().map(|h| blobs.iter().any(|b| &b.hash == h));
+        let expected = !e.is_directory() && e.path != "empty.txt";
+        assert_eq!(named, expected.then_some(true), "{}", e.path);
+    }
 }
 
 #[test]
