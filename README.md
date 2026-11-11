@@ -171,6 +171,9 @@ firmware refuses.
 That one difference is why Windows mode exists, and why a tool like Rufus
 exists at all.
 
+`--to-go` adds a third treatment for a Windows ISO: a drive that runs Windows
+itself, in place of an installer. [Windows To Go](#windows-to-go) tells how.
+
 ---
 
 ## How Burnout chooses
@@ -436,6 +439,42 @@ It reads the table again after your answer, and stops if the partition moved.
 It refuses a table that is damaged, a number that the table does not hold, an
 extended partition, and a partition smaller than the image. The check reads
 the partition back against the image.
+
+### Windows To Go
+
+`--to-go` makes a drive that starts Windows itself, in place of an installer.
+Burnout applies one edition of the install image to an NTFS partition, and
+puts the boot files and a BCD store on an EFI system partition. The drive
+starts through UEFI, and Windows then shows its first-run setup.
+
+```bash
+burnout write Win11_25H2_English_Arm64_v2.iso 3 --to-go --edition Pro
+```
+
+`--edition` is necessary here, because no Setup runs to ask for one.
+
+```
+Burnout makes a drive of Windows To Go with edition 3, Windows 11 Pro:
+    partition 1  FAT32, 314.6 MB, 104 boot files and the BCD store
+    partition 2  NTFS, 42.4 GB, 127,048 files and directories, 15.1 GB of streams
+The drive starts Windows through UEFI, with no Setup.
+```
+
+The drive has a GPT. Partition 1 is the EFI system partition, from 1 MiB for
+300 MiB. Partition 2 goes from 512 MiB to 1 MiB before the end of the drive.
+Burnout writes NTFS, the boot files and the BCD store itself, and calls no
+tool of Windows. The check reads back the GPT, each boot file, and each
+stream of Windows against the SHA-1 that the install image names for it.
+
+Limits:
+
+- The drive starts through UEFI only. A computer that starts through a BIOS
+  does not start it.
+- The ISO must hold `sources/install.wim`. An `install.esd` uses LZMS, which
+  Burnout does not read.
+- The drive must have sectors of 512 bytes.
+- Windows 11 25H2 Pro of the Arm64 ISO started from such a drive in a VM. No
+  test started an x64 drive yet.
 
 ### A write that stops
 
