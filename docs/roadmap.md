@@ -73,7 +73,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P9 | A write to one partition | S to M | **v2.0.0** |
 | P10 | Read a WIM file | L | **v2.1.0 and v2.2.0** |
 | P11 | Write an NTFS volume | XL | **v2.3.0** |
-| P12 | Windows To Go | L | planned, v3.0.0 |
+| P12 | Windows To Go | L | **v3.0.0** |
 
 ---
 
@@ -1235,7 +1235,8 @@ runs the unit tests on both, but no person ran the command there.
 
 ## Windows To Go: P10 to P12, toward version 3
 
-**Planned. The person who owns the project asked for it on 2026-11-11.**
+**Done for UEFI in version 3.0.0. The person who owns the project asked for
+it on 2026-11-11.**
 
 Windows To Go puts a Windows system that runs from the USB drive onto it, in
 place of an installer. So it is a third write mode, and not an option on
@@ -1387,12 +1388,54 @@ wrote is the reference.
 
 ### P12. Windows To Go
 
-**Size L. Depends on P8, P10 and P11. Ships as version 3.**
+**Size L. Depends on P8, P10 and P11. Done for UEFI in version 3.0.0.**
 
 `burnout write <image> <drive> --to-go --edition <n>` lays out the drive with
 an EFI system partition and an NTFS partition, applies the edition, and writes
-a BCD store and the boot files for UEFI and for a BIOS. The exit test is a
-drive image that starts Windows to its first-run setup in a VM.
+a BCD store and the boot files for UEFI. The exit test is a drive image that
+starts Windows to its first-run setup in a VM.
+
+What was built, each step in its own commit:
+
+1. `burnout_layout::hive` writes and reads a registry hive, the format of a
+   BCD store: regf version 1.3, with lh lists and one security cell.
+2. `burnout_layout::bcd` builds the store: the boot manager, the loader of
+   Windows, the resume loader and the seven objects of settings that
+   `bcdboot` wrote. A device element names a partition of a GPT disk by
+   the GUID of the partition and of the disk, in 88 bytes. A test compares
+   each element with the store that `bcdboot` wrote, when that store is at
+   hand.
+3. `burnout_layout::gpt` writes a GPT: a protective MBR, the header and its
+   128 entries, and the copy of both at the end of the disk.
+4. `burnout::to_go` plans the drive, writes it on any block target, and
+   reads it back. The boot files are `Windows\Boot\EFI` and
+   `Windows\Boot\Fonts` of the edition, as `bcdboot` copies them, and
+   `bootmgfw.efi` again as `EFI\Boot\BOOTAA64.EFI` or `BOOTX64.EFI`.
+5. `write --to-go` takes `--edition`, and refuses `--partition`, `--mode`
+   and the options of Setup.
+
+Measured on 2026-11-11:
+
+1. The store that Burnout built went in the place of the store of
+   `bcdboot`, on a drive that `bcdboot` had made. Windows started to its
+   first-run setup.
+2. The example `wim_ntfs` made a whole drive with no program of Windows:
+   the GPT, the EFI system partition, the boot files, the store and NTFS.
+   QEMU started the image alone, and Windows came to its first-run setup.
+3. `burnout write --to-go --edition 3` wrote Windows 11 25H2 Pro of the
+   Arm64 ISO to a disk image of 40 GiB, attached with `hdiutil`, in 121 s
+   with the check. Random bytes filled its first 2 GiB and its last MiB
+   before the write, as on a used drive. QEMU started it alone, and Windows
+   came to its first-run setup.
+
+Not done:
+
+- A BIOS does not start the drive. The NTFS boot code of Windows and
+  `bootmgr` for a BIOS are the next step.
+- No test started an x64 drive. HVF runs Arm64 only, and x64 in TCG takes
+  hours for one start.
+- An `install.esd` waits for LZMS, as P10 says.
+- A drive with sectors of 4096 bytes is refused.
 
 ---
 
