@@ -13,6 +13,7 @@
 #![forbid(unsafe_code)]
 
 mod header;
+pub mod sha1;
 mod xml;
 
 use std::io::{Read, Seek, SeekFrom};
