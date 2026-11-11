@@ -192,28 +192,35 @@ pub fn volume_path_to_open(guid_path: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-/// The bus, from `STORAGE_BUS_TYPE`.
+/// The bus, from `STORAGE_BUS_TYPE` of `winioctl.h`.
+///
+/// The bus decides whether a drive is external, so an error here is an
+/// error of safety. An earlier table gave FireWire for Fibre Channel, which
+/// made a disk of a SAN removable, so a plain yes erased it. A person
+/// reported it from a test on Windows on 2026-11-11: a VHDX showed as
+/// FireWire and removable.
 pub fn bus_from_storage_bus_type(value: u8) -> Bus {
     match value {
-        0x01 => Bus::Scsi,
-        0x02 => Bus::Ata,
-        0x03 => Bus::Ata,      // FLOPPY, through the ATA driver
-        0x04 => Bus::Ata,      // 1394 on some drivers
-        0x05 => Bus::Scsi,     // SSA
-        0x06 => Bus::FireWire, // Fibre, reported for 1394 as well
-        0x07 => Bus::Usb,
-        0x08 => Bus::Raid,
-        0x09 => Bus::Scsi, // iSCSI
-        0x0A => Bus::Sas,
-        0x0B => Bus::Sata,
-        0x0C => Bus::Sd,
-        0x0D => Bus::Mmc,
-        0x0E => Bus::Virtual,
-        0x0F => Bus::FireWire,
-        0x10 => Bus::Virtual, // a storage space
-        0x11 => Bus::Nvme,
-        0x12 => Bus::Scsi, // SCM
-        0x13 => Bus::Usb,  // UFS
+        0x01 => Bus::Scsi,     // BusTypeScsi
+        0x02 => Bus::Ata,      // BusTypeAtapi
+        0x03 => Bus::Ata,      // BusTypeAta
+        0x04 => Bus::FireWire, // BusType1394
+        0x05 => Bus::Scsi,     // BusTypeSsa
+        0x06 => Bus::Scsi,     // BusTypeFibre, a disk of a SAN
+        0x07 => Bus::Usb,      // BusTypeUsb
+        0x08 => Bus::Raid,     // BusTypeRAID
+        0x09 => Bus::Scsi,     // BusTypeiScsi
+        0x0A => Bus::Sas,      // BusTypeSas
+        0x0B => Bus::Sata,     // BusTypeSata
+        0x0C => Bus::Sd,       // BusTypeSd
+        0x0D => Bus::Mmc,      // BusTypeMmc
+        0x0E => Bus::Virtual,  // BusTypeVirtual
+        0x0F => Bus::Virtual,  // BusTypeFileBackedVirtual, such as a VHDX
+        0x10 => Bus::Virtual,  // BusTypeSpaces, a storage space
+        0x11 => Bus::Nvme,     // BusTypeNvme
+        0x12 => Bus::Scsi,     // BusTypeSCM
+        0x13 => Bus::Usb,      // BusTypeUfs
+        0x14 => Bus::Nvme,     // BusTypeNvmeof, NVMe over a network
         _ => Bus::Unknown,
     }
 }
@@ -547,12 +554,46 @@ mod tests {
 
     #[test]
     fn every_bus_that_windows_reports_maps_to_one_of_ours() {
-        assert_eq!(bus_from_storage_bus_type(0x07), Bus::Usb);
-        assert_eq!(bus_from_storage_bus_type(0x0B), Bus::Sata);
-        assert_eq!(bus_from_storage_bus_type(0x11), Bus::Nvme);
-        assert_eq!(bus_from_storage_bus_type(0x0C), Bus::Sd);
-        assert_eq!(bus_from_storage_bus_type(0x0E), Bus::Virtual);
-        assert_eq!(bus_from_storage_bus_type(0xFE), Bus::Unknown);
+        // Each value of STORAGE_BUS_TYPE in winioctl.h, in its order.
+        let table = [
+            (0x00, Bus::Unknown),  // BusTypeUnknown
+            (0x01, Bus::Scsi),     // BusTypeScsi
+            (0x02, Bus::Ata),      // BusTypeAtapi
+            (0x03, Bus::Ata),      // BusTypeAta
+            (0x04, Bus::FireWire), // BusType1394
+            (0x05, Bus::Scsi),     // BusTypeSsa
+            (0x06, Bus::Scsi),     // BusTypeFibre
+            (0x07, Bus::Usb),      // BusTypeUsb
+            (0x08, Bus::Raid),     // BusTypeRAID
+            (0x09, Bus::Scsi),     // BusTypeiScsi
+            (0x0A, Bus::Sas),      // BusTypeSas
+            (0x0B, Bus::Sata),     // BusTypeSata
+            (0x0C, Bus::Sd),       // BusTypeSd
+            (0x0D, Bus::Mmc),      // BusTypeMmc
+            (0x0E, Bus::Virtual),  // BusTypeVirtual
+            (0x0F, Bus::Virtual),  // BusTypeFileBackedVirtual
+            (0x10, Bus::Virtual),  // BusTypeSpaces
+            (0x11, Bus::Nvme),     // BusTypeNvme
+            (0x12, Bus::Scsi),     // BusTypeSCM
+            (0x13, Bus::Usb),      // BusTypeUfs
+            (0x14, Bus::Nvme),     // BusTypeNvmeof
+            (0x7F, Bus::Unknown),  // BusTypeMaxReserved
+            (0xFE, Bus::Unknown),
+        ];
+        for (value, bus) in table {
+            assert_eq!(bus_from_storage_bus_type(value), bus, "{value:#04x}");
+        }
+    }
+
+    #[test]
+    fn a_disk_of_a_san_or_a_file_is_not_external() {
+        // Fibre Channel, iSCSI, a VHDX and a storage space sit in or behind
+        // the computer. A plain yes must not erase them.
+        for value in [0x06, 0x09, 0x0E, 0x0F, 0x10, 0x14] {
+            let bus = bus_from_storage_bus_type(value);
+            assert!(!is_external(bus, Some(3)), "{value:#04x} {bus}");
+        }
+        assert!(is_external(bus_from_storage_bus_type(0x04), None));
     }
 
     fn raw(
