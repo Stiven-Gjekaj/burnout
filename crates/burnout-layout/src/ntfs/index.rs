@@ -208,6 +208,18 @@ fn split(
             current.push((entry, child));
         }
     }
+    if current.is_empty() {
+        // The last entry went up and left this node empty, which NTFS does
+        // not take: chkdsk of Windows 11 finds an error in such an index.
+        // The entry comes back down, and the last entry of the node before
+        // goes up in its place.
+        let (separator, _) = up.pop().expect("an empty last node follows a separator");
+        let before = nodes.last_mut().expect("a separator follows a node");
+        let (last, last_child) = before.entries.pop().expect("a full node holds entries");
+        let separator_child = std::mem::replace(&mut before.end_child, last_child);
+        current.push((separator, separator_child));
+        up.push((last, Some(first_node + nodes.len() - 1)));
+    }
     nodes.push(Node {
         entries: current,
         end_child: last_child,
@@ -439,6 +451,26 @@ mod tests {
                 let b = remove_fixups(b).unwrap();
                 let used = u32::from_le_bytes(b[0x1C..0x20].try_into().unwrap()) as usize;
                 assert!(used <= 4096 - 0x18);
+            }
+        }
+    }
+
+    #[test]
+    fn no_node_is_left_without_an_entry() {
+        // Sizes that make the last entry of a level go up alone.
+        for count in 2..400u32 {
+            for key in [66usize, 150, 230] {
+                let index = build((0..count).map(|i| entry(i, key)).collect(), &shape(200));
+                for b in &index.blocks {
+                    let b = remove_fixups(b).unwrap();
+                    let first = 0x18 + 0x40;
+                    let flags = u32::from_le_bytes(b[first + 12..first + 16].try_into().unwrap());
+                    assert!(
+                        flags & 2 == 0,
+                        "{count} keys of {key}: a node with the end entry alone"
+                    );
+                }
+                assert_eq!(files(&index).0, (1..=count as u64).collect::<Vec<_>>());
             }
         }
     }
