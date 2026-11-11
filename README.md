@@ -236,8 +236,12 @@ record the reason for each.
   goes on whole. Burnout writes no WIM file, which is also why it stays MIT and
   needs no wimlib.
 - **MBR, and not GPT.** Burnout writes the table itself, so the spare EFI
-  partition that `diskutil` adds on macOS never appears. It also leaves the
-  door open for Legacy BIOS boot later.
+  partition that `diskutil` adds on macOS never appears. It also lets a BIOS
+  start the drive: on `main`, the MBR and partition 1 carry boot code of
+  Burnout's own that loads `bootmgr`. A test in QEMU proves the boot code, and
+  a start of Windows from it waits for its test.
+  [P8 in the roadmap](docs/roadmap.md#p8-legacy-bios-boot) says what is
+  done.
 
 ---
 
