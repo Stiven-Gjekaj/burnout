@@ -190,7 +190,9 @@ A boot signature and a partition table in those 512 bytes mean a hybrid image,
 so Burnout copies the bytes.
 Without them, it looks inside for `sources/install.wim` or
 `sources/install.esd` and builds the installer.
-If it finds neither, it stops and says what it found.
+If it finds neither, it stops and says what it found. A file that xz, gzip,
+zstd, bzip2, zip or 7-Zip made holds the image and is not the image, so
+Burnout names the command that decompresses it.
 
 `--mode raw` and `--mode windows` override the result.
 They exist for the day the guess is wrong, and a normal person never types
@@ -286,7 +288,7 @@ install sources/install.wim, 7.1 GB, LZX compression
    2  Windows 11 Home Single Language  ARM64  10.0.26200.8037  en-US
    3  Windows 11 Pro                   ARM64  10.0.26200.8037  en-US
 
-Setup shows these editions, and you choose one there.
+Setup asks for one of these editions, or write --edition chooses one.
 ```
 
 ```bash
