@@ -9,6 +9,7 @@
 
 #![allow(dead_code)]
 
+mod attrdef;
 mod boot;
 mod record;
 mod runs;
