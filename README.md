@@ -496,8 +496,10 @@ Limits:
 - The drive must have sectors of 512 bytes.
 - Measured in VMs: Windows 11 25H2 Pro of the Arm64 ISO started through
   UEFI, and Windows 11 25H2 Pro of the x64 ISO started through UEFI and
-  through a BIOS. Each came to its first-run setup. Hyper-V on Windows
-  started an x64 drive with Secure Boot on.
+  through a BIOS. Each came to its first-run setup. On a PC with Windows,
+  Hyper-V started an x64 drive with Secure Boot on, and Windows 11 came to
+  its first-run setup in 5 minutes. The `install.esd` of the Media Creation
+  Tool for Windows 10, exported with the DISM command above, did the same.
 
 ### A write that stops
 
