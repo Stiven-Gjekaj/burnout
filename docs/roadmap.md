@@ -1339,9 +1339,23 @@ Done, in `crates/burnout-layout/src/ntfs/`, measured on 2026-11-11:
    the table of Windows 11 in 109 of the 65,536 units, and Windows takes it,
    because each volume carries its own table.
 
-Next: the files of a WIM edition, with their streams, hard links, reparse
-points and security descriptors, then directories that need blocks, then a
-check against each edition of the three ISOs.
+4. **Files and directories.** Each new file gets a record from record 27 on
+   and a run of its own clusters, and each directory an index, in blocks
+   when its root does not hold it. A volume with 309 files in nested
+   directories, 301 of them in one directory, and a name outside ASCII:
+   `chkdsk` found no problems, `dir` listed each name and size, and the
+   content read back. A name that DOS can hold goes in both namespaces, and
+   a long one in POSIX: with Win32 names alone, `chkdsk` found a "minor file
+   name error" in each file.
+5. **Hard links and reparse points.** A file with three names in three
+   directories, and the junction `Documents and Settings` to `C:\Users`.
+   `chkdsk` found no problems, `dir` showed the junction and its target,
+   `fsutil hardlink list` gave the three names, and the content read back
+   through each name.
+
+Next: the security descriptors of a WIM edition, which need index blocks in
+`$Secure`, named streams, a record that its names do not fit, which needs
+an attribute list, and then each edition of the three ISOs.
 
 ### P12. Windows To Go
 
