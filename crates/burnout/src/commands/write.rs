@@ -36,6 +36,7 @@ use burnout_layout::{
     unattend_xml, verify_windows, write_windows, Layout, Serials, Unattend, WindowsDrive,
     WindowsTree, UNATTEND_FILE,
 };
+use burnout_wim::{read_wim, Edition};
 
 use crate::cli::{ModeArg, WriteArgs};
 use crate::elevate::{self, Plan, State};
@@ -89,6 +90,8 @@ struct WindowsJob {
     tree: WindowsTree,
     unattend: String,
     iso_bytes: u64,
+    /// The edition that `--edition` chose, which Setup then installs.
+    edition: Option<Edition>,
 }
 
 /// Write an image to a drive.
@@ -261,6 +264,7 @@ fn refuse_windows_options(args: &WriteArgs) -> Result<()> {
     let options = [
         (args.skip_hardware_checks, "--skip-hardware-checks"),
         (args.no_microsoft_account, "--no-microsoft-account"),
+        (args.edition.is_some(), "--edition"),
     ];
     match options.iter().find(|(on, _)| *on) {
         Some((_, option)) => Err(Error::WindowsOption { option }),
@@ -287,10 +291,14 @@ fn windows_job(args: &WriteArgs) -> Result<WindowsJob> {
         Error::Source { path, detail } => unreadable(format!("{path}: {detail}")),
         other => other,
     })?;
+    let edition = match &args.edition {
+        Some(text) => Some(choose_edition(&source, &tree, text, &name)?),
+        None => None,
+    };
     let unattend = unattend_xml(&Unattend {
         architecture: tree.architecture,
         image: tree.image,
-        edition: None,
+        edition: edition.as_ref().map(|e| e.index),
         skip_hardware_checks: args.skip_hardware_checks,
         no_microsoft_account: args.no_microsoft_account,
     });
@@ -299,7 +307,41 @@ fn windows_job(args: &WriteArgs) -> Result<WindowsJob> {
         tree,
         unattend,
         iso_bytes,
+        edition,
     })
+}
+
+/// The edition of the install image that `text` names, by its index or its
+/// name, as `burnout info` lists them.
+fn choose_edition(
+    source: &IsoSource<File>,
+    tree: &WindowsTree,
+    text: &str,
+    iso: &str,
+) -> Result<Edition> {
+    let path = tree.image_path();
+    let wim = read_wim(source.open_file(path)?, &format!("{iso}: {path}"))?;
+    wim.find_edition(text)
+        .cloned()
+        .ok_or_else(|| Error::NoSuchEdition {
+            path: iso.to_string(),
+            edition: text.to_string(),
+            editions: editions_text(&wim.editions),
+        })
+}
+
+/// The editions as a person reads them: "1 Windows 11 Home and 2 Windows 11
+/// Pro".
+fn editions_text(editions: &[Edition]) -> String {
+    let each: Vec<String> = editions
+        .iter()
+        .map(|e| format!("{} {}", e.index, e.shown_name()))
+        .collect();
+    match each.split_last() {
+        None => "none".to_string(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 /// Copy the image byte for byte, and read the drive back against it.
@@ -628,6 +670,20 @@ fn partition_number_json(p: Option<&Partition>) -> Json {
 }
 
 /// The name of the mode of a job, as JSON gives it.
+/// The edition that Setup installs, or `null` when Setup asks.
+fn edition_json(job: &Job) -> Json {
+    match job {
+        Job::Windows(w) => match &w.edition {
+            Some(e) => Json::Object(vec![
+                ("index", Json::Number(e.index as u64)),
+                ("name", Json::text(e.shown_name())),
+            ]),
+            None => Json::Null,
+        },
+        Job::Raw { .. } => Json::Null,
+    }
+}
+
 fn mode_name(job: &Job) -> &'static str {
     match job {
         Job::Raw { .. } => "raw",
@@ -658,13 +714,25 @@ fn what_goes_on(job: &Job, layout: Option<&Layout>) -> Vec<String> {
         }
     };
     let (w, layout) = w;
-    windows_lines(&w.tree, &w.unattend, layout)
+    windows_lines(&w.tree, &w.unattend, w.edition.as_ref(), layout)
 }
 
 /// The lines of the confirmation for Windows mode.
-fn windows_lines(tree: &WindowsTree, unattend: &str, layout: &Layout) -> Vec<String> {
+fn windows_lines(
+    tree: &WindowsTree,
+    unattend: &str,
+    edition: Option<&Edition>,
+    layout: &Layout,
+) -> Vec<String> {
     let (boot_files, _) = tree.boot_files();
     let mut does = vec!["tells Setup where the install image is".to_string()];
+    if let Some(e) = edition {
+        does.push(format!(
+            "chooses edition {}, {}, so Setup does not ask for one",
+            e.index,
+            e.shown_name()
+        ));
+    }
     if unattend.contains("LabConfig") {
         does.push("turns off the hardware checks of Windows 11".to_string());
     }
@@ -874,6 +942,7 @@ fn confirm(
                     ]),
                 ),
                 ("mode", Json::text(mode_name(job))),
+                ("edition", edition_json(job)),
                 ("drive", drive_json(number, drive)),
                 ("partition", partition_json(partition)),
                 ("expects", Json::text(wanted.unwrap_or(&phrase))),
@@ -912,6 +981,7 @@ mod tests {
             partition: None,
             skip_hardware_checks: false,
             no_microsoft_account: false,
+            edition: None,
         }
     }
 
@@ -1001,7 +1071,7 @@ mod tests {
             skip_hardware_checks: true,
             no_microsoft_account: true,
         });
-        let lines = windows_lines(&tree, &unattend, &layout);
+        let lines = windows_lines(&tree, &unattend, None, &layout);
         assert!(
             lines[1]
                 .starts_with("    partition 1  FAT32, 269.5 MB, 2 boot files and autounattend.xml"),
@@ -1024,11 +1094,46 @@ mod tests {
             skip_hardware_checks: false,
             no_microsoft_account: false,
         });
-        let lines = windows_lines(&tree, &plain, &layout);
+        let lines = windows_lines(&tree, &plain, None, &layout);
         assert_eq!(
             lines[3],
             "autounattend.xml tells Setup where the install image is."
         );
+        let pro = Edition {
+            index: 6,
+            name: "Windows 11 Pro".to_string(),
+            ..Edition::default()
+        };
+        let lines = windows_lines(&tree, &plain, Some(&pro), &layout);
+        assert_eq!(
+            lines[3],
+            "autounattend.xml tells Setup where the install image is, and chooses edition 6, \
+             Windows 11 Pro, so Setup does not ask for one."
+        );
+    }
+
+    #[test]
+    fn the_editions_read_as_a_list() {
+        let e = |index, name: &str| Edition {
+            index,
+            name: name.to_string(),
+            ..Edition::default()
+        };
+        assert_eq!(editions_text(&[]), "none");
+        assert_eq!(editions_text(&[e(1, "Home")]), "1 Home");
+        assert_eq!(
+            editions_text(&[e(1, "Home"), e(2, "Home N"), e(3, "Pro")]),
+            "1 Home, 2 Home N and 3 Pro"
+        );
+    }
+
+    #[test]
+    fn an_edition_is_refused_for_an_image_that_goes_raw() {
+        let mut a = args("ubuntu.iso");
+        a.edition = Some("Pro".to_string());
+        let e = refuse_windows_options(&a).unwrap_err();
+        assert_eq!(e.kind(), "windows_option");
+        assert!(e.to_string().starts_with("--edition"), "{e}");
     }
 
     #[test]

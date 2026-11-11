@@ -112,6 +112,14 @@ pub struct WriteArgs {
     /// Windows mode only. Setup then asks for a local account.
     #[arg(long)]
     pub no_microsoft_account: bool,
+
+    /// The edition that Setup installs, by its index or its name, as
+    /// `burnout info` lists them.
+    ///
+    /// Windows mode only. Setup then does not ask for an edition. A name can
+    /// be the end of the full name, such as Pro for Windows 11 Pro.
+    #[arg(long, value_name = "EDITION")]
+    pub edition: Option<String>,
 }
 
 /// A mode that a person can choose.

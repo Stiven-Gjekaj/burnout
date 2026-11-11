@@ -268,6 +268,16 @@ pub enum Error {
         /// The image, as the person gave it.
         path: String,
     },
+    /// The install image of a Windows ISO has no edition with this index or
+    /// name.
+    NoSuchEdition {
+        /// The image, as the person gave it.
+        path: String,
+        /// The edition, as the person gave it.
+        edition: String,
+        /// The editions that the image holds, as a person reads them.
+        editions: String,
+    },
 }
 
 /// The way past a lock switch, as a literal that `concat!` takes.
@@ -564,6 +574,16 @@ impl fmt::Display for Error {
                      with no --partition"
                 )
             }
+            Error::NoSuchEdition {
+                path,
+                edition,
+                editions,
+            } => {
+                write!(
+                    f,
+                    "{path} holds no edition {edition}. Its editions are {editions}. Give the index or the name that burnout info shows"
+                )
+            }
             Error::VolumeFull {
                 file_system,
                 needed_bytes,
@@ -680,6 +700,7 @@ impl Error {
             Error::PartitionTooSmall { .. } => "partition_too_small",
             Error::NeedsLargerDrive { .. } => "needs_larger_drive",
             Error::VolumeFull { .. } => "volume_full",
+            Error::NoSuchEdition { .. } => "no_such_edition",
             Error::WindowsInPartition { .. } => "windows_in_partition",
             Error::PartitionChanged { .. } => "partition_changed",
             Error::PartitionTooSmallForImage { .. } => "partition_too_small_for_image",
@@ -1156,6 +1177,11 @@ mod tests {
             },
             Error::PartitionChanged { number: 1 },
             Error::WindowsInPartition { path: text() },
+            Error::NoSuchEdition {
+                path: text(),
+                edition: text(),
+                editions: text(),
+            },
         ];
         // A new kind of error does not compile here until it is in the list
         // above, so it cannot miss the test below.
@@ -1196,7 +1222,8 @@ mod tests {
                 | Error::ExtendedPartition { .. }
                 | Error::PartitionTooSmallForImage { .. }
                 | Error::PartitionChanged { .. }
-                | Error::WindowsInPartition { .. } => {}
+                | Error::WindowsInPartition { .. }
+                | Error::NoSuchEdition { .. } => {}
             }
         }
         all
