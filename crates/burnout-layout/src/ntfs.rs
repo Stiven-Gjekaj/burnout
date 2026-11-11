@@ -14,4 +14,5 @@ mod boot;
 mod index;
 mod record;
 mod runs;
+mod secure;
 mod values;
