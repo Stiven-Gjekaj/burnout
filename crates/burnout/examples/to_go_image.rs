@@ -115,7 +115,7 @@ fn run(
     println!("written in {:.1} s", start.elapsed().as_secs_f64());
     to_go::verify(&mut target, &plan, &written, &mut Silent).map_err(err)?;
     println!(
-        "checked the GPT, the boot files and each stream in {:.1} s",
+        "checked the partition table, the boot files and each stream in {:.1} s",
         start.elapsed().as_secs_f64()
     );
     Ok(())
