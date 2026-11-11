@@ -113,8 +113,9 @@ impl PartitionTable {
 /// Read the table from `head`, the first bytes of a drive of `drive_bytes`
 /// with sectors of `sector_size` bytes.
 ///
-/// A drive with no table gives `None`. A table that contradicts itself, or a
-/// partition that reaches past the end of the drive, is an error, because a
+/// A drive with no table gives `None`. A table that contradicts itself, two
+/// partitions that overlap, or a partition that reaches past the end of the
+/// drive, is an error, because a
 /// write that trusted it could land outside the partition.
 pub fn read_table(
     head: &[u8],
@@ -152,6 +153,7 @@ pub fn read_table(
         check_inside(&partition, drive_bytes)?;
         partitions.push(partition);
     }
+    check_apart(&partitions)?;
     Ok(Some(PartitionTable {
         kind: TableKind::Mbr,
         partitions,
@@ -217,6 +219,7 @@ fn read_gpt(head: &[u8], sector_size: u32, drive_bytes: u64) -> Result<Partition
         check_inside(&partition, drive_bytes)?;
         partitions.push(partition);
     }
+    check_apart(&partitions)?;
     Ok(PartitionTable {
         kind: TableKind::Gpt,
         partitions,
@@ -277,6 +280,22 @@ fn check_inside(p: &Partition, drive_bytes: u64) -> Result<()> {
             "partition {} reaches past the end of the drive",
             p.number
         )));
+    }
+    Ok(())
+}
+
+/// Refuse two partitions that share a byte. A write into one of them would
+/// also write into the other.
+fn check_apart(partitions: &[Partition]) -> Result<()> {
+    for (i, a) in partitions.iter().enumerate() {
+        for b in &partitions[i + 1..] {
+            if a.first_byte < b.first_byte + b.bytes && b.first_byte < a.first_byte + a.bytes {
+                return Err(damaged(&format!(
+                    "partitions {} and {} overlap",
+                    a.number, b.number
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -469,6 +488,24 @@ mod tests {
         assert!(
             e.to_string().contains("partition 1 reaches past the end"),
             "{e}"
+        );
+    }
+
+    #[test]
+    fn two_partitions_that_overlap_are_refused() {
+        let head = mbr(&[(0x0C, 2048, 4096), (0x83, 6143, 2048)]);
+        let e = read_table(&head, 512, 64 * MIB).unwrap_err();
+        assert_eq!(e.kind(), "table_damaged");
+        assert!(e.to_string().contains("partitions 1 and 2 overlap"), "{e}");
+        // The partition after the last byte of the first one is apart.
+        let head = mbr(&[(0x0C, 2048, 4096), (0x83, 6144, 2048)]);
+        assert_eq!(
+            read_table(&head, 512, 64 * MIB)
+                .unwrap()
+                .unwrap()
+                .partitions
+                .len(),
+            2
         );
     }
 
