@@ -835,6 +835,11 @@ example as a USB disk. It ran Windows 11 25H2, build 26200.8037.
    Language and Pro. So `burnout write` has no `--edition`, and Burnout does
    not read the editions out of the image. The library can still write an
    index, and the example takes `--edition` for it.
+   P10 reads the editions, so `burnout write` takes `--edition` since then,
+   as an option. With no option, Setup still asks. Measured on 2026-11-11
+   with the Arm64 ISO and `--edition pro` in the same VM: Setup went from
+   the product key page to its check of the hardware, and showed no "Select
+   Image" page.
 2. **Does `HideOnlineAccountScreens` alone skip the Microsoft account on
    25H2?** No. With no network, the first-run setup stops at "Let's connect
    you to a network", and that page has no way on. With the `BypassNRO` key
