@@ -82,7 +82,7 @@ impl Attribute {
     }
 
     /// The bytes of the attribute in a record, with this ID.
-    fn to_bytes(&self, id: u16) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self, id: u16) -> Vec<u8> {
         let name: Vec<u8> = self
             .name
             .encode_utf16()

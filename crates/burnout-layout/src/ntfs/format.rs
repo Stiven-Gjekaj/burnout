@@ -17,6 +17,7 @@ use crate::ntfs::record::{
 };
 use crate::ntfs::runs::Run;
 use crate::ntfs::secure::{secure, FIRST_ID};
+use crate::ntfs::split::split;
 use crate::ntfs::values::{file_attribute as fa, standard_information, FileName, Namespace, Times};
 
 pub(crate) const CLUSTER: u64 = 4096;
@@ -250,6 +251,29 @@ fn root_space(units: usize) -> usize {
     RECORD_BYTES.saturating_sub(fixed)
 }
 
+/// The extension records that a new file may need: none when its
+/// attributes surely fit one record, and enough for each byte else.
+fn extensions_needed(f: &NewFile) -> u64 {
+    let name = |n: &str| align8(0x18 + 0x42 + 2 * n.encode_utf16().count());
+    let mut bytes = FIRST_RECORD_BYTES + 0x18 + 72 + name(&f.name);
+    bytes += f.links.iter().map(|(_, n)| name(n)).sum::<usize>();
+    bytes += 0x50;
+    bytes += f
+        .streams
+        .iter()
+        .map(|(n, _)| 0x50 + 2 * n.encode_utf16().count())
+        .sum::<usize>();
+    bytes += f.reparse.as_ref().map_or(0, |r| align8(0x18 + r.len()));
+    if f.directory {
+        bytes += RECORD_BYTES / 2;
+    }
+    if bytes <= RECORD_BYTES {
+        0
+    } else {
+        (bytes / (RECORD_BYTES - FIRST_RECORD_BYTES)) as u64 + 2
+    }
+}
+
 /// The header of a record and its end marker.
 const FIRST_RECORD_BYTES: usize = 0x38 + 8;
 
@@ -378,7 +402,10 @@ pub(crate) fn format(
     new_files: &[NewFile],
     new_descriptors: &[Vec<u8>],
 ) -> Result<Formatted, String> {
-    let mft_records = (FIRST_FREE_RECORD + new_files.len() as u64)
+    // A file whose attributes do not fit one record takes extension
+    // records, so the table has room for them after the new files.
+    let extension_room: u64 = new_files.iter().map(extensions_needed).sum();
+    let mft_records = (FIRST_FREE_RECORD + new_files.len() as u64 + extension_room)
         .div_ceil(MFT_RECORDS)
         .max(1)
         * MFT_RECORDS;
@@ -875,12 +902,33 @@ pub(crate) fn format(
     let mut put = |n: u64, bytes: Vec<u8>| {
         mft[n as usize * RECORD_BYTES..(n as usize + 1) * RECORD_BYTES].copy_from_slice(&bytes);
     };
+    let mut next_extension = FIRST_FREE_RECORD + new_files.len() as u64;
     for f in &files {
-        let r = f
-            .record()
-            .to_bytes()
-            .map_err(|e| format!("record {} needs {} bytes", e.number, e.needed))?;
-        put(f.number, r);
+        match f.record().to_bytes() {
+            Ok(r) => put(f.number, r),
+            Err(_) => {
+                let parts = split(
+                    f.record(),
+                    || {
+                        let n = next_extension;
+                        next_extension += 1;
+                        if n >= mft_records {
+                            return Err(format!("the table has no record left for {}", f.name));
+                        }
+                        Ok(n as u32)
+                    },
+                    |bytes| clusters.take(clusters_for(bytes)),
+                    CLUSTER,
+                    &mut writes,
+                )?;
+                for r in parts {
+                    let bytes = r
+                        .to_bytes()
+                        .map_err(|e| format!("record {} needs {} bytes", e.number, e.needed))?;
+                    put(r.number as u64, bytes);
+                }
+            }
+        }
     }
     for n in 12..16u64 {
         let reserved = Record {
@@ -906,7 +954,7 @@ pub(crate) fn format(
         );
     }
     let mut mft_bitmap = vec![0u8; (clusters_for(mft_bitmap_bytes) * CLUSTER) as usize];
-    let last = FIRST_FREE_RECORD + new_files.len() as u64;
+    let last = next_extension;
     for n in (0..16).chain(QUOTA..last) {
         mft_bitmap[(n / 8) as usize] |= 1 << (n % 8);
     }
