@@ -177,7 +177,8 @@ fn run(iso: &str, edition: usize, image: &str, gib: u64) -> Result<(), String> {
     );
 
     let disk = gib * 1024 * 1024 * 1024;
-    let partition = disk - start_sector() * 512;
+    // The last MiB stays free, so a GPT can keep its copy there.
+    let partition = disk - start_sector() * 512 - 1024 * 1024;
     let f = format(
         partition,
         start_sector() as u32,
