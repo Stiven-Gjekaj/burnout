@@ -202,7 +202,7 @@ impl File {
             Attribute::resident(kind::FILE_NAME, "", self.file_name().to_bytes()),
         ];
         for (parent, name) in &self.extra_names {
-            let link = self.file_name_as(*parent, name, namespace_for(name));
+            let link = self.file_name_as(*parent, name, Namespace::Posix);
             attributes.push(Attribute::resident(kind::FILE_NAME, "", link.to_bytes()));
         }
         attributes.extend(self.others.iter().cloned());
@@ -267,7 +267,7 @@ fn name_entries(file: &File) -> Vec<(u64, Entry)> {
             Entry {
                 file: reference(file.number, sequence(file.number)),
                 key: file
-                    .file_name_as(*parent, name, namespace_for(name))
+                    .file_name_as(*parent, name, Namespace::Posix)
                     .to_bytes(),
                 data: Vec::new(),
             },
@@ -732,7 +732,13 @@ pub(crate) fn format(
                 .security
                 .map_or(SD_READ_WRITE, |s| FIRST_ID + 2 + s as u32),
             flags: if f.directory { FLAG_DIRECTORY } else { 0 },
-            namespace: namespace_for(&f.name),
+            // A file has one DOS name at most, so a file with hard links
+            // keeps each of its names in POSIX.
+            namespace: if f.links.is_empty() {
+                namespace_for(&f.name)
+            } else {
+                Namespace::Posix
+            },
             sizes,
             others,
             extra_names,
