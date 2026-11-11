@@ -16,7 +16,7 @@ P0 to P7 are done. Raw mode and Windows mode write a drive on all three
 hosts, and a drive from each host installs Windows 11.
 v0.3.0 is the first release, and it holds P0 to P6. v1.0.0 holds P7. v0.1
 and v0.2 were planned, and nobody cut them.
-P8, Legacy BIOS boot, is in progress.
+P8, Legacy BIOS boot, is done, and v1.1.0 holds it.
 Burnout reads an ISO itself, and `burnout write` uses the reader to choose the
 mode.
 
@@ -64,7 +64,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P5 | Reading an ISO | L | **done** |
 | P6 | Windows mode | L | **v0.3.0** |
 | P7 | The edges | M | **v1.0.0** |
-| P8 | Legacy BIOS boot | M | in progress |
+| P8 | Legacy BIOS boot | M | **v1.1.0** |
 
 ---
 
@@ -1056,7 +1056,7 @@ drive on the firmware of a physical PC.
 
 ## P8. Legacy BIOS boot
 
-**Size M. Depends on P7. In progress.**
+**Size M. Depends on P7. Done. Ships as v1.1.0.**
 
 A Windows drive from Burnout starts a PC with UEFI firmware only. P8 makes the
 same drive start a PC with BIOS firmware, or with UEFI in its compatibility
@@ -1109,15 +1109,35 @@ it.
   BOOTMGR" on the screen. `fsck_msdos -n` on macOS finds the volume clean
   with the boot code in it.
 
+- CI on Windows mounts and checks a FAT32 volume that carries the boot code,
+  in the jobs "layout" and "windows mode".
+
+**The exit test, run.** `windows_image` wrote `Win10_22H2_English_x64v1.iso`
+into a drive image of 6,410,993,664 bytes, with 907 files checked against
+their SHA-256. QEMU 11.1.3 started it:
+
+| Firmware | What it showed |
+| --- | --- |
+| SeaBIOS 1.17.0 | The logo of Windows after 1 minute, and the first page of Setup |
+| OVMF of QEMU 11.1.3 | The first page of Setup |
+
+The Fedora 44 x86_64 ISO, as a USB stick that QEMU opened read only, started
+with SeaBIOS (GRUB started its first entry) and with OVMF (the boot screen of
+Fedora). Raw mode writes the ISO byte for byte, so the ISO is the drive.
+
+**A fault that the exit test found, and fixed.** The first run stopped at
+"Windows cannot read the <ProductKey> setting from the unattend answer file",
+with SeaBIOS and with OVMF alike. Windows 10 Setup reads the key from the
+answer file once the file names the image, and the file held none. Windows 11
+asks for the key itself, so the tests of P6 never met it, and v1.0.0 has it
+for each Windows 10 ISO. `autounattend.xml` now gives an empty key that Setup
+always asks for. The run after the fix reached the first page of Setup with
+both firmwares.
+
 **What is open.**
 
-- A real `BOOTMGR`. The T7 that holds the Windows ISOs was not connected
-  when the code was done. The next step writes `Win10_22H2_English_x64v1.iso`
-  to a drive image and starts it in QEMU with SeaBIOS, up to the first screen
-  of Setup.
-- The same drive with OVMF, for UEFI, and a Linux x86_64 ISO in both.
-- The CI check on Windows of a FAT32 volume that carries the boot code. It
-  runs on the next push.
+- Windows 11 with the new answer file. Windows 11 x64 stops under emulation
+  on this Mac, so only a run on Arm64 in UTM can check it.
 - A drive with sectors of 4096 bytes. The code reads each number from the
   BPB, but SeaBIOS 1.17.0 cannot read sector 0 of such a drive at all, so
   QEMU cannot test it. A USB stick has sectors of 512 bytes.
