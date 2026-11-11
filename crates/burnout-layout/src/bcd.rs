@@ -206,6 +206,15 @@ pub fn bcd_store(drive: &BcdDrive) -> Key {
     root
 }
 
+/// The bytes of the store for `drive`, as the file `\\EFI\\Microsoft\\Boot\\BCD`
+/// holds them. The keys get a descriptor that gives SYSTEM and the
+/// administrators full control.
+pub fn store_bytes(drive: &BcdDrive, time: u64) -> Result<Vec<u8>, String> {
+    // KEY_ALL_ACCESS.
+    let descriptor = crate::ntfs::descriptor_for_hive(0x000F_003F);
+    crate::hive::write_hive(&bcd_store(drive), "\\BCD", &descriptor, time)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

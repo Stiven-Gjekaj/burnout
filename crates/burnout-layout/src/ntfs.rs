@@ -23,3 +23,9 @@ mod values;
 pub use format::{format, Formatted, NewFile, NtfsOptions, CLUSTER};
 pub use runs::Run;
 pub use values::Times;
+
+/// The descriptor that the system files get, with `mask` for SYSTEM and the
+/// administrators, for a hive such as a BCD store.
+pub(crate) fn descriptor_for_hive(mask: u32) -> Vec<u8> {
+    descriptor::system_descriptor(mask)
+}
