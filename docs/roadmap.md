@@ -1301,8 +1301,13 @@ The crate `burnout-wim` reads a WIM or ESD file from inside an ISO, through
    SHA-1, and each file of each edition names one of those streams.
 
 **Blocked: LZMS.** An ESD file and a solid resource use LZMS. Microsoft
-publishes no description of LZMS, and the one public decoder, in wimlib, is
-GPL, so new code under the MIT licence cannot follow it. The three ISOs of
+publishes no description of LZMS. The public decoders are in wimlib, whose
+`lzms_decompress.c` is LGPL 2.1 or later, and in 7-Zip, which is LGPL too.
+New code under the MIT licence cannot follow either one. On 2026-11-12 the
+owner of the project asked the author of wimlib for the MIT licence on a
+Rust port of his decoder. That port decoded the `install.esd` of the Media
+Creation Tool for Windows 10 22H2 x64, build 19045.3803: each of its 75,934
+streams matched its SHA-1. The three ISOs of
 Microsoft here hold `install.wim` with LZX, so Windows To Go goes on without
 LZMS. An ESD from the Media Creation Tool waits until a description that
 Burnout can use exists.
