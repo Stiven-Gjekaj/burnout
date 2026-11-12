@@ -494,10 +494,13 @@ Limits:
   dism /Export-Image /SourceImageFile:D:\sources\install.esd /SourceIndex:6 /DestinationImageFile:install.wim /Compress:max
   burnout write install.wim 3 --to-go --edition 1
   ```
-- The drive must have sectors of 512 bytes.
+- The drive can have sectors of 512 bytes or of 4096 bytes. A BIOS starts
+  no drive with sectors of 4096 bytes, so `--bios` refuses such a drive with
+  the error kind `bios_sector_size`.
 - Measured in VMs: Windows 11 25H2 Pro of the Arm64 ISO started through
   UEFI, and Windows 11 25H2 Pro of the x64 ISO started through UEFI and
-  through a BIOS, and one drive of `--bios` started through UEFI too. Each
+  through a BIOS, and one drive of `--bios` started through UEFI too. A
+  drive with sectors of 4096 bytes started through UEFI. Each
   came to its first-run setup. On a PC with Windows,
   Hyper-V started an x64 drive with Secure Boot on, and Windows 11 came to
   its first-run setup in 5 minutes. The `install.esd` of the Media Creation
