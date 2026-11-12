@@ -1594,6 +1594,38 @@ So on macOS `burnout` itself can ask `authopen` for the drive, in the place
 of a restart through `sudo`. The program then starts `burnout` with no
 privilege, and macOS asks for the password in its own dialog.
 
+**Linux, measured on 2026-11-12** in the Fedora 44 live VM (aarch64,
+GNOME), on a disk image of 300 MiB that QEMU gave as a USB disk.
+- `burnout write --json` with no privilege stopped with the kind
+  `needs_privilege`, and wrote nothing.
+- `pkexec burnout write ... --json` showed the dialog of GNOME, and the
+  person of the session authenticated in it. `pkexec` passed the input and
+  the output through. All 11 events came as lines, and the exit code was 0.
+  Burnout wrote 8 MiB and checked it byte for byte.
+- The live system does not say which disk it starts from, so the `confirm`
+  event asked for the model and the size, and a plain `yes` was refused with
+  `not_confirmed`. The program must send the answer that the event names in
+  `expects`, after the person types it.
+
+**Windows, measured on 2026-11-12** in the Windows 11 VM (Arm64), on a disk
+image of 280 MiB that QEMU gave as a USB disk. A test program with no
+privilege made a named pipe with `PIPE_REJECT_REMOTE_CLIENTS`, and started
+itself again through `ShellExecuteEx` with `runas` and
+`SEE_MASK_NOCLOSEPROCESS`.
+- UAC showed its prompt, with "unknown publisher" for the program that no
+  certificate signs. The account was an administrator, so the prompt asked
+  for a yes and no password.
+- The elevated child opened the pipe, found the one drive of 280 MiB, and
+  wrote a sector of it back unchanged through `\\.\PhysicalDrive2`.
+- Its lines came through the pipe as it wrote them, one second apart. Its
+  exit code came to the parent through the handle of the process.
+- A program that the MSVC runtime does not link in stopped with
+  `0xC0000135`, a DLL not found. The release links it in, so the program must
+  do the same.
+
+So on Windows `burnout` needs one change: an option that names a pipe for
+the events, because a child that UAC starts has no output of its own.
+
 So the first step is a spike, as P0 was. On each host it starts `burnout
 list --json` and then a write to a disk image with the privilege, from a
 program that a person opens with a double-click, and records what works. The
