@@ -1,15 +1,48 @@
-import { AboutSlint, Button, StandardTableView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { AboutSlint, Button, LineEdit, ProgressIndicator, StandardTableView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+// The pages of the window, in the order of a write.
+export enum Page { choose, confirm, running, finished }
 
 export component MainWindow inherits Window {
     title: "Burnout";
-    preferred-width: 640px;
-    preferred-height: 400px;
+    preferred-width: 680px;
+    preferred-height: 460px;
+    min-width: 520px;
+    min-height: 360px;
 
-    // One row for each drive: number, name, size, bus, and what it is.
+    in-out property <Page> page: Page.choose;
+
+    // The page to choose: one row for each drive, and the image.
     in property <[[StandardListViewItem]]> drives;
-    // A line under the list: what went wrong, or how many drives there are.
+    in-out property <int> selected-row: -1;
+    in property <string> image-path;
+    in property <bool> can-write;
+    // A line under the list: what went wrong, or what to do next.
     in property <string> status;
+
+    // The page to confirm: what Burnout names, and the answer that it takes.
+    in property <string> confirm-text;
+    in property <string> expects;
+    in-out property <string> typed;
+
+    // The page of the write.
+    in property <string> stage-text;
+    in property <float> progress;
+    in property <bool> progress-known;
+    in property <string> progress-text;
+    in property <bool> stopping;
+
+    // The last page.
+    in property <string> end-title;
+    in property <string> end-text;
+
     callback refresh();
+    callback row-chosen(int);
+    callback choose-image();
+    callback start-write();
+    callback send-answer(string);
+    callback cancel();
+    callback back();
 
     MenuBar {
         Menu {
@@ -42,34 +75,148 @@ export component MainWindow inherits Window {
         }
     }
 
-    VerticalBox {
+    if root.page == Page.choose: VerticalBox {
         Text {
-            text: "Drives";
-            font-size: 1.4rem;
+            text: "1. Choose the image";
+            font-size: 1.15rem;
             font-weight: 600;
         }
-        StandardTableView {
+        HorizontalBox {
+            padding: 0;
+            Text {
+                text: root.image-path == "" ? "No image chosen." : root.image-path;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+            Button {
+                text: "Choose image…";
+                clicked => { root.choose-image(); }
+            }
+        }
+        Text {
+            text: "2. Choose the drive to erase";
+            font-size: 1.15rem;
+            font-weight: 600;
+        }
+        table := StandardTableView {
             vertical-stretch: 1;
             columns: [
                 { title: "#", min-width: 40px, horizontal-stretch: 0 },
-                { title: "Drive", min-width: 240px, horizontal-stretch: 1 },
+                { title: "Drive", min-width: 220px, horizontal-stretch: 1 },
                 { title: "Size", min-width: 90px, horizontal-stretch: 0 },
                 { title: "Bus", min-width: 80px, horizontal-stretch: 0 },
                 { title: "Kind", min-width: 110px, horizontal-stretch: 0 },
             ];
             rows: root.drives;
+            current-row: root.selected-row;
+            current-row-changed(row) => {
+                root.selected-row = row;
+                root.row-chosen(row);
+            }
+        }
+        Text {
+            text: root.status;
+            wrap: word-wrap;
         }
         HorizontalBox {
             padding: 0;
-            Text {
-                text: root.status;
-                vertical-alignment: center;
-                horizontal-stretch: 1;
-                wrap: word-wrap;
-            }
             Button {
                 text: "Refresh";
                 clicked => { root.refresh(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                text: "Write";
+                primary: true;
+                enabled: root.can-write;
+                clicked => { root.start-write(); }
+            }
+        }
+    }
+
+    if root.page == Page.confirm: VerticalBox {
+        Text {
+            text: "This erases the drive. Nothing undoes it.";
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: #c62828;
+        }
+        Text {
+            text: root.confirm-text;
+            wrap: word-wrap;
+        }
+        Text {
+            text: "Type \{root.expects} to go on:";
+            wrap: word-wrap;
+        }
+        answer := LineEdit {
+            text <=> root.typed;
+            placeholder-text: root.expects;
+            accepted(text) => { if text != "" { root.send-answer(text); } }
+            init => { self.focus(); }
+        }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalBox {
+            padding: 0;
+            Button {
+                text: "Cancel";
+                clicked => { root.cancel(); }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                text: "Erase and write";
+                primary: true;
+                enabled: root.typed != "";
+                clicked => { root.send-answer(root.typed); }
+            }
+        }
+    }
+
+    if root.page == Page.running: VerticalBox {
+        Text {
+            text: root.stage-text;
+            font-size: 1.15rem;
+            font-weight: 600;
+        }
+        ProgressIndicator {
+            progress: root.progress;
+            indeterminate: !root.progress-known;
+        }
+        Text {
+            text: root.progress-text;
+            wrap: word-wrap;
+        }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalBox {
+            padding: 0;
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                text: root.stopping ? "Stopping…" : "Cancel";
+                enabled: !root.stopping;
+                clicked => { root.cancel(); }
+            }
+        }
+    }
+
+    if root.page == Page.finished: VerticalBox {
+        Text {
+            text: root.end-title;
+            font-size: 1.15rem;
+            font-weight: 600;
+        }
+        Text {
+            text: root.end-text;
+            wrap: word-wrap;
+        }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalBox {
+            padding: 0;
+            Rectangle { horizontal-stretch: 1; }
+            Button {
+                text: "Back to the drives";
+                primary: true;
+                clicked => { root.back(); }
             }
         }
     }

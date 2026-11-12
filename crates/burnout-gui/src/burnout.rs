@@ -23,6 +23,8 @@ pub struct Drive {
     pub number: u64,
     /// The name of the drive, as the host gives it.
     pub name: String,
+    /// The path that `--device` takes.
+    pub node: String,
     /// The size in bytes.
     pub size_bytes: u64,
     /// The bus, such as USB.
@@ -59,6 +61,7 @@ pub fn parse_list(text: &str) -> Result<Vec<Drive>, String> {
             Ok(Drive {
                 number: d["number"].as_u64().ok_or_else(|| field("number"))?,
                 name: d["name"].as_str().ok_or_else(|| field("name"))?.to_string(),
+                node: d["node"].as_str().ok_or_else(|| field("node"))?.to_string(),
                 size_bytes: d["size_bytes"]
                     .as_u64()
                     .ok_or_else(|| field("size_bytes"))?,
@@ -140,6 +143,11 @@ impl Burnout {
         }
     }
 
+    /// Where `burnout` is.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     /// The drives that `burnout list --json` gives.
     pub fn list(&self) -> Result<Vec<Drive>, String> {
         parse_list(&self.run(&["list", "--json"])?)
@@ -185,6 +193,7 @@ mod tests {
         assert_eq!(drives.len(), 3);
         assert_eq!(drives[1].name, "SanDisk Ultra");
         assert_eq!(drives[1].number, 2);
+        assert_eq!(drives[1].node, "/dev/rdisk4");
         let kinds: Vec<_> = drives.iter().map(Drive::kind).collect();
         assert_eq!(kinds, ["system disk", "removable", "fixed"]);
     }
