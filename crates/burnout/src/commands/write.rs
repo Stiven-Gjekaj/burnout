@@ -253,9 +253,8 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
             drive: describe(&chosen),
         });
     }
-    #[cfg(windows)]
-    if args.pipe.is_some() {
-        crate::pipe::stop_on_request();
+    if stops_on_input(args) {
+        crate::stop::on_input();
     }
 
     // The confirmation takes a person's time, and a drive can leave in it.
@@ -1127,6 +1126,16 @@ fn names_drive(drive: &DriveInfo, path: &str) -> bool {
         || path.strip_prefix("/dev/") == Some(drive.id.as_str())
 }
 
+/// Whether a line of the input can stop the write. `--pipe` always does
+/// this, because the program behind the pipe has no other way to stop it.
+fn stops_on_input(args: &WriteArgs) -> bool {
+    #[cfg(windows)]
+    if args.pipe.is_some() {
+        return true;
+    }
+    args.stop_on_input
+}
+
 /// Show the target and wait for the person to agree to it.
 ///
 /// Two prompts, and the harder one is not only for `--force`.
@@ -1281,6 +1290,7 @@ mod tests {
             edition: None,
             to_go: false,
             bios: false,
+            stop_on_input: false,
             #[cfg(windows)]
             pipe: None,
         }
@@ -1410,6 +1420,18 @@ mod tests {
         for mode in [Mode::Raw, Mode::Windows] {
             assert_eq!(decide(Ok(mode), Path::new("image.iso")).unwrap(), mode);
         }
+    }
+
+    #[test]
+    fn only_the_option_lets_the_input_stop_the_write() {
+        // A script that pipes "yes" in closes the input at once, and that
+        // must not stop its write.
+        assert!(!stops_on_input(&args("ubuntu.iso")));
+        let a = WriteArgs {
+            stop_on_input: true,
+            ..args("ubuntu.iso")
+        };
+        assert!(stops_on_input(&a));
     }
 
     #[test]

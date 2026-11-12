@@ -58,26 +58,6 @@ pub fn connect(name: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Stop the write when the program writes "stop" into the pipe of the
-/// answer, or closes it.
-///
-/// Call this after the answer is read. A closed pipe means that the program
-/// is gone, and nobody then sees the progress or can stop the write. So the
-/// program keeps the pipe open until Burnout ends.
-#[cfg(windows)]
-pub fn stop_on_request() {
-    std::thread::spawn(|| {
-        for line in std::io::stdin().lines() {
-            match line {
-                Ok(line) if is_stop(&line) => break,
-                Ok(_) => continue,
-                Err(_) => break,
-            }
-        }
-        crate::stop::now()
-    });
-}
-
 /// Whether a line from the program asks for a stop.
 pub fn is_stop(line: &str) -> bool {
     line.trim().eq_ignore_ascii_case("stop")

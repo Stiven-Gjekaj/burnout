@@ -241,11 +241,10 @@ pub fn on_stop(json: bool) {
     }
 }
 
-/// Say what the drive holds, and end with 130, as Ctrl-C does on Windows.
+/// Say what the drive holds, and end with 130, as Ctrl-C does.
 ///
-/// A program that started Burnout through UAC cannot send Ctrl-C to it, so
-/// the pipe of `--pipe` calls this too.
-#[cfg(windows)]
+/// A program that started Burnout through UAC or through pkexec cannot send
+/// Ctrl-C to it, so a stop that comes through the input calls this.
 pub fn now() -> ! {
     let now = reached();
     let _ = std::io::Write::write_all(&mut std::io::stderr(), stopped(now).as_bytes());
@@ -254,6 +253,25 @@ pub fn now() -> ! {
         let _ = std::io::Write::write_all(&mut std::io::stdout(), line.as_bytes());
     }
     std::process::exit(130)
+}
+
+/// Stop the write when the input says "stop", or ends.
+///
+/// Call this after the answer is read. An input that ends means that the
+/// program which started Burnout is gone, and nobody then sees the progress
+/// or can stop the write. So the program keeps the input open until Burnout
+/// ends.
+pub fn on_input() {
+    std::thread::spawn(|| {
+        for line in std::io::stdin().lines() {
+            match line {
+                Ok(line) if crate::pipe::is_stop(&line) => break,
+                Ok(_) => continue,
+                Err(_) => break,
+            }
+        }
+        now()
+    });
 }
 
 /// Say what the drive holds when Ctrl-C, Ctrl-Break or the close of the

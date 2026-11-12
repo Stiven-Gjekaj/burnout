@@ -142,6 +142,16 @@ pub struct WriteArgs {
     #[arg(long, requires = "to_go")]
     pub bios: bool,
 
+    /// After the answer, read the input, and stop the write when it says
+    /// "stop" or ends.
+    ///
+    /// For a program that cannot send Ctrl+C to Burnout, such as one that
+    /// starts it through pkexec, which runs it as root. The stop is the same
+    /// as for Ctrl+C, and the exit code is 130. So the program keeps the input
+    /// open until Burnout ends. `--pipe` on Windows does this always.
+    #[arg(long)]
+    pub stop_on_input: bool,
+
     /// Read the answer and write the JSON events through two named pipes.
     ///
     /// Windows only, with --json. This is for a program that starts Burnout
