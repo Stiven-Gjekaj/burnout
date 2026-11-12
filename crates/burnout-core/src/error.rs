@@ -299,6 +299,11 @@ pub enum Error {
         /// The index of the edition in the install image.
         index: u32,
     },
+    /// A drive for a BIOS on sectors that a BIOS does not start.
+    BiosSectorSize {
+        /// The sector of the drive, in bytes.
+        sector_bytes: u32,
+    },
 }
 
 /// The way past a lock switch, as a literal that `concat!` takes.
@@ -670,6 +675,12 @@ impl fmt::Display for Error {
                      --edition 1"
                 )
             }
+            Error::BiosSectorSize { sector_bytes } => {
+                write!(
+                    f,
+                    "the drive has sectors of {sector_bytes} bytes, and a BIOS starts no drive with such sectors. Leave out --bios, and the drive starts through UEFI"
+                )
+            }
             Error::VolumeFull {
                 file_system,
                 needed_bytes,
@@ -786,6 +797,7 @@ impl Error {
             Error::PartitionTooSmall { .. } => "partition_too_small",
             Error::NeedsLargerDrive { .. } => "needs_larger_drive",
             Error::VolumeFull { .. } => "volume_full",
+            Error::BiosSectorSize { .. } => "bios_sector_size",
             Error::LzmsImage { .. } => "lzms_image",
             Error::CompressedImage { .. } => "compressed_image",
             Error::NoSuchEdition { .. } => "no_such_edition",
@@ -1280,6 +1292,7 @@ mod tests {
                 inside_iso: true,
                 index: 3,
             },
+            Error::BiosSectorSize { sector_bytes: 4096 },
         ];
         // A new kind of error does not compile here until it is in the list
         // above, so it cannot miss the test below.
@@ -1323,7 +1336,8 @@ mod tests {
                 | Error::WindowsInPartition { .. }
                 | Error::NoSuchEdition { .. }
                 | Error::CompressedImage { .. }
-                | Error::LzmsImage { .. } => {}
+                | Error::LzmsImage { .. }
+                | Error::BiosSectorSize { .. } => {}
             }
         }
         all

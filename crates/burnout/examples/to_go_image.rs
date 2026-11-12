@@ -1,9 +1,12 @@
 //! Write a drive of Windows To Go into an image file, with the code of
 //! `burnout write --to-go`, and read it back.
 //!
-//!     cargo run --release -p burnout --example to_go_image -- <iso or wim> <edition> <image> <GiB> [bios]
+//!     cargo run --release -p burnout --example to_go_image -- <iso or wim> <edition> <image> <GiB> [bios | 4096]
 //!
 //! With `bios` at the end, the drive is for a BIOS, as `--bios` makes it.
+//! With `4096` at the end, the drive has sectors of 4096 bytes, for UEFI. A
+//! VM then gives the image to the guest with sectors of 4096 bytes, as QEMU
+//! does with `logical_block_size=4096`.
 //!
 //! A test that cannot attach a virtual disk, because it has no privilege,
 //! uses this. A VM then starts the image. The image is raw, with sectors of
@@ -26,23 +29,32 @@ use burnout_wim::{read_wim, Compression};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let firmware = match args.get(4).map(String::as_str) {
-        None => to_go::Firmware::Uefi,
-        Some("bios") => to_go::Firmware::Bios,
+    let usage = "usage: to_go_image <iso or wim> <edition> <image> <GiB> [bios | 4096]";
+    let (firmware, sector) = match args.get(4).map(String::as_str) {
+        None => (to_go::Firmware::Uefi, 512),
+        Some("bios") => (to_go::Firmware::Bios, 512),
+        Some("4096") => (to_go::Firmware::Uefi, 4096),
         Some(_) => {
-            eprintln!("usage: to_go_image <iso or wim> <edition> <image> <GiB> [bios]");
+            eprintln!("{usage}");
             return ExitCode::from(2);
         }
     };
     if args.len() < 4 {
-        eprintln!("usage: to_go_image <iso or wim> <edition> <image> <GiB> [bios]");
+        eprintln!("{usage}");
         return ExitCode::from(2);
     }
     let Ok(gib) = args[3].parse::<u64>() else {
         eprintln!("to_go_image: {} is not a number of GiB", args[3]);
         return ExitCode::from(2);
     };
-    match run(&args[0], &args[1], Path::new(&args[2]), gib, firmware) {
+    match run(
+        &args[0],
+        &args[1],
+        Path::new(&args[2]),
+        gib,
+        firmware,
+        sector,
+    ) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("to_go_image: {e}");
@@ -57,6 +69,7 @@ fn run(
     out: &Path,
     gib: u64,
     firmware: to_go::Firmware,
+    sector: u32,
 ) -> Result<(), String> {
     let start = Instant::now();
     let err = |e: burnout_core::Error| e.to_string();
@@ -103,13 +116,22 @@ fn run(
 
     let bytes = gib * 1024 * 1024 * 1024;
     let seed = format!("{}/{:?}", out.display(), std::time::SystemTime::now());
-    let plan =
-        to_go::plan(&mut reader, &name, &wim, position, bytes, &seed, firmware).map_err(err)?;
+    let plan = to_go::plan(
+        &mut reader,
+        &name,
+        &wim,
+        position,
+        bytes,
+        sector,
+        &seed,
+        firmware,
+    )
+    .map_err(err)?;
     println!(
         "{}: {} files and directories, {} more names, {} bytes of streams, {} boot files",
         plan.edition, plan.files, plan.links, plan.stream_bytes, plan.boot_files
     );
-    let mut target = sparse_target(out, bytes)?;
+    let mut target = sparse_target(out, bytes, sector)?;
     let written =
         to_go::write(&mut target, &plan, &mut reader, &wim, &name, &mut Silent).map_err(err)?;
     println!("written in {:.1} s", start.elapsed().as_secs_f64());
@@ -122,7 +144,7 @@ fn run(
 }
 
 /// A new file of `bytes` bytes as the drive, sparse on each host.
-fn sparse_target(path: &Path, bytes: u64) -> Result<FileTarget, String> {
+fn sparse_target(path: &Path, bytes: u64, sector: u32) -> Result<FileTarget, String> {
     let fault = |e: std::io::Error| format!("{}: {e}", path.display());
     let file = std::fs::OpenOptions::new()
         .read(true)
@@ -134,7 +156,7 @@ fn sparse_target(path: &Path, bytes: u64) -> Result<FileTarget, String> {
     #[cfg(windows)]
     set_sparse(&file).map_err(fault)?;
     file.set_len(bytes).map_err(fault)?;
-    FileTarget::new(file, 512).map_err(|e| e.to_string())
+    FileTarget::new(file, sector).map_err(|e| e.to_string())
 }
 
 /// Ask NTFS to keep the file sparse, so the clusters that nothing writes

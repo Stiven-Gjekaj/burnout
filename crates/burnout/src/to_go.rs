@@ -49,7 +49,8 @@ pub const WINDOWS_FIRST_SECTOR: u64 = 512 * 2048;
 const TAIL_BYTES: u64 = 1024 * 1024;
 /// A MiB.
 const MIB: u64 = 1024 * 1024;
-/// The sector size of the layout. A drive with other sectors is refused.
+/// The unit of the constants of the layout. A drive has sectors of 512 or
+/// 4096 bytes, and the layout is the same in bytes on both.
 const SECTOR: u32 = 512;
 /// The time on the new volumes: 2025-11-11, in the units of NTFS and of
 /// the registry.
@@ -88,6 +89,8 @@ pub struct ToGo {
     /// The firmware that starts the drive.
     pub firmware: Firmware,
     drive_bytes: u64,
+    /// The sector of the drive: 512 or 4096.
+    sector_bytes: u32,
     windows_bytes: u64,
     fills: Vec<Fill>,
     sizes: HashMap<Digest, u64>,
@@ -139,17 +142,27 @@ pub fn needed_bytes(edition_bytes: u64) -> u64 {
 }
 
 /// Work out the drive for edition `edition`, the position of the edition in
-/// the install image counted from 1, for `firmware`. `seed` makes the GUIDs
-/// and the disk signature of the drive.
+/// the install image counted from 1, for `firmware`, on a drive of
+/// `drive_bytes` with sectors of `sector_bytes`. `seed` makes the GUIDs and
+/// the disk signature of the drive.
+// Each argument is a separate fact about the drive or the image.
+#[allow(clippy::too_many_arguments)]
 pub fn plan<R: Read + Seek>(
     wim_file: &mut R,
     name: &str,
     wim: &Wim,
     edition: usize,
     drive_bytes: u64,
+    sector_bytes: u32,
     seed: &str,
     firmware: Firmware,
 ) -> Result<ToGo> {
+    match (sector_bytes, firmware) {
+        (512, _) | (4096, Firmware::Uefi) => {}
+        (4096, Firmware::Bios) => return Err(Error::BiosSectorSize { sector_bytes }),
+        _ => return Err(Error::SectorSize { got: sector_bytes }),
+    }
+    let sector = u64::from(sector_bytes);
     let info = wim
         .editions
         .get(edition.wrapping_sub(1))
@@ -292,9 +305,9 @@ pub fn plan<R: Read + Seek>(
     let seed_serial = new_guid(seed, 6);
     let ntfs = format(
         windows_bytes,
-        WINDOWS_FIRST_SECTOR as u32,
+        (WINDOWS_FIRST_SECTOR * u64::from(SECTOR) / sector) as u32,
         &NtfsOptions {
-            sector_bytes: 512,
+            sector_bytes,
             label: "WINDOWS".into(),
             serial: u64::from_le_bytes(seed_serial[..8].try_into().expect("8 bytes")),
             time: TIME,
@@ -405,12 +418,19 @@ pub fn plan<R: Read + Seek>(
     }
     let table = match firmware {
         Firmware::Uefi => {
-            let g = gpt_for(drive_bytes, disk_id, efi_id, windows_id, windows_bytes)
-                .map_err(|e| image_error(name, e))?;
+            let g = gpt_for(
+                drive_bytes,
+                sector_bytes,
+                disk_id,
+                efi_id,
+                windows_id,
+                windows_bytes,
+            )
+            .map_err(|e| image_error(name, e))?;
             Table {
                 head: g.head,
                 tail: g.tail,
-                tail_byte: g.tail_sector * u64::from(SECTOR),
+                tail_byte: g.tail_sector * sector,
             }
         }
         Firmware::Bios => {
@@ -457,6 +477,7 @@ pub fn plan<R: Read + Seek>(
         boot_files,
         firmware,
         drive_bytes,
+        sector_bytes,
         windows_bytes,
         fills,
         sizes,
@@ -537,28 +558,32 @@ impl BootFiles {
 
 fn gpt_for(
     drive_bytes: u64,
+    sector_bytes: u32,
     disk: [u8; 16],
     efi: [u8; 16],
     windows: [u8; 16],
     windows_bytes: u64,
 ) -> std::result::Result<burnout_layout::gpt::Gpt, String> {
+    // The layout in bytes, counted in the sectors of the drive.
+    let to_drive = |sectors: u64| sectors * u64::from(SECTOR) / u64::from(sector_bytes);
     gpt(
-        drive_bytes / u64::from(SECTOR),
-        SECTOR,
+        drive_bytes / u64::from(sector_bytes),
+        sector_bytes,
         disk,
         &[
             GptPartition {
                 kind: EFI_SYSTEM,
                 id: efi,
-                first: EFI_FIRST_SECTOR,
-                last: EFI_FIRST_SECTOR + EFI_SECTORS - 1,
+                first: to_drive(EFI_FIRST_SECTOR),
+                last: to_drive(EFI_FIRST_SECTOR + EFI_SECTORS) - 1,
                 name: "EFI system partition".to_string(),
             },
             GptPartition {
                 kind: BASIC_DATA,
                 id: windows,
-                first: WINDOWS_FIRST_SECTOR,
-                last: WINDOWS_FIRST_SECTOR + windows_bytes / u64::from(SECTOR) - 1,
+                first: to_drive(WINDOWS_FIRST_SECTOR),
+                last: (to_drive(WINDOWS_FIRST_SECTOR) + windows_bytes / u64::from(sector_bytes))
+                    - 1,
                 name: "Windows".to_string(),
             },
         ],
@@ -595,7 +620,7 @@ pub fn write<T: BlockTarget, R: Read + Seek>(
     name: &str,
     progress: &mut dyn Progress,
 ) -> Result<Written> {
-    if drive.logical_sector_size() != SECTOR {
+    if drive.logical_sector_size() != plan.sector_bytes {
         return Err(Error::SectorSize {
             got: drive.logical_sector_size(),
         });
@@ -634,7 +659,8 @@ pub fn write<T: BlockTarget, R: Read + Seek>(
         &Fat32Options {
             label: "SYSTEM",
             serial: plan.serial,
-            first_sector: EFI_FIRST_SECTOR as u32,
+            first_sector: (EFI_FIRST_SECTOR * u64::from(SECTOR) / u64::from(plan.sector_bytes))
+                as u32,
         },
     )?;
     let manifest = copy_to_fat32(efi_window(drive)?, &plan.boot)?;
@@ -800,9 +826,13 @@ mod tests {
 
     impl Drive {
         fn new(test: &str, bytes: u64) -> (Drive, FileTarget) {
+            Drive::with_sectors(test, bytes, 512)
+        }
+
+        fn with_sectors(test: &str, bytes: u64, sector: u32) -> (Drive, FileTarget) {
             let path = std::env::temp_dir()
                 .join(format!("burnout-to-go-{test}-{}.img", std::process::id()));
-            let target = FileTarget::create(&path, bytes, 512).unwrap();
+            let target = FileTarget::create(&path, bytes, sector).unwrap();
             (Drive(path), target)
         }
     }
@@ -829,6 +859,7 @@ mod tests {
             &wim,
             1,
             bytes,
+            512,
             "test",
             Firmware::Uefi,
         )
@@ -869,6 +900,78 @@ mod tests {
     }
 
     #[test]
+    fn a_drive_with_sectors_of_4096_bytes_reads_back_in_its_own_sectors() {
+        let (mut file, wim) = open("to-go.wim");
+        let bytes = 600 * MIB;
+        let plan = plan(
+            &mut file,
+            "to-go.wim",
+            &wim,
+            1,
+            bytes,
+            4096,
+            "test",
+            Firmware::Uefi,
+        )
+        .unwrap();
+        let (_keep, mut drive) = Drive::with_sectors("4096", bytes, 4096);
+        let written = write(&mut drive, &plan, &mut file, &wim, "to-go.wim", &mut Silent).unwrap();
+        verify(&mut drive, &plan, &written, &mut Silent).unwrap();
+
+        let mut head = vec![0u8; MIB as usize];
+        drive.seek(SeekFrom::Start(0)).unwrap();
+        drive.read_exact(&mut head).unwrap();
+        assert_eq!(&head[4096..4104], b"EFI PART", "the header in sector 1");
+        let table = read_table(&head, 4096, bytes).unwrap().unwrap();
+        assert_eq!(table.kind, TableKind::Gpt);
+        assert_eq!(table.partitions[0].first_byte, MIB);
+        assert_eq!(table.partitions[0].bytes, 300 * MIB);
+        assert_eq!(table.partitions[1].first_byte, 512 * MIB);
+        assert_eq!(table.partitions[1].bytes, 87 * MIB);
+
+        // Each boot sector counts in sectors of 4096 bytes.
+        let mut sector = vec![0u8; 4096];
+        drive.seek(SeekFrom::Start(MIB)).unwrap();
+        drive.read_exact(&mut sector).unwrap();
+        assert_eq!(u16::from_le_bytes([sector[11], sector[12]]), 4096, "FAT32");
+        assert_eq!(u32::from_le_bytes(sector[28..32].try_into().unwrap()), 256);
+        drive.seek(SeekFrom::Start(512 * MIB)).unwrap();
+        drive.read_exact(&mut sector).unwrap();
+        assert_eq!(&sector[3..11], b"NTFS    ");
+        assert_eq!(u16::from_le_bytes([sector[11], sector[12]]), 4096, "NTFS");
+        assert_eq!(
+            u32::from_le_bytes(sector[28..32].try_into().unwrap()),
+            512 * 256
+        );
+
+        // A drive of other sectors than the plan is refused before a write.
+        let (_other, mut small) = Drive::new("4096-other", bytes);
+        let e = write(&mut small, &plan, &mut file, &wim, "to-go.wim", &mut Silent).unwrap_err();
+        assert!(matches!(e, Error::SectorSize { got: 512 }), "{e}");
+    }
+
+    #[test]
+    fn a_drive_for_a_bios_with_sectors_of_4096_bytes_is_refused() {
+        let (mut file, wim) = open("to-go.wim");
+        let e = plan(
+            &mut file,
+            "to-go.wim",
+            &wim,
+            1,
+            600 * MIB,
+            4096,
+            "test",
+            Firmware::Bios,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(e, Error::BiosSectorSize { sector_bytes: 4096 }),
+            "{e}"
+        );
+        assert!(e.to_string().contains("Leave out --bios"), "{e}");
+    }
+
+    #[test]
     fn a_drive_for_a_bios_has_an_mbr_with_burnout_code_and_an_active_system_partition() {
         let (mut file, wim) = open("to-go.wim");
         let bytes = 600 * MIB;
@@ -878,6 +981,7 @@ mod tests {
             &wim,
             1,
             bytes,
+            512,
             "test",
             Firmware::Bios,
         )
@@ -914,6 +1018,7 @@ mod tests {
             &wim,
             1,
             bytes,
+            512,
             "old",
             Firmware::Uefi,
         )
@@ -982,6 +1087,7 @@ mod tests {
             &wim,
             1,
             600 * MIB,
+            512,
             "test",
             Firmware::Bios,
         )
@@ -1001,6 +1107,7 @@ mod tests {
             &wim,
             1,
             bytes,
+            512,
             "test",
             Firmware::Uefi,
         )
@@ -1030,6 +1137,7 @@ mod tests {
             &wim,
             1,
             600 * MIB,
+            512,
             "test",
             Firmware::Uefi,
         )
@@ -1046,6 +1154,7 @@ mod tests {
             &wim,
             1,
             520 * MIB,
+            512,
             "test",
             Firmware::Uefi,
         )

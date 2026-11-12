@@ -182,6 +182,7 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
                 &t.wim,
                 t.position,
                 chosen.size_bytes,
+                chosen.logical_sector_size,
                 &seed(&chosen),
                 if args.bios {
                     to_go::Firmware::Bios
@@ -1294,6 +1295,7 @@ mod tests {
             &job.wim,
             1,
             600 << 20,
+            512,
             "t",
             to_go::Firmware::Uefi,
         )
