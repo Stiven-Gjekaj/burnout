@@ -301,6 +301,7 @@ fn to_go<R: std::io::Read + Seek>(
         (new_guid(&seed, 1), new_guid(&seed, 2), new_guid(&seed, 3));
     let table = gpt(
         sectors,
+        512,
         disk_id,
         &[
             GptPartition {

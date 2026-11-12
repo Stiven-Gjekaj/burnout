@@ -543,6 +543,7 @@ fn gpt_for(
 ) -> std::result::Result<burnout_layout::gpt::Gpt, String> {
     gpt(
         drive_bytes / u64::from(SECTOR),
+        SECTOR,
         disk,
         &[
             GptPartition {

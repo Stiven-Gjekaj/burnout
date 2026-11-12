@@ -7,7 +7,9 @@
 //!
 //! The table is a protective MBR, a header in sector 1 with 128 entries of
 //! 128 bytes after it, and a copy of the entries and the header at the end
-//! of the disk. The header and the entries each carry a CRC-32.
+//! of the disk. The header and the entries each carry a CRC-32. The entries
+//! take 16 KiB, so 32 sectors of 512 bytes or 4 of 4096 bytes. The MBR and
+//! each header fill a sector of their own.
 
 use burnout_core::crc32;
 
@@ -28,7 +30,11 @@ pub const BASIC_DATA: [u8; 16] = guid(
 
 const ENTRIES: usize = 128;
 const ENTRY_BYTES: usize = 128;
-const ENTRY_SECTORS: u64 = (ENTRIES * ENTRY_BYTES / 512) as u64;
+
+/// The sectors that the entries take, with sectors of `sector_bytes`.
+fn entry_sectors(sector_bytes: u32) -> u64 {
+    (ENTRIES * ENTRY_BYTES) as u64 / u64::from(sector_bytes)
+}
 
 /// A GUID in the byte order of a GPT, from its four fields.
 pub const fn guid(a: u32, b: u16, c: u16, d: [u8; 8]) -> [u8; 16] {
@@ -62,14 +68,25 @@ pub struct Gpt {
 }
 
 /// The first and the last sector that a partition can take on a disk of
-/// `sectors` sectors of 512 bytes.
-pub fn usable(sectors: u64) -> (u64, u64) {
-    (2 + ENTRY_SECTORS, sectors - 2 - ENTRY_SECTORS)
+/// `sectors` sectors of `sector_bytes`.
+pub fn usable(sectors: u64, sector_bytes: u32) -> (u64, u64) {
+    let entries = entry_sectors(sector_bytes);
+    (2 + entries, sectors - 2 - entries)
 }
 
-/// The table for a disk of `sectors` sectors of 512 bytes.
-pub fn gpt(sectors: u64, disk: [u8; 16], partitions: &[GptPartition]) -> Result<Gpt, String> {
-    let (first_usable, last_usable) = usable(sectors);
+/// The table for a disk of `sectors` sectors of `sector_bytes`, 512 or 4096.
+pub fn gpt(
+    sectors: u64,
+    sector_bytes: u32,
+    disk: [u8; 16],
+    partitions: &[GptPartition],
+) -> Result<Gpt, String> {
+    if sector_bytes != 512 && sector_bytes != 4096 {
+        return Err(format!("sectors of {sector_bytes} bytes"));
+    }
+    let (first_usable, last_usable) = usable(sectors, sector_bytes);
+    let entry_sectors = entry_sectors(sector_bytes);
+    let sector = sector_bytes as usize;
     if partitions.len() > ENTRIES {
         return Err(format!(
             "{} partitions, and a GPT holds {ENTRIES}",
@@ -97,7 +114,7 @@ pub fn gpt(sectors: u64, disk: [u8; 16], partitions: &[GptPartition]) -> Result<
     }
     let entries_crc = crc32(&entries);
     let header = |this: u64, other: u64, table: u64| {
-        let mut h = vec![0u8; 512];
+        let mut h = vec![0u8; sector];
         h[0..8].copy_from_slice(b"EFI PART");
         h[8..12].copy_from_slice(&0x0001_0000u32.to_le_bytes());
         h[12..16].copy_from_slice(&92u32.to_le_bytes());
@@ -114,7 +131,7 @@ pub fn gpt(sectors: u64, disk: [u8; 16], partitions: &[GptPartition]) -> Result<
         h[16..20].copy_from_slice(&crc.to_le_bytes());
         h
     };
-    let mut mbr = vec![0u8; 512];
+    let mut mbr = vec![0u8; sector];
     let e = 446;
     mbr[e + 1..e + 4].copy_from_slice(&[0, 2, 0]);
     mbr[e + 4] = 0xEE;
@@ -128,11 +145,11 @@ pub fn gpt(sectors: u64, disk: [u8; 16], partitions: &[GptPartition]) -> Result<
     head.extend_from_slice(&header(1, sectors - 1, 2));
     head.extend_from_slice(&entries);
     let mut tail = entries;
-    tail.extend_from_slice(&header(sectors - 1, 1, sectors - 1 - ENTRY_SECTORS));
+    tail.extend_from_slice(&header(sectors - 1, 1, sectors - 1 - entry_sectors));
     Ok(Gpt {
         head,
         tail,
-        tail_sector: sectors - 1 - ENTRY_SECTORS,
+        tail_sector: sectors - 1 - entry_sectors,
     })
 }
 
@@ -156,11 +173,11 @@ mod tests {
                 kind: BASIC_DATA,
                 id: [2; 16],
                 first: 2048 * 64,
-                last: usable(sectors).1,
+                last: usable(sectors, 512).1,
                 name: "Windows".to_string(),
             },
         ];
-        let g = gpt(sectors, [9; 16], &parts).unwrap();
+        let g = gpt(sectors, 512, [9; 16], &parts).unwrap();
         assert_eq!(g.head.len(), 34 * 512);
         assert_eq!(g.tail.len(), 33 * 512);
         assert_eq!(g.tail_sector + 33, sectors);
@@ -201,9 +218,49 @@ mod tests {
             last: 100,
             name: String::new(),
         };
-        assert!(gpt(4096, [0; 16], &[p])
+        assert!(gpt(4096, 512, [0; 16], std::slice::from_ref(&p))
             .unwrap_err()
             .contains("outside 34 to 4062"));
+        let early = GptPartition { first: 5, ..p };
+        assert!(gpt(4096, 4096, [0; 16], &[early])
+            .unwrap_err()
+            .contains("outside 6 to 4090"));
+    }
+
+    #[test]
+    fn a_table_with_sectors_of_4096_bytes_puts_each_part_in_its_sector() {
+        let sectors = 64 * 256;
+        let parts = vec![GptPartition {
+            kind: BASIC_DATA,
+            id: [2; 16],
+            first: 256,
+            last: usable(sectors, 4096).1,
+            name: "Windows".to_string(),
+        }];
+        let g = gpt(sectors, 4096, [9; 16], &parts).unwrap();
+        // The MBR, the header and 4 sectors of entries.
+        assert_eq!(g.head.len(), 6 * 4096);
+        assert_eq!(&g.head[4096..4104], b"EFI PART");
+        assert_eq!(
+            u64::from_le_bytes(g.head[4096 + 72..4096 + 80].try_into().unwrap()),
+            2
+        );
+        assert_eq!(g.tail_sector + 5, sectors);
+        let mut disk = vec![0u8; (sectors * 4096) as usize];
+        disk[..g.head.len()].copy_from_slice(&g.head);
+        let at = (g.tail_sector * 4096) as usize;
+        disk[at..at + g.tail.len()].copy_from_slice(&g.tail);
+        let table = read_table(&disk[..1024 * 1024], 4096, sectors * 4096)
+            .unwrap()
+            .unwrap();
+        assert_eq!(table.kind, TableKind::Gpt);
+        assert_eq!(table.partitions[0].first_byte, 256 * 4096);
+        assert_eq!(&disk[((sectors - 1) * 4096) as usize..][..8], b"EFI PART");
+    }
+
+    #[test]
+    fn sectors_of_another_size_are_refused() {
+        assert!(gpt(4096, 1024, [0; 16], &[]).is_err());
     }
 
     #[test]
