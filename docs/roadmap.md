@@ -75,7 +75,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P10 | Read a WIM file | L | **v2.1.0 and v2.2.0** |
 | P11 | Write an NTFS volume | XL | **v2.3.0** |
 | P12 | Windows To Go | L | **v3.0.0** |
-| P13 | A graphical interface | L | not started |
+| P13 | A graphical interface | L | in progress |
 
 ---
 
@@ -1530,8 +1530,9 @@ sectors, so `--bios` refuses it with the kind `bios_sector_size`.
 
 ## P13. A graphical interface
 
-**Size L. Depends on P12. Not started. The person who owns the project chose
-it on 2026-11-12, and it left "Later, maybe".**
+**Size L. Depends on P12. In progress: the spike passed on the three hosts,
+and `burnout` has the two changes that it asked for. The person who owns the
+project chose it on 2026-11-12, and it left "Later, maybe".**
 
 A program with windows that writes a drive, for a person who does not use a
 terminal. It is a second program on the same crates, and it adds no write
@@ -1631,6 +1632,29 @@ list --json` and then a write to a disk image with the privilege, from a
 program that a person opens with a double-click, and records what works. The
 spike can change `burnout`, for example with an option for a named pipe. Do
 not write the windows before the spike passes on all three hosts.
+
+**The two changes to `burnout`, made on 2026-11-12.**
+- macOS: with no terminal, `write` asks `/usr/libexec/authopen` for the drive
+  after the unmount, in the place of a restart through `sudo`. Measured on a
+  disk image of 64 MiB with its write bit taken away, so that a plain open
+  was refused. `burnout write --json` ran with no terminal, macOS showed its
+  dialog, and the person typed the password. The dialog took 32 s. Then
+  `burnout` wrote 8 MiB through the descriptor, checked it byte for byte,
+  and exited with 0. `--partition` reads the table of the drive before it
+  asks, so with no terminal it stops and says to use a terminal. The unmount
+  of a volume that root mounted is not measured with a USB stick yet:
+  `DADiskUnmount` with no root answered `0xf8da0009` for such a volume.
+- Windows: `write --json --pipe NAME` uses `\\.\pipe\NAME.out` for its events
+  and `\\.\pipe\NAME.in` for its answer. Measured in the Windows 11 VM
+  (Arm64) on a disk image of 400 MiB that QEMU gave as a USB disk. A test
+  program with no privilege made the two pipes, started `burnout` through
+  UAC, and sent the answer that the `confirm` event named. `burnout` wrote
+  200 MiB, checked it, and exited with 0 after 13.3 s, and each event came
+  through the pipe as it happened. In a second run the program wrote `stop`
+  at the first progress of the write. `burnout` sent `stopped` with
+  `reached` `writing`, and exited with 130. A UAC prompt that nobody answers
+  closes after about 2 minutes, and `ShellExecuteEx` then fails with 1223,
+  the error of a cancel. The program shows that as a cancel.
 
 ### Decisions, made on 2026-11-12
 
