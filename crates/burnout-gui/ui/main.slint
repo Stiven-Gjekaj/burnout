@@ -1,0 +1,76 @@
+import { AboutSlint, Button, StandardTableView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "Burnout";
+    preferred-width: 640px;
+    preferred-height: 400px;
+
+    // One row for each drive: number, name, size, bus, and what it is.
+    in property <[[StandardListViewItem]]> drives;
+    // A line under the list: what went wrong, or how many drives there are.
+    in property <string> status;
+    callback refresh();
+
+    MenuBar {
+        Menu {
+            title: "Help";
+            MenuItem {
+                title: "About Burnout";
+                activated => { about.show(); }
+            }
+        }
+    }
+
+    about := PopupWindow {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width: 360px;
+        close-policy: close-on-click-outside;
+        Rectangle {
+            background: #ffffff;
+            border-radius: 8px;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #00000040;
+            VerticalBox {
+                Text {
+                    text: "Burnout writes a bootable USB drive.";
+                    color: #000000;
+                    horizontal-alignment: center;
+                }
+                AboutSlint { }
+            }
+        }
+    }
+
+    VerticalBox {
+        Text {
+            text: "Drives";
+            font-size: 1.4rem;
+            font-weight: 600;
+        }
+        StandardTableView {
+            vertical-stretch: 1;
+            columns: [
+                { title: "#", min-width: 40px, horizontal-stretch: 0 },
+                { title: "Drive", min-width: 240px, horizontal-stretch: 1 },
+                { title: "Size", min-width: 90px, horizontal-stretch: 0 },
+                { title: "Bus", min-width: 80px, horizontal-stretch: 0 },
+                { title: "Kind", min-width: 110px, horizontal-stretch: 0 },
+            ];
+            rows: root.drives;
+        }
+        HorizontalBox {
+            padding: 0;
+            Text {
+                text: root.status;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+                wrap: word-wrap;
+            }
+            Button {
+                text: "Refresh";
+                clicked => { root.refresh(); }
+            }
+        }
+    }
+}

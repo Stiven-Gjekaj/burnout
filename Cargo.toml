@@ -5,6 +5,7 @@ members = [
     "crates/burnout-iso",
     "crates/burnout-wim",
     "crates/burnout",
+    "crates/burnout-gui",
 ]
 resolver = "2"
 
