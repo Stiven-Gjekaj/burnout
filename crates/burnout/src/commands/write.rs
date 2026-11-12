@@ -200,15 +200,27 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
         no_elevate: args.no_elevate,
         interactive: std::io::stdin().is_terminal(),
         can_restart: cfg!(unix),
+        can_ask_host: cfg!(target_os = "macos"),
     };
-    match elevate::plan(state) {
-        Plan::GoAhead => {}
+    let ask_host = match elevate::plan(state) {
+        Plan::GoAhead => false,
+        Plan::AskHost => true,
         Plan::Stop => return Err(elevate::refusal(state)),
         Plan::StartAgain => {
             eprintln!("Burnout needs root to write a drive, so it asks sudo for it.");
             elevate::start_again(&std::env::args().skip(1).collect::<Vec<_>>())?;
             unreachable!("the restart replaces this program");
         }
+    };
+    if ask_host && args.partition.is_some() {
+        // The table of the drive is read before the confirmation, and the
+        // dialog of the host comes after the unmount.
+        return Err(Error::NeedsPrivilege {
+            remedy: "--partition reads the table of the drive before it asks, and with no \
+                     terminal it can ask only after the unmount. Run the same command in a \
+                     terminal"
+                .to_string(),
+        });
     }
 
     // The table comes from the drive, so it needs the privilege, and the
@@ -250,7 +262,7 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
         }
     }
 
-    let access = platform::drive_access()?;
+    let access = platform::drive_access(ask_host)?;
     let mut bar = Tracked(match json {
         true => Listener::Json(JsonProgress::new()),
         false => Listener::Bar(Bar::new()),

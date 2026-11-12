@@ -11,6 +11,12 @@
 //! the exit code never reaches the shell. So Windows gets a sentence that
 //! says what to do.
 //!
+//! On macOS with no terminal, as under a program with windows, there is no
+//! restart either. `sudo` has nobody to ask. Burnout asks macOS for the drive
+//! through `authopen`, which shows the password dialog of macOS and hands
+//! back an open descriptor. No process of Burnout becomes root. The roadmap
+//! holds the measurement, in P13.
+//!
 //! The decision below is pure and the restart under it is not. That is what
 //! lets the rule be tested on all three hosts.
 
@@ -30,6 +36,8 @@ pub enum Plan {
     GoAhead,
     /// Start again through `sudo`.
     StartAgain,
+    /// Go ahead, and open the drive through the dialog of the host.
+    AskHost,
     /// Stop, and say why.
     Stop,
 }
@@ -47,11 +55,13 @@ pub struct State {
     pub interactive: bool,
     /// Whether this host can start itself again at all.
     pub can_restart: bool,
+    /// Whether the host can ask for the drive in a dialog of its own.
+    pub can_ask_host: bool,
 }
 
 /// Decide what to do about privilege, and decide it in one place.
 ///
-/// Five inputs and three answers. A rule spread over the command would be a
+/// Six inputs and four answers. A rule spread over the command would be a
 /// rule that no test can reach.
 pub fn plan(state: State) -> Plan {
     if state.privileged {
@@ -71,6 +81,10 @@ pub fn plan(state: State) -> Plan {
     }
     if !state.interactive {
         // A password prompt inside a pipeline stops and waits for nobody.
+        // A dialog of the host does not need the pipeline, so it can ask.
+        if state.can_ask_host {
+            return Plan::AskHost;
+        }
         return Plan::Stop;
     }
     Plan::StartAgain
@@ -192,6 +206,7 @@ pub fn start_again(_arguments: &[String]) -> Result<std::convert::Infallible> {
         no_elevate: false,
         interactive: true,
         can_restart: false,
+        can_ask_host: false,
     }))
 }
 
@@ -218,6 +233,7 @@ mod tests {
             no_elevate: false,
             interactive: true,
             can_restart: true,
+            can_ask_host: false,
         }
     }
 
@@ -264,6 +280,32 @@ mod tests {
         // A sudo prompt with no terminal behind it waits for nobody.
         let mut s = state();
         s.interactive = false;
+        assert_eq!(plan(s), Plan::Stop);
+    }
+
+    #[test]
+    fn with_no_terminal_a_host_with_a_dialog_asks_in_the_dialog() {
+        let mut s = state();
+        s.interactive = false;
+        s.can_ask_host = true;
+        assert_eq!(plan(s), Plan::AskHost);
+    }
+
+    #[test]
+    fn with_a_terminal_the_restart_through_sudo_stays() {
+        // The dialog is for a process with no terminal. A person at a
+        // terminal keeps the prompt of sudo, as before.
+        let mut s = state();
+        s.can_ask_host = true;
+        assert_eq!(plan(s), Plan::StartAgain);
+    }
+
+    #[test]
+    fn no_elevate_stops_before_the_dialog_too() {
+        let mut s = state();
+        s.interactive = false;
+        s.can_ask_host = true;
+        s.no_elevate = true;
         assert_eq!(plan(s), Plan::Stop);
     }
 

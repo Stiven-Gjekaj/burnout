@@ -35,14 +35,20 @@ pub type HostAccess = unsupported::NoAccess;
 /// The way to open a drive on the host that this build runs on.
 ///
 /// A host that Burnout does not support gives an error and not a panic.
-pub fn drive_access() -> Result<HostAccess> {
+///
+/// With `ask_host`, macOS opens each drive through `authopen`, which asks for
+/// the password in a dialog of its own. The plan of [`crate::elevate`] asks
+/// for that only on macOS.
+pub fn drive_access(ask_host: bool) -> Result<HostAccess> {
+    #[cfg(not(target_os = "macos"))]
+    let _ = ask_host;
     #[cfg(target_os = "linux")]
     {
         Ok(linux::host::LinuxAccess)
     }
     #[cfg(target_os = "macos")]
     {
-        Ok(macos::host::MacosAccess)
+        Ok(macos::host::MacosAccess::new(ask_host))
     }
     #[cfg(windows)]
     {

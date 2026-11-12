@@ -8,12 +8,14 @@
 //! Nothing here is covered by a test, and nothing here may grow a rule.
 
 use std::any::Any;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::MetadataExt;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread::{self, JoinHandle};
@@ -224,7 +226,22 @@ fn convert(value: &CFType) -> Option<Value> {
 }
 
 /// Opens the drives of a running macOS host.
-pub struct MacosAccess;
+pub struct MacosAccess {
+    /// `None` when the process opens the node itself. `Some` when `authopen`
+    /// opens it, and then it holds the descriptor of the first open, so that
+    /// the dialog comes once and each later open is a copy of it.
+    authorized: Option<RefCell<Option<(DriveId, File)>>>,
+}
+
+impl MacosAccess {
+    /// The access of this process, or with `through_authopen` the access that
+    /// macOS gives after its own dialog.
+    pub fn new(through_authopen: bool) -> Self {
+        MacosAccess {
+            authorized: through_authopen.then(|| RefCell::new(None)),
+        }
+    }
+}
 
 impl DriveAccess for MacosAccess {
     type Target = MacosDisk;
@@ -238,6 +255,11 @@ impl DriveAccess for MacosAccess {
     }
 
     fn eject(&self, id: &DriveId) -> Result<()> {
+        // A descriptor that stays open holds the disk, and the eject waits
+        // for nobody to let it go.
+        if let Some(held) = &self.authorized {
+            held.borrow_mut().take();
+        }
         eject_whole(id.as_str())
     }
 
@@ -246,16 +268,103 @@ impl DriveAccess for MacosAccess {
         // The raw node, and never /dev/diskN. The raw node skips the buffer
         // cache, so what is written is on the medium and a read back is a
         // read of the medium.
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&info.node)
-            .map_err(|e| super::super::busy_or(e, &info.node))?;
+        let file = match &self.authorized {
+            None => OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&info.node)
+                .map_err(|e| super::super::busy_or(e, &info.node))?,
+            Some(held) => {
+                let mut held = held.borrow_mut();
+                if !matches!(held.as_ref(), Some((of, _)) if of == id) {
+                    *held = Some((id.clone(), authopen(&info.node)?));
+                }
+                let (_, file) = held.as_ref().expect("set above");
+                file.try_clone()?
+            }
+        };
         Ok(MacosDisk {
             file,
             sector_size: info.logical_sector_size,
             length: info.size_bytes,
         })
+    }
+}
+
+/// The program of macOS that opens a file after its own authorization.
+const AUTHOPEN: &str = "/usr/libexec/authopen";
+
+/// Ask macOS to open `node` for reading and writing, and take the descriptor.
+///
+/// `authopen` shows the password dialog of macOS and sends the open
+/// descriptor back across a socket with `SCM_RIGHTS`. No process of Burnout
+/// becomes root, and Burnout never sees the password.
+///
+/// Measured on 2026-11-12 with a USB stick: while a volume of the disk was
+/// mounted, `authopen` took the password and gave no descriptor. So the
+/// caller unmounts first, as the write does before each open.
+fn authopen(node: &str) -> Result<File> {
+    let mut pair = [0 as libc::c_int; 2];
+    // SAFETY: `pair` has room for the two descriptors that socketpair writes.
+    if unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, pair.as_mut_ptr()) } != 0 {
+        return Err(Error::Io(io::Error::last_os_error()));
+    }
+    // SAFETY: socketpair succeeded, so both descriptors are open and nothing
+    // else owns them.
+    let (ours, theirs) = unsafe { (OwnedFd::from_raw_fd(pair[0]), OwnedFd::from_raw_fd(pair[1])) };
+    let mut child = Command::new(AUTHOPEN)
+        .args(["-stdoutpipe", "-o", &libc::O_RDWR.to_string(), node])
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(theirs))
+        .spawn()?;
+    // The Command is gone, so this process holds no copy of the other end,
+    // and the receive ends when authopen exits without an answer.
+    let received = receive_descriptor(&ours);
+    let status = child.wait()?;
+    match received {
+        Some(fd) => Ok(File::from(fd)),
+        None => Err(Error::NeedsPrivilege {
+            remedy: format!(
+                "macOS did not open {node} ({status}). The password dialog was closed, or nobody \
+                 is signed in to answer it. Run the same command in a terminal"
+            ),
+        }),
+    }
+}
+
+/// Read one descriptor that `SCM_RIGHTS` carries across `socket`, if one
+/// comes before the other end closes.
+fn receive_descriptor(socket: &OwnedFd) -> Option<OwnedFd> {
+    let mut data = [0u8; 16];
+    let mut iov = libc::iovec {
+        iov_base: data.as_mut_ptr().cast(),
+        iov_len: data.len(),
+    };
+    // Room for one control message with one descriptor, aligned for the
+    // header.
+    let mut control = [0u64; 8];
+    // SAFETY: the message points at buffers that live for the whole call,
+    // and the lengths are the lengths of those buffers.
+    unsafe {
+        let space = libc::CMSG_SPACE(std::mem::size_of::<libc::c_int>() as u32) as usize;
+        debug_assert!(space <= std::mem::size_of_val(&control));
+        let mut message: libc::msghdr = std::mem::zeroed();
+        message.msg_iov = &mut iov;
+        message.msg_iovlen = 1;
+        message.msg_control = control.as_mut_ptr().cast();
+        message.msg_controllen = space as libc::socklen_t;
+        if libc::recvmsg(socket.as_raw_fd(), &mut message, 0) <= 0 {
+            return None;
+        }
+        let header = libc::CMSG_FIRSTHDR(&message);
+        if header.is_null()
+            || (*header).cmsg_level != libc::SOL_SOCKET
+            || (*header).cmsg_type != libc::SCM_RIGHTS
+        {
+            return None;
+        }
+        let fd = std::ptr::read_unaligned(libc::CMSG_DATA(header).cast::<libc::c_int>());
+        (fd >= 0).then(|| OwnedFd::from_raw_fd(fd))
     }
 }
 
