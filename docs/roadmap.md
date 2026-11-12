@@ -54,6 +54,7 @@ flowchart LR
     P10 --> P11[P11 NTFS]
     P11 --> P12[P12 Windows To Go]
     P8 --> P12
+    P12 --> P13[P13 a graphical interface]
 ```
 
 P0 and P5 do not wait for anything.
@@ -74,6 +75,7 @@ Start P0 now, because it can send P3 and P4 back to the drawing board.
 | P10 | Read a WIM file | L | **v2.1.0 and v2.2.0** |
 | P11 | Write an NTFS volume | XL | **v2.3.0** |
 | P12 | Windows To Go | L | **v3.0.0** |
+| P13 | A graphical interface | L | not started |
 
 ---
 
@@ -1526,6 +1528,98 @@ sectors, so `--bios` refuses it with the kind `bios_sector_size`.
 
 ---
 
+## P13. A graphical interface
+
+**Size L. Depends on P12. Not started. The person who owns the project chose
+it on 2026-11-12, and it left "Later, maybe".**
+
+A program with windows that writes a drive, for a person who does not use a
+terminal. It is a second program on the same crates, and it adds no write
+mode. The command line stays the reference: each thing that the program does,
+`burnout` does too.
+
+### The shape: the program does not write
+
+The program has no privilege, and it does not open a drive for a write. It
+starts `burnout write ... --json` as a child with the privilege, reads the
+events, and shows them. The confirmation, the refusal of the system disk, the
+check of a fixed disk and the check after the write stay in one binary, which
+the tests already cover.
+
+- `burnout list --json` gives the drives. It needs no privilege.
+- The `confirm` event names the drive and the answer that it `expects`. The
+  program shows the drive, and the person types that answer. The program
+  sends it to the child. It never makes the answer itself.
+- `start`, `progress` and `done` give the progress bar. `result`, `error`
+  and `stopped` end the write.
+- A cancel sends the child the same signal as Ctrl+C, so the drive ends in
+  the same state as a stop on the command line.
+
+So the program holds no code that can erase a drive. A fault in it can show
+the wrong thing, and it cannot write the wrong thing past the confirmation.
+
+### Scope
+
+In: raw mode and Windows mode, with the choice of the image, the drive and the
+edition, the progress, the cancel and the result.
+
+Out of the first release: `--to-go`, `--partition`, `--bios` and the options
+of Setup. They stay on the command line, and the program says so.
+
+### Risk first: the privilege on each host
+
+The program cannot ask for a password through `sudo`, because it has no
+terminal. Each host needs its own path, and none of the three is measured:
+
+| Host | The path to try first | What can go wrong |
+| --- | --- | --- |
+| macOS | `authopen` | `authopen` gives a file descriptor, so `burnout` must take a drive that is already open. A helper through `SMAppService` needs a signed app, and decision 2 below rules it out. |
+| Windows | `ShellExecuteEx` with `runas`, which shows the UAC prompt | A child started that way has no pipe for its output, so the events need a named pipe or a file. |
+| Linux | `pkexec burnout write ...` | `pkexec` passes the output through. A desktop with no polkit agent cannot ask. |
+
+So the first step is a spike, as P0 was. On each host it starts `burnout
+list --json` and then a write to a disk image with the privilege, from a
+program that a person opens with a double-click, and records what works. The
+spike can change `burnout`, for example with an option for a named pipe. Do
+not write the windows before the spike passes on all three hosts.
+
+### Decisions, made on 2026-11-12
+
+1. **The toolkit is Slint.** It is native Rust, it runs on the three hosts,
+   and its binaries are small. Its free licence for a desktop program asks
+   for an attribution in the program, so the program shows it. Read the
+   licence again before the first release.
+2. **No code signing.** "Version 1 buys no certificate" stays. The program
+   ships through Homebrew, Scoop and winget, as `burnout` does, and the
+   release documents the warning for a download in a browser. So a helper
+   through `SMAppService` is out, because it needs a Developer ID. The spike
+   on macOS tries `authopen` first. It also checks whether a Homebrew cask
+   sets the quarantine mark on the app.
+3. **A package of its own.** The program is the crate `burnout-gui` in this
+   workspace, with the binary `burnout-gui`. It goes out in the same release
+   as `burnout`, with the same version. Its formula, its Scoop manifest and
+   its winget package depend on the package of `burnout`, so the package of
+   `burnout` does not change and a person who uses the command line gets no
+   more than before. The program finds `burnout` beside itself or on the
+   path, and refuses a `burnout` of another version, because the events of
+   `--json` are the contract between the two.
+
+### The exit test
+
+On macOS, on Windows and on Linux, a person opens the program with a
+double-click, and not from a terminal:
+
+- The system disk is not in the list, or it is shown and cannot be chosen.
+- A fixed disk needs its model and its size typed back, as on the command
+  line.
+- The program writes a Linux ISO and a Windows 11 ISO to a USB drive, and each
+  drive starts on a PC.
+- A cancel during the write stops the child, and the program shows the state
+  of the drive that `burnout` reports.
+- The program starts after the download path that the release documents.
+
+---
+
 ## Later, maybe
 
 Not planned. Each one changes what Burnout is, so it needs a phase of its own
@@ -1535,12 +1629,11 @@ as it stands, and nothing measured them.
 
 | Feature | Size | What it costs |
 | --- | --- | --- |
-| A graphical interface | L | A second program on the same crates. The choice of the drive, the progress and the confirmation must stay as safe as they are on the command line. |
 | A drive that holds many images | XL | A boot menu that loads an ISO from a data partition, for BIOS and for UEFI, with Secure Boot. Much of what such a tool gives comes from years of fixes for one ISO after another. |
 | macOS install media | XL | Apple ships no ISO, and `createinstallmedia` runs on macOS only. Burnout would build the installer from the packages that Apple ships, in a format that Apple does not document and changes each year. |
 
-A write to one partition left this list as P9. A graphical interface is the
-first candidate now.
+A write to one partition left this list as P9, and a graphical interface
+left it as P13.
 
 ---
 
