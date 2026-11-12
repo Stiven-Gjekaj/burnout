@@ -157,6 +157,10 @@ struct WindowsJob {
 /// With `json`, each step prints as one JSON object on a line of the output
 /// stream, and no progress line is drawn.
 pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
+    #[cfg(windows)]
+    if let Some(name) = &args.pipe {
+        crate::pipe::connect(name)?;
+    }
     crate::stop::on_stop(json);
     let mut job = prepare(args)?;
 
@@ -1273,6 +1277,8 @@ mod tests {
             edition: None,
             to_go: false,
             bios: false,
+            #[cfg(windows)]
+            pipe: None,
         }
     }
 

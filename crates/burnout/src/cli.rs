@@ -141,6 +141,17 @@ pub struct WriteArgs {
     /// starts it too. An Arm64 edition has no boot manager for a BIOS.
     #[arg(long, requires = "to_go")]
     pub bios: bool,
+
+    /// Read the answer and write the JSON events through two named pipes.
+    ///
+    /// Windows only, with --json. This is for a program that starts Burnout
+    /// through UAC: the process that UAC starts gets no streams from the
+    /// program that started it. Burnout writes its events into
+    /// \\.\pipe\NAME.out and reads its answer from \\.\pipe\NAME.in. The
+    /// program makes both pipes before it starts Burnout.
+    #[cfg(windows)]
+    #[arg(long, value_name = "NAME", requires = "json", value_parser = crate::pipe::name)]
+    pub pipe: Option<String>,
 }
 
 /// A mode that a person can choose.
