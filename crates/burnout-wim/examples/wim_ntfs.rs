@@ -188,6 +188,7 @@ fn run(iso: &str, edition: usize, image: &str, gib: u64) -> Result<(), String> {
         partition,
         start_sector() as u32,
         &NtfsOptions {
+            sector_bytes: 512,
             label: "WINDOWS".into(),
             serial: 0x5EED_0000_B0B0_0001,
             time: 134_070_000_000_000_000,

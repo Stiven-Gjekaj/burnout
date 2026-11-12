@@ -21,7 +21,6 @@ use crate::ntfs::split::split;
 use crate::ntfs::values::{file_attribute as fa, standard_information, FileName, Namespace, Times};
 
 pub const CLUSTER: u64 = 4096;
-const SECTOR: u64 = 512;
 const INDEX_BLOCK: usize = 4096;
 /// The records that the master file table starts with.
 const MFT_RECORDS: u64 = 256;
@@ -49,6 +48,11 @@ const FLAG_EXTEND_FILE: u16 = 0x0004;
 #[derive(Clone, Debug)]
 pub struct NtfsOptions {
     pub label: String,
+    /// The sector of the drive: 512 or 4096. Windows 10.0.26100 keeps records
+    /// of 1024 bytes and clusters of 4096 bytes on both, measured on
+    /// 2026-11-12. Only the sector of the boot sector and the place of its
+    /// copy change.
+    pub sector_bytes: u32,
     pub serial: u64,
     /// The time of each file, in 100 ns units since 1601.
     pub time: u64,
@@ -409,8 +413,12 @@ pub fn format(
         .div_ceil(MFT_RECORDS)
         .max(1)
         * MFT_RECORDS;
-    let partition_sectors = partition_bytes / SECTOR;
-    let total = (partition_sectors - 1) / (CLUSTER / SECTOR);
+    if options.sector_bytes != 512 && options.sector_bytes != 4096 {
+        return Err(format!("sectors of {} bytes", options.sector_bytes));
+    }
+    let sector = u64::from(options.sector_bytes);
+    let partition_sectors = partition_bytes / sector;
+    let total = (partition_sectors - 1) / (CLUSTER / sector);
     let mut clusters = Clusters { next: 0, total };
     let mut writes: Vec<(u64, Vec<u8>)> = Vec::new();
     let times = Times::all(options.time);
@@ -975,7 +983,7 @@ pub fn format(
     writes.push((bitmap_run.lcn.unwrap() * CLUSTER, bitmap));
 
     let geometry = Geometry {
-        sector_bytes: SECTOR as u32,
+        sector_bytes: options.sector_bytes,
         cluster_bytes: CLUSTER as u32,
         partition_sectors,
         hidden_sectors,
@@ -988,7 +996,10 @@ pub fn format(
     let mut boot_area = vec![0u8; 2 * CLUSTER as usize];
     boot_area[..512].copy_from_slice(&boot);
     writes.push((0, boot_area));
-    writes.push(((partition_sectors - 1) * SECTOR, boot));
+    // The copy fills the last sector, whatever its size.
+    let mut copy = vec![0u8; sector as usize];
+    copy[..512].copy_from_slice(&boot);
+    writes.push(((partition_sectors - 1) * sector, copy));
     writes.sort_by_key(|w| w.0);
     Ok(Formatted {
         geometry,
@@ -1006,10 +1017,15 @@ mod tests {
     use crate::ntfs::record::remove_fixups;
 
     fn image(bytes: u64) -> (Formatted, Vec<u8>) {
+        image_with(bytes, 512)
+    }
+
+    fn image_with(bytes: u64, sector_bytes: u32) -> (Formatted, Vec<u8>) {
         let f = format(
             bytes,
-            2048,
+            2048 * 512 / sector_bytes,
             &NtfsOptions {
+                sector_bytes,
                 label: "BURNOUT".to_string(),
                 serial: 0x1122_3344_5566_7788,
                 time: 133_000_000_000_000_000,
@@ -1028,6 +1044,45 @@ mod tests {
     fn record(img: &[u8], f: &Formatted, n: usize) -> Vec<u8> {
         let at = (f.geometry.mft_cluster * CLUSTER) as usize + n * RECORD_BYTES;
         remove_fixups(&img[at..at + RECORD_BYTES]).unwrap()
+    }
+
+    #[test]
+    fn a_volume_on_sectors_of_4096_bytes_has_the_fields_that_windows_wrote() {
+        let (f, img) = image_with(64 * 1024 * 1024, 4096);
+        // As the Setup of Windows 11, 10.0.26100, formatted a disk of 4096-byte
+        // sectors.
+        assert_eq!(u16::from_le_bytes([img[0x0B], img[0x0C]]), 4096);
+        assert_eq!(img[0x0D], 1, "one sector in a cluster");
+        assert_eq!(u32::from_le_bytes(img[0x1C..0x20].try_into().unwrap()), 256);
+        assert_eq!(
+            u64::from_le_bytes(img[0x28..0x30].try_into().unwrap()),
+            64 * 256 - 1,
+            "the sectors of the volume, without the last one"
+        );
+        assert_eq!(img[0x40] as i8, -10, "records of 1024 bytes");
+        assert_eq!(img[0x44], 1, "index blocks of one cluster");
+        let last = img.len() - 4096;
+        assert_eq!(
+            &img[last..last + 512],
+            &img[..512],
+            "the copy in the last sector"
+        );
+        for n in 0..16 {
+            assert_eq!(&record(&img, &f, n)[0..4], b"FILE", "record {n}");
+        }
+        assert!(format(
+            1 << 26,
+            256,
+            &NtfsOptions {
+                sector_bytes: 2048,
+                label: String::new(),
+                serial: 0,
+                time: 0
+            },
+            &[],
+            &[]
+        )
+        .is_err());
     }
 
     #[test]
@@ -1080,6 +1135,7 @@ mod tests {
             256 * 1024,
             0,
             &NtfsOptions {
+                sector_bytes: 512,
                 label: String::new(),
                 serial: 0,
                 time: 0,
@@ -1126,6 +1182,7 @@ mod tests {
             64 * 1024 * 1024,
             0,
             &NtfsOptions {
+                sector_bytes: 512,
                 label: String::new(),
                 serial: 1,
                 time: 1,
@@ -1181,6 +1238,7 @@ mod tests {
             64 * 1024 * 1024,
             0,
             &NtfsOptions {
+                sector_bytes: 512,
                 label: String::new(),
                 serial: 1,
                 time: 1,
@@ -1234,6 +1292,7 @@ mod tests {
             64 * 1024 * 1024,
             0,
             &NtfsOptions {
+                sector_bytes: 512,
                 label: String::new(),
                 serial: 1,
                 time: 1,

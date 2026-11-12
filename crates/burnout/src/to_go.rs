@@ -294,6 +294,7 @@ pub fn plan<R: Read + Seek>(
         windows_bytes,
         WINDOWS_FIRST_SECTOR as u32,
         &NtfsOptions {
+            sector_bytes: 512,
             label: "WINDOWS".into(),
             serial: u64::from_le_bytes(seed_serial[..8].try_into().expect("8 bytes")),
             time: TIME,
