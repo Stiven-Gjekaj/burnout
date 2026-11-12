@@ -1577,6 +1577,23 @@ terminal. Each host needs its own path, and none of the three is measured:
 | Windows | `ShellExecuteEx` with `runas`, which shows the UAC prompt | A child started that way has no pipe for its output, so the events need a named pipe or a file. |
 | Linux | `pkexec burnout write ...` | `pkexec` passes the output through. A desktop with no polkit agent cannot ask. |
 
+**macOS, measured on 2026-11-12.** A process with no root started
+`/usr/libexec/authopen -stdoutpipe -o 2 /dev/rdiskN` on a socket pair, and
+got a file descriptor for read and write back through `SCM_RIGHTS`.
+- On a USB stick of 125.8 GB that root owns, a plain open was refused.
+  `authopen` showed the dialog of macOS, the person typed the password, and
+  the process wrote a sector back unchanged through the descriptor.
+- While a volume of the stick was mounted, the person authorized the open and
+  `authopen` still gave no descriptor. After an unmount it gave one in 2.5 s
+  with no second dialog, because macOS keeps the right for a short time. So
+  `burnout` unmounts first, and asks `authopen` after that.
+- On a disk image that the person attached, `authopen` gave the descriptor
+  with no dialog.
+
+So on macOS `burnout` itself can ask `authopen` for the drive, in the place
+of a restart through `sudo`. The program then starts `burnout` with no
+privilege, and macOS asks for the password in its own dialog.
+
 So the first step is a spike, as P0 was. On each host it starts `burnout
 list --json` and then a write to a disk image with the privilege, from a
 program that a person opens with a double-click, and records what works. The
