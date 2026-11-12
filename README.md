@@ -302,9 +302,11 @@ That command is identical on all three hosts.
 
 `list` runs with no privilege, so you see your drives before you give a
 password. `write` asks for one only when the drive itself refuses the write,
-and it asks through `sudo` and never reads a password itself. On Windows it
-says to open a shell as Administrator, because a second console window that
-closes at the end is worse than a clean refusal.
+and it asks through `sudo` and never reads a password itself. On macOS with
+no terminal, as under a program that starts it, `write` asks macOS for the
+drive instead, and macOS shows its own password dialog. On Windows it says to
+open a shell as Administrator, because a second console window that closes at
+the end is worse than a clean refusal.
 
 It names the drive, the size to the byte and the serial, and waits.
 
@@ -555,6 +557,13 @@ An error prints `{"event":"error","kind":"in_use","message":"...","note":null}`,
 and a stop prints `{"event":"stopped","reached":"writing","message":"..."}`.
 Test the `kind`, and not the message: the message is for a person, and it can
 change.
+
+On Windows, a program that starts `burnout` through UAC gets none of its
+streams. The program makes two named pipes, `\\.\pipe\NAME.out` and
+`\\.\pipe\NAME.in`, and starts `burnout write ... --json --pipe NAME`.
+The events then come through the first pipe, and the answer goes in through
+the second. When the program writes `stop` into the second pipe, or closes
+it, `burnout` stops as it does for Ctrl+C.
 
 ---
 
