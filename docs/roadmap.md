@@ -1491,6 +1491,15 @@ with Secure Boot on, 4 processors and 4 GB.
   read LZMS itself, as P10 says.
 - A drive with sectors of 4096 bytes is refused.
 
+**One drive for a BIOS and for UEFI, measured on 2026-11-12.** UEFI starts
+Windows from an MBR disk, so `--bios` now puts the boot files and the store
+for UEFI on partition 1 too, beside those for a BIOS. The store for UEFI
+names the partitions of the MBR, as the store for a BIOS does. The example
+`to_go_image` wrote Windows 11 25H2 Pro of the x64 ISO into a disk image of
+40 GiB: 219 boot files. QEMU with OVMF started one copy of the image as an
+NVMe disk, and QEMU with SeaBIOS started another copy as a SATA disk. Each
+came to its first-run setup, with x64 emulated in TCG.
+
 ---
 
 ## Later, maybe
