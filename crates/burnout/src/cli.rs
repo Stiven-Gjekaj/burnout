@@ -134,11 +134,11 @@ pub struct WriteArgs {
     )]
     pub to_go: bool,
 
-    /// Make the drive of --to-go for a BIOS, in the place of UEFI.
+    /// Make the drive of --to-go for a BIOS, and for UEFI too.
     ///
-    /// The drive then has an MBR and an active system partition, and a PC
-    /// with a BIOS, or with UEFI in its compatibility mode, starts it. An
-    /// Arm64 edition has no boot manager for a BIOS.
+    /// The drive then has an MBR and an active system partition with the
+    /// boot files of both. A PC with a BIOS starts it, and a PC with UEFI
+    /// starts it too. An Arm64 edition has no boot manager for a BIOS.
     #[arg(long, requires = "to_go")]
     pub bios: bool,
 }

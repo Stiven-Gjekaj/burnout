@@ -14,7 +14,11 @@
 //!   program of Windows in the path.
 //! - For a BIOS, the table is an MBR with the boot code of Burnout, and the
 //!   system partition is active. Its boot code loads `bootmgr`, which reads
-//!   `\Boot\BCD`. Windows starts from a BIOS only on an MBR disk.
+//!   `\Boot\BCD`. Windows starts from a BIOS only on an MBR disk. The
+//!   partition also holds the files and the store of the drive for UEFI,
+//!   with the partitions of the MBR. So UEFI starts the same drive. A
+//!   drive with this layout started Windows 11 25H2 Pro of the x64 ISO to
+//!   its first-run setup in QEMU with OVMF on 2026-11-12.
 
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -299,48 +303,58 @@ pub fn plan<R: Read + Seek>(
     )
     .map_err(|e| image_error(name, format!("the edition does not fit on NTFS: {e}")))?;
 
-    let boot_dirs = BootFiles::of(firmware, info.arch);
+    // A drive for a BIOS also gets the files that UEFI starts, so one drive
+    // starts through either firmware.
+    let sets: Vec<BootFiles> = match firmware {
+        Firmware::Uefi => vec![BootFiles::of(Firmware::Uefi, info.arch)],
+        Firmware::Bios => vec![
+            BootFiles::of(Firmware::Bios, info.arch),
+            BootFiles::of(Firmware::Uefi, info.arch),
+        ],
+    };
     let mut boot = MemorySource::new();
     let mut boot_files = 0;
-    let mut manager = false;
-    for d in &tree.entries {
-        let Some(dest) = boot_dirs.place(&d.path) else {
-            continue;
-        };
-        if d.is_directory() {
-            boot.add_dir(&dest)?;
-            continue;
-        }
-        let bytes = match d.data_hash() {
-            Some(h) => {
-                let b = by_hash
-                    .get(h)
-                    .ok_or_else(|| image_error(name, format!("{} names no stream", d.path)))?;
-                read_resource(&mut *wim_file, &wim.header, &b.resource, name)?
+    for set in &sets {
+        let mut manager = false;
+        for d in &tree.entries {
+            let Some(dest) = set.place(&d.path) else {
+                continue;
+            };
+            if d.is_directory() {
+                boot.add_dir(&dest)?;
+                continue;
             }
-            None => Vec::new(),
-        };
-        if d.path.eq_ignore_ascii_case(boot_dirs.manager) {
-            manager = true;
-            if let Some(again) = boot_dirs.manager_again {
-                boot.add_file(again, bytes.clone())?;
-            }
-        }
-        boot.add_file(&dest, bytes)?;
-        boot_files += 1;
-    }
-    if !manager {
-        return Err(image_error(
-            name,
-            format!(
-                "edition {edition} has no {}, so {} cannot start a drive of it",
-                boot_dirs.manager.replace('/', "\\"),
-                match firmware {
-                    Firmware::Uefi => "UEFI",
-                    Firmware::Bios => "a BIOS",
+            let bytes = match d.data_hash() {
+                Some(h) => {
+                    let b = by_hash
+                        .get(h)
+                        .ok_or_else(|| image_error(name, format!("{} names no stream", d.path)))?;
+                    read_resource(&mut *wim_file, &wim.header, &b.resource, name)?
                 }
-            ),
-        ));
+                None => Vec::new(),
+            };
+            if d.path.eq_ignore_ascii_case(set.manager) {
+                manager = true;
+                if let Some(again) = set.manager_again {
+                    boot.add_file(again, bytes.clone())?;
+                }
+            }
+            boot.add_file(&dest, bytes)?;
+            boot_files += 1;
+        }
+        if !manager {
+            return Err(image_error(
+                name,
+                format!(
+                    "edition {edition} has no {}, so {} cannot start a drive of it",
+                    set.manager.replace('/', "\\"),
+                    match set.firmware {
+                        Firmware::Uefi => "UEFI",
+                        Firmware::Bios => "a BIOS",
+                    }
+                ),
+            ));
+        }
     }
     let (disk_id, efi_id, windows_id) = (new_guid(seed, 1), new_guid(seed, 2), new_guid(seed, 3));
     // A disk signature of zero means none to Windows.
@@ -367,24 +381,27 @@ pub fn plan<R: Read + Seek>(
             },
         ),
     };
-    let store = store_bytes(
-        &BcdDrive {
-            firmware,
-            system,
-            windows,
-            loader: new_guid(seed, 4),
-            resume: new_guid(seed, 5),
-            description: info.shown_name().to_string(),
-            locale: if info.default_language.is_empty() {
-                "en-US".to_string()
-            } else {
-                info.default_language.clone()
+    let locale = if info.default_language.is_empty() {
+        "en-US".to_string()
+    } else {
+        info.default_language.clone()
+    };
+    for set in &sets {
+        let store = store_bytes(
+            &BcdDrive {
+                firmware: set.firmware,
+                system,
+                windows,
+                loader: new_guid(seed, 4),
+                resume: new_guid(seed, 5),
+                description: info.shown_name().to_string(),
+                locale: locale.clone(),
             },
-        },
-        TIME,
-    )
-    .map_err(|e| image_error(name, format!("the BCD store: {e}")))?;
-    boot.add_file(boot_dirs.store, store)?;
+            TIME,
+        )
+        .map_err(|e| image_error(name, format!("the BCD store: {e}")))?;
+        boot.add_file(set.store, store)?;
+    }
     let table = match firmware {
         Firmware::Uefi => {
             let g = gpt_for(drive_bytes, disk_id, efi_id, windows_id, windows_bytes)
@@ -451,6 +468,8 @@ pub fn plan<R: Read + Seek>(
 
 /// Where the boot files of an edition go on the system partition.
 struct BootFiles {
+    /// The firmware that starts these files.
+    firmware: Firmware,
     /// Directories of the edition, and the directory that each goes to.
     places: &'static [(&'static str, &'static str)],
     /// Files of the edition that go to a place of their own.
@@ -468,6 +487,7 @@ impl BootFiles {
     fn of(firmware: Firmware, arch: Option<Arch>) -> BootFiles {
         match firmware {
             Firmware::Uefi => BootFiles {
+                firmware,
                 places: &[
                     ("windows/boot/efi/", "EFI/Microsoft/Boot/"),
                     ("windows/boot/fonts/", "EFI/Microsoft/Boot/Fonts/"),
@@ -482,6 +502,7 @@ impl BootFiles {
                 store: "EFI/Microsoft/Boot/BCD",
             },
             Firmware::Bios => BootFiles {
+                firmware,
                 places: &[
                     ("windows/boot/pcat/", "Boot/"),
                     ("windows/boot/fonts/", "Boot/Fonts/"),
@@ -759,7 +780,9 @@ pub fn verify<T: BlockTarget>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use burnout_core::{read_table, FileTarget, PartitionType, Silent, TableKind};
+    use burnout_core::{
+        read_table, FileSource, FileTarget, PartitionType, Silent, TableKind, TreePath,
+    };
     use burnout_layout::mbr_with;
     use std::fs::File;
     use std::path::PathBuf;
@@ -857,9 +880,29 @@ mod tests {
             Firmware::Bios,
         )
         .unwrap();
-        // bootmgr, BOOTNXT, the language file of PCAT, the font and
-        // bootres.dll.
-        assert_eq!(plan.boot_files, 5);
+        // For a BIOS: bootmgr, BOOTNXT, the language file of PCAT, the font
+        // and bootres.dll. For UEFI: the three files of the drive for UEFI.
+        assert_eq!(plan.boot_files, 5 + 3);
+        // Each firmware has its own store, and both name the partitions of
+        // the MBR.
+        let signature =
+            |plan: &ToGo| u32::from_le_bytes(plan.table.head[440..444].try_into().unwrap());
+        let windows = burnout_layout::bcd::device_element(&Device::Mbr {
+            signature: signature(&plan),
+            first_byte: 512 * MIB,
+        });
+        for store in ["Boot/BCD", "EFI/Microsoft/Boot/BCD"] {
+            let mut bytes = Vec::new();
+            plan.boot
+                .open(&TreePath::new(store).unwrap())
+                .unwrap()
+                .read_to_end(&mut bytes)
+                .unwrap();
+            assert!(
+                bytes.windows(windows.len()).any(|w| w == windows),
+                "{store} names the Windows partition of the MBR"
+            );
+        }
         let (_keep, mut drive) = Drive::new("bios", bytes);
         // An old GPT at both ends, as a drive of Windows To Go for UEFI
         // leaves it.
@@ -897,6 +940,20 @@ mod tests {
         drive.seek(SeekFrom::Start(bytes - MIB)).unwrap();
         drive.read_exact(&mut last).unwrap();
         assert!(last.iter().all(|&b| b == 0), "no copy of a GPT stays");
+        let paths: Vec<String> = written
+            .efi
+            .files
+            .iter()
+            .map(|f| f.path.to_string())
+            .collect();
+        for path in [
+            "bootmgr",
+            "Boot/BCD",
+            "EFI/Boot/BOOTX64.EFI",
+            "EFI/Microsoft/Boot/BCD",
+        ] {
+            assert!(paths.iter().any(|p| p == path), "{path} is on partition 1");
+        }
 
         // The FAT32 boot sector of partition 1 carries code, and the
         // NTFS boot sector counts its hidden sectors from 512 MiB.

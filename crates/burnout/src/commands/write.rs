@@ -967,13 +967,13 @@ fn to_go_lines(t: &ToGoJob) -> Vec<String> {
             t.edition.index, plan.edition
         ),
         format!(
-            "    partition 1  FAT32, {}, {} boot files and the BCD store{}",
+            "    partition 1  FAT32, {}, {} boot files and {}",
             human_size(to_go::EFI_SECTORS * 512),
             plan.boot_files,
             if plan.firmware == to_go::Firmware::Bios {
-                ", active"
+                "two BCD stores, active"
             } else {
-                ""
+                "the BCD store"
             }
         ),
         format!(
@@ -985,7 +985,7 @@ fn to_go_lines(t: &ToGoJob) -> Vec<String> {
         match plan.firmware {
             to_go::Firmware::Uefi => "The drive starts Windows through UEFI, with no Setup.",
             to_go::Firmware::Bios => {
-                "The drive has an MBR, and starts Windows through a BIOS, with no Setup."
+                "The drive has an MBR, and starts Windows through a BIOS or through UEFI, with no Setup."
             }
         }
         .to_string(),
