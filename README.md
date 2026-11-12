@@ -467,18 +467,19 @@ Burnout writes NTFS, the boot files and the BCD store itself, and calls no
 tool of Windows. The check reads back the GPT, each boot file, and each
 stream of Windows against the SHA-1 that the install image names for it.
 
-`--bios` makes the drive for a BIOS, or for UEFI in its compatibility mode,
-in the place of UEFI:
+`--bios` makes a drive that a BIOS starts, and that UEFI starts too:
 
 ```bash
 burnout write Win11_25H2_English_x64_v2.iso 3 --to-go --bios --edition Pro
 ```
 
 The drive then has an MBR with the boot code of Burnout, and partition 1 is
-active. It holds `bootmgr` and `\Boot\BCD`, as `bcdboot /f BIOS` puts them.
-One drive starts through UEFI or through a BIOS, and not both: Windows
-starts from a BIOS only on an MBR disk, and from UEFI on this layout only on
-a GPT disk.
+active. It holds `bootmgr` and `\Boot\BCD` for a BIOS, as `bcdboot /f BIOS`
+puts them. It also holds the boot files and the store for UEFI, which name
+the partitions of the MBR. Windows starts from a BIOS only on an MBR disk,
+and UEFI starts Windows from an MBR disk too. So one drive serves a PC of
+either kind. Without `--bios`, the drive has a GPT and starts through UEFI
+only.
 
 Limits:
 
@@ -496,7 +497,8 @@ Limits:
 - The drive must have sectors of 512 bytes.
 - Measured in VMs: Windows 11 25H2 Pro of the Arm64 ISO started through
   UEFI, and Windows 11 25H2 Pro of the x64 ISO started through UEFI and
-  through a BIOS. Each came to its first-run setup. On a PC with Windows,
+  through a BIOS, and one drive of `--bios` started through UEFI too. Each
+  came to its first-run setup. On a PC with Windows,
   Hyper-V started an x64 drive with Secure Boot on, and Windows 11 came to
   its first-run setup in 5 minutes. The `install.esd` of the Media Creation
   Tool for Windows 10, exported with the DISM command above, did the same.
