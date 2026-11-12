@@ -253,6 +253,10 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
             drive: describe(&chosen),
         });
     }
+    #[cfg(windows)]
+    if args.pipe.is_some() {
+        crate::pipe::stop_on_request();
+    }
 
     // The confirmation takes a person's time, and a drive can leave in it.
     // A number is a position in a list, so the drive at that number now may

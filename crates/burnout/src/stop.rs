@@ -241,6 +241,21 @@ pub fn on_stop(json: bool) {
     }
 }
 
+/// Say what the drive holds, and end with 130, as Ctrl-C does on Windows.
+///
+/// A program that started Burnout through UAC cannot send Ctrl-C to it, so
+/// the pipe of `--pipe` calls this too.
+#[cfg(windows)]
+pub fn now() -> ! {
+    let now = reached();
+    let _ = std::io::Write::write_all(&mut std::io::stderr(), stopped(now).as_bytes());
+    if JSON.load(Ordering::SeqCst) {
+        let line = stopped_json(now);
+        let _ = std::io::Write::write_all(&mut std::io::stdout(), line.as_bytes());
+    }
+    std::process::exit(130)
+}
+
 /// Say what the drive holds when Ctrl-C, Ctrl-Break or the close of the
 /// console window stops the write, and end with 130.
 ///
@@ -256,15 +271,7 @@ pub fn on_stop(json: bool) {
 
     unsafe extern "system" fn stop(event: u32) -> BOOL {
         match event {
-            CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT => {
-                let now = reached();
-                let _ = std::io::Write::write_all(&mut std::io::stderr(), stopped(now).as_bytes());
-                if JSON.load(Ordering::SeqCst) {
-                    let line = stopped_json(now);
-                    let _ = std::io::Write::write_all(&mut std::io::stdout(), line.as_bytes());
-                }
-                std::process::exit(130)
-            }
+            CTRL_C_EVENT | CTRL_BREAK_EVENT | CTRL_CLOSE_EVENT => now(),
             // A log off or a shut down goes to the next handler.
             _ => 0,
         }

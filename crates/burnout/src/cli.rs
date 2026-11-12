@@ -148,7 +148,8 @@ pub struct WriteArgs {
     /// through UAC: the process that UAC starts gets no streams from the
     /// program that started it. Burnout writes its events into
     /// \\.\pipe\NAME.out and reads its answer from \\.\pipe\NAME.in. The
-    /// program makes both pipes before it starts Burnout.
+    /// program makes both pipes before it starts Burnout. When the program
+    /// writes "stop", or closes NAME.in, Burnout stops as it does for Ctrl+C.
     #[cfg(windows)]
     #[arg(long, value_name = "NAME", requires = "json", value_parser = crate::pipe::name)]
     pub pipe: Option<String>,
