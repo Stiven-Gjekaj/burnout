@@ -1494,7 +1494,8 @@ with Secure Boot on, 4 processors and 4 GB.
   drive, and SeaBIOS does not read NVMe.
 - An `install.esd` goes through the export to a WIM file. Burnout does not
   read LZMS itself, as P10 says.
-- A drive with sectors of 4096 bytes is refused.
+- A drive with sectors of 4096 bytes was refused on that day. The next
+  paragraph but one says what changed.
 
 **One drive for a BIOS and for UEFI, measured on 2026-11-12.** UEFI starts
 Windows from an MBR disk, so `--bios` now puts the boot files and the store
@@ -1504,6 +1505,24 @@ names the partitions of the MBR, as the store for a BIOS does. The example
 40 GiB: 219 boot files. QEMU with OVMF started one copy of the image as an
 NVMe disk, and QEMU with SeaBIOS started another copy as a SATA disk. Each
 came to its first-run setup, with x64 emulated in TCG.
+
+**A drive with sectors of 4096 bytes, measured on 2026-11-12.** Windows
+Setup 10.0.26100 formatted a disk with sectors of 4096 bytes in a VM, and
+its NTFS gave the fields that Burnout now writes on such a drive:
+- 4096 bytes in a sector, and 1 sector in a cluster.
+- 256 hidden sectors, for a partition at LBA 256.
+- The total sectors are 1 less than the sectors of the partition. The
+  backup boot sector is in the last sector of 4096 bytes.
+- A file record is 1024 bytes and an index buffer is 1 cluster. The update
+  sequence array has 3 entries, at a stride of 512 bytes.
+- The GPT has its entries at LBA 2 and its first usable sector at LBA 6.
+
+The example `to_go_image` with `4096` wrote Windows 11 25H2 Pro of the x64
+ISO into a disk image of 40 GiB: 136 boot files, written in 63 s and checked
+in 102 s. QEMU with OVMF started it as an NVMe disk with
+`logical_block_size=4096`, and Windows came to its first-run setup within
+20 minutes, with x64 emulated in TCG. A BIOS starts no drive with such
+sectors, so `--bios` refuses it with the kind `bios_sector_size`.
 
 ---
 
