@@ -1268,7 +1268,7 @@ that writes a drive that Windows starts from.
 
 ### P10. Read a WIM file
 
-**Size L. Depends on P5. Done for WIM files, and LZMS is blocked.**
+**Size L. Depends on P5. Done, with LZMS since 2026-11-13.**
 
 The crate `burnout-wim` reads a WIM or ESD file from inside an ISO, through
 `IsoSource::open_file`, which seeks.
@@ -1302,17 +1302,32 @@ The crate `burnout-wim` reads a WIM or ESD file from inside an ISO, through
 5. **The exit test.** Met for WIM files: each stream comes out with its
    SHA-1, and each file of each edition names one of those streams.
 
-**Blocked: LZMS.** An ESD file and a solid resource use LZMS. Microsoft
-publishes no description of LZMS. The public decoders are in wimlib, whose
-`lzms_decompress.c` is LGPL 2.1 or later, and in 7-Zip, which is LGPL too.
-New code under the MIT licence cannot follow either one. On 2026-11-12 the
-owner of the project asked the author of wimlib for the MIT licence on a
-Rust port of his decoder. That port decoded the `install.esd` of the Media
-Creation Tool for Windows 10 22H2 x64, build 19045.3803: each of its 75,934
-streams matched its SHA-1. The three ISOs of
-Microsoft here hold `install.wim` with LZX, so Windows To Go goes on without
-LZMS. An ESD from the Media Creation Tool waits until a description that
-Burnout can use exists.
+**LZMS, done on 2026-11-13.** An ESD file and a solid resource use LZMS.
+Microsoft publishes no description of LZMS. The public decoders are in
+wimlib, whose `lzms_decompress.c` is LGPL 2.1 or later, and in 7-Zip, which
+is LGPL too. On 2026-11-12 the owner of the project asked Eric Biggers, the
+author of wimlib, for the MIT licence on a Rust port of his decoder, and on
+2026-11-13 he said yes. The port is now `burnout-wim/src/lzms`, and its
+header records the permission.
+
+- Chunked LZMS and solid resources read, with two test files that wimlib
+  made, one with chunks of 32 KiB and one solid with chunks of 64 KiB.
+- A stream in a solid resource gives its place in the bytes of all solid
+  resources of the file, one after the other. The `install.esd` of the Media
+  Creation Tool showed it: its 10 solid resources hold 11,161,438,137 bytes,
+  and its streams run from place 0 to that number. Its table lists the
+  streams in that order, and the entry of a resource can come after the
+  first stream in it.
+- Measured on 2026-11-13 with `wim_check`: each of the 75,934 streams of
+  the `install.esd` of Windows 10 22H2 x64, build 19045.3803 (4,164,077,935
+  bytes, its SHA-1 as the catalog of the Media Creation Tool gives it),
+  matched its SHA-1. That is 11.4 GB in 114 s.
+- `to_go_image` wrote Windows 10 Pro of that `install.esd` into a disk
+  image of 40 GiB: 101,926 files and directories, 30,021 hard links, 9.6 GB
+  of streams and 127 boot files, in 108 s, and checked each of them in
+  155 s. That drive has not started in a VM yet.
+- `burnout info` lists the editions of an ISO, and not of a bare WIM or ESD
+  file. That is still to do.
 
 ### P11. Write an NTFS volume
 

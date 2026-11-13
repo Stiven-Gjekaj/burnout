@@ -7,8 +7,10 @@
 //! decompressor is needed for it.
 //!
 //! wimlib is LGPL or GPL, so the reader here is new code, to keep Burnout
-//! under the MIT licence. Microsoft documents the format in "Windows Imaging
-//! File Format (WIM)".
+//! under the MIT licence. The one exception is the LZMS decompressor in
+//! `lzms`, a port of the one of wimlib that its author allowed under the MIT
+//! licence; that module says more. Microsoft documents the format in
+//! "Windows Imaging File Format (WIM)".
 
 #![forbid(unsafe_code)]
 
