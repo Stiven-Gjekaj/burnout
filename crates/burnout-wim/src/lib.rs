@@ -15,6 +15,7 @@
 mod blobs;
 mod header;
 mod huffman;
+pub mod lzms;
 mod lzx;
 mod metadata;
 mod resource;
