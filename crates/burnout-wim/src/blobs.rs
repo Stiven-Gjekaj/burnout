@@ -25,10 +25,11 @@ pub struct Blob {
     /// How many directory entries name the stream.
     pub references: u32,
     pub hash: Digest,
-    /// The solid resources that hold the stream, one after the other, or
-    /// none for a stream that has a resource of its own. For a stream in
-    /// them, `resource.offset` is where the stream starts in their bytes
-    /// after decompression, and `resource.stored_bytes` is its size.
+    /// The solid resources of the file in the order of the table, for a
+    /// stream in one of them, or none for a stream that has a resource of
+    /// its own. Their bytes after decompression count as one run, one
+    /// resource after the other. `resource.offset` is where the stream
+    /// starts in that run, and `resource.stored_bytes` is its size.
     pub solid: Option<Arc<[Resource]>>,
 }
 
@@ -50,9 +51,11 @@ impl Blob {
 /// Read the entries of the table from its decompressed bytes. `name` names
 /// the file in an error.
 ///
-/// A run of entries for solid resources comes before the entries of the
-/// streams in them, as wimlib and Windows write it. The entries of the
-/// resources are not streams, so the list leaves them out.
+/// The entries of solid resources are not streams, so the list leaves them
+/// out. A stream in a solid resource gives its place in the bytes of all
+/// solid resources of the file, one after the other. An install.esd of
+/// Microsoft lists its streams in the order of that place, and the entry of a
+/// resource can come after the first stream in it.
 pub fn parse_blobs(bytes: &[u8], name: &str) -> Result<Vec<Blob>> {
     let fault = |detail: String| Error::Image {
         path: name.to_string(),
@@ -64,30 +67,27 @@ pub fn parse_blobs(bytes: &[u8], name: &str) -> Result<Vec<Blob>> {
             bytes.len()
         )));
     }
+    let is_solid_resource =
+        |r: &Resource| r.flags & Resource::SOLID != 0 && r.original_bytes == SOLID_RESOURCE;
+    let entries: Vec<Resource> = bytes
+        .chunks_exact(ENTRY_BYTES)
+        .map(|e| Resource::parse(&e[..24]))
+        .collect();
+    let solid: Vec<Resource> = entries.iter().copied().filter(is_solid_resource).collect();
+    let shared: Option<Arc<[Resource]>> = (!solid.is_empty()).then(|| Arc::from(solid));
     let mut blobs = Vec::new();
-    // The run of solid resources that the entries after it use.
-    let mut run: Vec<Resource> = Vec::new();
-    let mut shared: Option<Arc<[Resource]>> = None;
-    for e in bytes.chunks_exact(ENTRY_BYTES) {
-        let resource = Resource::parse(&e[..24]);
-        let solid = resource.flags & Resource::SOLID != 0;
-        if solid && resource.original_bytes == SOLID_RESOURCE {
-            if shared.take().is_some() {
-                run.clear();
-            }
-            run.push(resource);
+    for (e, resource) in bytes.chunks_exact(ENTRY_BYTES).zip(entries) {
+        if is_solid_resource(&resource) {
             continue;
         }
-        let solid = if solid {
-            if shared.is_none() {
-                if run.is_empty() {
-                    return Err(fault(
-                        "its offset table names a stream in a solid resource before any solid resource".to_string(),
-                    ));
-                }
-                shared = Some(Arc::from(std::mem::take(&mut run)));
-            }
-            shared.clone()
+        let solid = if resource.flags & Resource::SOLID != 0 {
+            let run = shared.clone().ok_or_else(|| {
+                fault(
+                    "its offset table names a stream in a solid resource, and no solid resource"
+                        .to_string(),
+                )
+            })?;
+            Some(run)
         } else {
             None
         };
@@ -144,39 +144,38 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_streams_after_a_run_of_solid_resources_are_in_that_run() {
+    fn a_stream_in_a_solid_resource_has_all_solid_resources_of_the_file() {
+        // As an install.esd lists them: a stream can come before the entry
+        // of its resource, and the streams follow the order of their place.
         let solid = Resource::SOLID | Resource::COMPRESSED;
         let bytes = [
-            entry(4000, solid, 208, SOLID_RESOURCE, [0; 20]),
-            entry(3000, solid, 4208, SOLID_RESOURCE, [0; 20]),
             entry(10, Resource::SOLID, 0, 0, [1; 20]),
+            entry(4000, solid, 208, SOLID_RESOURCE, [0; 20]),
             entry(20, Resource::SOLID, 10, 0, [2; 20]),
             entry(50, 0, 7208, 50, [3; 20]),
-            entry(900, solid, 7258, SOLID_RESOURCE, [0; 20]),
-            entry(30, Resource::SOLID, 0, 0, [4; 20]),
+            entry(3000, solid, 4208, SOLID_RESOURCE, [0; 20]),
+            entry(30, Resource::SOLID, 9000, 0, [4; 20]),
         ]
         .concat();
         let blobs = parse_blobs(&bytes, "a.esd").unwrap();
         let hashes: Vec<u8> = blobs.iter().map(|b| b.hash[0]).collect();
         assert_eq!(hashes, [1, 2, 3, 4]);
-        let first = blobs[0].solid.as_ref().unwrap();
+        let run = blobs[0].solid.as_ref().unwrap();
         assert_eq!(
-            first.iter().map(|r| r.offset).collect::<Vec<_>>(),
+            run.iter().map(|r| r.offset).collect::<Vec<_>>(),
             [208, 4208]
         );
-        assert!(Arc::ptr_eq(first, blobs[1].solid.as_ref().unwrap()));
+        assert!(Arc::ptr_eq(run, blobs[3].solid.as_ref().unwrap()));
         assert_eq!((blobs[1].bytes(), blobs[1].resource.offset), (20, 10));
         assert!(blobs[2].solid.is_none());
         assert_eq!(blobs[2].bytes(), 50);
-        let last = blobs[3].solid.as_ref().unwrap();
-        assert_eq!(last.iter().map(|r| r.offset).collect::<Vec<_>>(), [7258]);
     }
 
     #[test]
-    fn a_stream_in_a_solid_resource_needs_the_resource_first() {
+    fn a_stream_in_a_solid_resource_needs_a_solid_resource() {
         let bytes = entry(10, Resource::SOLID, 0, 0, [1; 20]);
         let e = parse_blobs(&bytes, "a.esd").unwrap_err();
-        assert!(e.to_string().contains("before any solid resource"), "{e}");
+        assert!(e.to_string().contains("no solid resource"), "{e}");
     }
 
     #[test]
