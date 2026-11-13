@@ -81,3 +81,8 @@ fn xpress_with_chunks_of_32_kib() {
 fn xpress_with_chunks_of_64_kib() {
     check("xpress-64k.wim", Compression::Xpress, 65536);
 }
+
+#[test]
+fn lzms_with_chunks_of_32_kib() {
+    check("lzms-32k.wim", Compression::Lzms, 32768);
+}

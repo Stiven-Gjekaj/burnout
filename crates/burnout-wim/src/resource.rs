@@ -10,7 +10,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use burnout_core::{Error, Result};
 
 use crate::header::{Compression, Header, Resource};
-use crate::{lzx, xpress};
+use crate::{lzms, lzx, xpress};
 
 /// The decompressor of the chunks, and what it needs.
 #[derive(Clone, Copy)]
@@ -18,6 +18,7 @@ enum Decoder {
     /// LZX, with the order of its window.
     Lzx(u32),
     Xpress,
+    Lzms,
 }
 
 /// The largest resource that `read_resource` holds in memory at once.
@@ -105,6 +106,9 @@ pub fn copy_resource<R: Read + Seek, W: Write>(
     }
     starts.push(data_bytes);
 
+    // The tables of LZMS take some 300 KiB, so the chunks of one resource
+    // share them.
+    let mut lzms = matches!(decoder, Decoder::Lzms).then(lzms::Decompressor::new);
     let mut input = Vec::new();
     let mut output = vec![0u8; chunk as usize];
     for i in 0..count as usize {
@@ -126,6 +130,11 @@ pub fn copy_resource<R: Read + Seek, W: Write>(
             match decoder {
                 Decoder::Lzx(order) => lzx::decompress(&input, target, order),
                 Decoder::Xpress => xpress::decompress(&input, target),
+                Decoder::Lzms => lzms
+                    .as_mut()
+                    .expect("made for LZMS")
+                    .decompress(&input, target)
+                    .map_err(|e| e.to_string()),
             }
             .map_err(|e| fault(format!("chunk {i}: {e}")))?;
         }
@@ -144,13 +153,10 @@ fn decoder(header: &Header) -> std::result::Result<Decoder, String> {
             .map(Decoder::Lzx)
             .ok_or_else(|| format!("LZX with chunks of {} bytes", header.chunk_bytes)),
         Compression::Xpress => Ok(Decoder::Xpress),
+        Compression::Lzms => Ok(Decoder::Lzms),
         Compression::None => {
             Err("it is compressed, and the WIM header names no compression".to_string())
         }
-        other => Err(format!(
-            "Burnout does not read {} compression yet",
-            other.name()
-        )),
     }
 }
 
@@ -215,11 +221,11 @@ mod tests {
             let e = read_resource(&mut Cursor::new(vec![0u8; 8]), &h, &r, "a.wim").unwrap_err();
             assert!(e.to_string().contains(says), "{says}: {e}");
         }
-        let mut b = header(0x0008_0002, 1, (0, 0));
-        b[0x14..0x18].copy_from_slice(&32768u32.to_le_bytes());
-        let lzms = Header::parse(&b, "a.wim").unwrap();
+        let mut b = header(0x0004_0002, 1, (0, 0));
+        b[0x14..0x18].copy_from_slice(&0u32.to_le_bytes());
+        let no_chunks = Header::parse(&b, "a.wim").unwrap();
         let r = resource(0, 4, 8, Resource::COMPRESSED);
-        let e = read_resource(&mut Cursor::new(vec![0u8; 8]), &lzms, &r, "a.wim").unwrap_err();
-        assert!(e.to_string().contains("LZMS compression yet"), "{e}");
+        let e = read_resource(&mut Cursor::new(vec![0u8; 8]), &no_chunks, &r, "a.wim").unwrap_err();
+        assert!(e.to_string().contains("chunks of 0 bytes"), "{e}");
     }
 }
