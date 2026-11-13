@@ -489,7 +489,9 @@ the partition back against the image.
 Burnout applies one edition of the install image to an NTFS partition, and
 puts the boot files and a BCD store on an EFI system partition. The drive
 starts through UEFI, and Windows then shows its first-run setup.
-The image is a Windows ISO, or a WIM file that holds the edition.
+The image is a Windows ISO, or a WIM or ESD file that holds the edition. An
+`install.esd`, as the Media Creation Tool puts in its ISO, works too: Burnout
+reads LZMS and solid resources.
 
 ```bash
 burnout write Win11_25H2_English_Arm64_v2.iso 3 --to-go --edition Pro
@@ -527,16 +529,6 @@ only.
 Limits:
 
 - An Arm64 edition has no boot manager for a BIOS, so `--bios` refuses it.
-- An `install.esd` uses LZMS, which Burnout does not read. An ISO that the
-  Media Creation Tool made holds one. Burnout refuses it and prints the
-  command that exports the edition to a WIM file: DISM on Windows, and
-  `wimlib-imagex` on macOS and Linux. Give Burnout that file in the place of
-  the ISO:
-
-  ```bash
-  dism /Export-Image /SourceImageFile:D:\sources\install.esd /SourceIndex:6 /DestinationImageFile:install.wim /Compress:max
-  burnout write install.wim 3 --to-go --edition 1
-  ```
 - The drive can have sectors of 512 bytes or of 4096 bytes. A BIOS starts
   no drive with sectors of 4096 bytes, so `--bios` refuses such a drive with
   the error kind `bios_sector_size`.
@@ -547,7 +539,10 @@ Limits:
   came to its first-run setup. On a PC with Windows,
   Hyper-V started an x64 drive with Secure Boot on, and Windows 11 came to
   its first-run setup in 5 minutes. The `install.esd` of the Media Creation
-  Tool for Windows 10, exported with the DISM command above, did the same.
+  Tool for Windows 10, exported to a WIM file with DISM, did the same. Since
+  3.4.1 Burnout reads that `install.esd` itself: each of its 75,934 streams
+  gives back its SHA-1, and a drive of Windows 10 Pro from it was written and
+  checked in a disk image. That drive has not started in a VM yet.
 
 ### A write that stops
 
@@ -678,6 +673,10 @@ letters itself. The milestones record what to do about that.
 ## Licence
 
 MIT. See [LICENSE](LICENSE) and [TERMS.md](TERMS.md).
+
+The LZMS decompressor in `burnout-wim` is a port of the one of
+[wimlib](https://wimlib.net), which Eric Biggers wrote. wimlib is LGPL, and
+Eric Biggers allowed the port under the MIT licence.
 
 `burnout-gui` uses [Slint](https://slint.dev) under the Slint Royalty-free
 Desktop, Mobile, and Web Applications License. **Help > About** shows the
