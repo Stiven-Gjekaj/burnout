@@ -212,8 +212,8 @@ pub fn run(args: &WriteArgs, elevated: bool, json: bool) -> Result<i32> {
         Plan::Stop => return Err(elevate::refusal(state)),
         Plan::StartAgain => {
             eprintln!("Burnout needs root to write a drive, so it asks sudo for it.");
-            elevate::start_again(&std::env::args().skip(1).collect::<Vec<_>>())?;
-            unreachable!("the restart replaces this program");
+            // The restart replaces this program, so success holds no value.
+            match elevate::start_again(&std::env::args().skip(1).collect::<Vec<_>>())? {}
         }
     };
     if ask_host && args.partition.is_some() {
