@@ -1656,6 +1656,25 @@ not write the windows before the spike passes on all three hosts.
   closes after about 2 minutes, and `ShellExecuteEx` then fails with 1223,
   the error of a cancel. The program shows that as a cancel.
 
+**The write from the program, measured on 2026-11-13.** Each run wrote the
+same image of 200 MiB to a disk image of 400 MiB, through the windows of
+`burnout-gui`, and each drive held the SHA-256 of the image after it.
+- macOS: the person chose the image and the drive. `burnout` showed the
+  confirmation, macOS asked for the drive in its dialog, and the person gave
+  a fingerprint. The program showed the write, the check and the eject.
+- Linux, in the Fedora 44 live VM: pkexec showed the dialog of polkit for
+  `burnout write ... --json --stop-on-input`. The live system does not name
+  its system disk, so the program asked for the model and the size, and
+  `burnout` took them. The binary was built on the Mac with `cargo zigbuild`
+  and the `libfontconfig.so` of the Fedora package.
+- Windows, in the Windows 11 VM: the program started `burnout` through UAC.
+  Nobody answered the prompt, and after about 2 minutes the program showed
+  "Cancelled". A write through the program on Windows is not measured. The
+  same pipes passed with the test program above.
+- Two faults to fix: the table of drives has no action of accessibility that
+  selects a row, and the window draws no picture for a capture of macOS while
+  it renders through OpenGL. The software renderer of Slint draws one.
+
 ### Decisions, made on 2026-11-12
 
 1. **The toolkit is Slint.** It is native Rust, it runs on the three hosts,
