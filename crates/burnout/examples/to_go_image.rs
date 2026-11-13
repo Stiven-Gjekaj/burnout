@@ -24,8 +24,8 @@ use std::time::Instant;
 use burnout::to_go;
 use burnout_core::{FileTarget, Silent};
 use burnout_iso::IsoSource;
-use burnout_layout::{InstallImage, WindowsTree};
-use burnout_wim::{read_wim, Compression};
+use burnout_layout::WindowsTree;
+use burnout_wim::read_wim;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -91,19 +91,10 @@ fn run(
             .map_err(err)?
             .ok_or("neither an ISO nor a WIM file")?;
         let tree = WindowsTree::new(&source).map_err(err)?;
-        if tree.image != InstallImage::Wim {
-            return Err(format!(
-                "it holds {}, which LZMS compresses",
-                tree.image_path()
-            ));
-        }
         name = tree.image_path().to_string();
         reader = Box::new(source.open_file(tree.image_path()).map_err(err)?);
     }
     let wim = read_wim(&mut reader, &name).map_err(err)?;
-    if wim.header.compression() == Compression::Lzms {
-        return Err("LZMS compresses it".to_string());
-    }
     let chosen = wim
         .find_edition(edition)
         .ok_or_else(|| format!("no edition {edition}"))?;

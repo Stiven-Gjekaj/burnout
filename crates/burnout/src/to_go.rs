@@ -34,7 +34,7 @@ use burnout_layout::{
     TYPE_FAT32, TYPE_NTFS,
 };
 use burnout_wim::sha1::{Digest, Sha1};
-use burnout_wim::{copy_resource, parse_metadata, read_blobs, read_resource, Arch, Blob, Wim};
+use burnout_wim::{parse_metadata, read_blobs, Arch, Blob, BlobReader, Wim};
 
 pub use burnout_layout::bcd::Firmware;
 
@@ -177,6 +177,7 @@ pub fn plan<R: Read + Seek>(
     }
     let blobs = read_blobs(&mut *wim_file, &wim.header, name)?;
     let by_hash: HashMap<Digest, &Blob> = blobs.iter().map(|b| (b.hash, b)).collect();
+    let mut streams = BlobReader::new();
     let mut metas: Vec<&Blob> = blobs.iter().filter(|b| b.is_metadata()).collect();
     metas.sort_by_key(|b| b.resource.offset);
     let meta = metas.get(edition - 1).ok_or_else(|| {
@@ -185,7 +186,7 @@ pub fn plan<R: Read + Seek>(
             format!("the install image has no tree for edition {edition}"),
         )
     })?;
-    let bytes = read_resource(&mut *wim_file, &wim.header, &meta.resource, name)?;
+    let bytes = streams.read(&mut *wim_file, &wim.header, meta, name)?;
     let tree = parse_metadata(&bytes).map_err(|e| image_error(name, e))?;
 
     // The new files, in the order of the tree. A hard link becomes a
@@ -194,7 +195,7 @@ pub fn plan<R: Read + Seek>(
     let mut index_of: HashMap<&str, usize> = HashMap::new();
     let mut by_group: HashMap<u64, usize> = HashMap::new();
     let mut fills: Vec<Fill> = Vec::new();
-    let size_of = |h: &Digest| by_hash.get(h).map(|b| b.resource.original_bytes);
+    let size_of = |h: &Digest| by_hash.get(h).map(|b| b.bytes());
     for d in tree.entries.iter().skip(1) {
         let (parent_path, leaf) = d.path.rsplit_once('/').unwrap_or(("", &d.path));
         let parent = if parent_path.is_empty() {
@@ -240,7 +241,7 @@ pub fn plan<R: Read + Seek>(
             let body = match &data {
                 Some(h) => {
                     let b = by_hash.get(h).ok_or_else(missing)?;
-                    read_resource(&mut *wim_file, &wim.header, &b.resource, name)?
+                    streams.read(&mut *wim_file, &wim.header, b, name)?
                 }
                 None => Vec::new(),
             };
@@ -343,7 +344,7 @@ pub fn plan<R: Read + Seek>(
                     let b = by_hash
                         .get(h)
                         .ok_or_else(|| image_error(name, format!("{} names no stream", d.path)))?;
-                    read_resource(&mut *wim_file, &wim.header, &b.resource, name)?
+                    streams.read(&mut *wim_file, &wim.header, b, name)?
                 }
                 None => Vec::new(),
             };
@@ -465,7 +466,7 @@ pub fn plan<R: Read + Seek>(
 
     let sizes = fills
         .iter()
-        .map(|f| (f.hash, by_hash[&f.hash].resource.original_bytes))
+        .map(|f| (f.hash, by_hash[&f.hash].bytes()))
         .collect::<HashMap<_, _>>();
     let stream_bytes = fills.iter().map(|f| sizes[&f.hash]).sum();
     let links = list.iter().map(|f| f.links.len()).sum();
@@ -609,6 +610,15 @@ impl ToGo {
     }
 }
 
+/// Where the bytes of a stream are in the image: the place of its solid
+/// resources and its place in them, or the place of its own resource.
+fn place_in_image(blob: &Blob) -> (u64, u64) {
+    match &blob.solid {
+        Some(run) => (run.first().map_or(0, |r| r.offset), blob.resource.offset),
+        None => (blob.resource.offset, 0),
+    }
+}
+
 /// Write the drive: the GPT, the EFI system partition with its files, and
 /// the NTFS partition with every stream of the edition. `tally` hears the
 /// bytes of each piece as it goes out.
@@ -676,13 +686,19 @@ pub fn write<T: BlockTarget, R: Read + Seek>(
         .into_iter()
         .map(|b| (b.hash, b))
         .collect();
-    for fill in &plan.fills {
+    // The streams go in the order of the image, and not of the tree. A
+    // solid resource then gives each of its chunks once, and the reads go
+    // forwards through the file.
+    let mut fills: Vec<&Fill> = plan.fills.iter().collect();
+    fills.sort_by_key(|f| place_in_image(&by_hash[&f.hash]));
+    let mut streams = BlobReader::new();
+    for fill in fills {
         let run = run_of(plan, fill)
             .ok_or_else(|| image_error(name, "a stream with bytes has no clusters"))?;
         io.seek(SeekFrom::Start(run.lcn.expect("a placed run") * CLUSTER))?;
         let blob = &by_hash[&fill.hash];
-        copy_resource(&mut *wim_file, &wim.header, &blob.resource, name, &mut io)?;
-        tally(blob.resource.original_bytes);
+        streams.copy(&mut *wim_file, &wim.header, blob, name, &mut io)?;
+        tally(blob.bytes());
     }
     io.flush()?;
     drop(io);

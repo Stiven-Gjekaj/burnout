@@ -33,10 +33,10 @@ use burnout_core::{
 };
 use burnout_iso::{check_whole, mode_of_file, IsoSource, Mode};
 use burnout_layout::{
-    unattend_xml, verify_windows, write_windows, InstallImage, Layout, Serials, Unattend,
-    WindowsDrive, WindowsTree, UNATTEND_FILE,
+    unattend_xml, verify_windows, write_windows, Layout, Serials, Unattend, WindowsDrive,
+    WindowsTree, UNATTEND_FILE,
 };
-use burnout_wim::{read_wim, Compression, Edition, Wim};
+use burnout_wim::{read_wim, Edition, Wim};
 
 use crate::cli::{ModeArg, WriteArgs};
 use crate::elevate::{self, Plan, State};
@@ -504,7 +504,6 @@ fn to_go_job(args: &WriteArgs) -> Result<ToGoJob> {
     let mut magic = [0u8; 8];
     let is_wim = file.read_exact(&mut magic).is_ok() && &magic == WIM_MAGIC;
     file.seek(SeekFrom::Start(0))?;
-    let mut esd = false;
     let input = if is_wim {
         WimInput::File(args.image.clone())
     } else {
@@ -519,14 +518,11 @@ fn to_go_job(args: &WriteArgs) -> Result<ToGoJob> {
             Error::Source { path, detail } => unreadable(format!("{path}: {detail}")),
             other => other,
         })?;
-        esd = tree.image == InstallImage::Esd;
         WimInput::Iso {
             path: tree.image_path().clone(),
             source,
         }
     };
-    // The header and the XML of an install.esd are not compressed, so the
-    // edition is found before the refusal, and the refusal names its index.
     let wim = read_wim(input.open()?, &input.name())?;
     let text = args.edition.as_deref().unwrap_or_default();
     let edition = wim
@@ -537,13 +533,6 @@ fn to_go_job(args: &WriteArgs) -> Result<ToGoJob> {
             edition: text.to_string(),
             editions: editions_text(&wim.editions),
         })?;
-    if esd || wim.header.compression() == Compression::Lzms {
-        return Err(Error::LzmsImage {
-            path: name.clone(),
-            inside_iso: matches!(input, WimInput::Iso { .. }),
-            index: edition.index,
-        });
-    }
     let position = wim
         .editions
         .iter()
@@ -1345,29 +1334,29 @@ mod tests {
     }
 
     #[test]
-    fn to_go_refuses_a_wim_file_that_lzms_compresses_and_tells_how_to_export_it() {
-        let image = wim_fixture("lzms-solid.wim");
-        let Err(e) = to_go_job(&to_go_args(&image, "Windows Test")) else {
-            panic!("refused")
+    fn to_go_plans_a_solid_image_that_lzms_compresses_as_it_plans_the_same_image_with_lzx() {
+        // Both files hold the same tree, so they give the same drive.
+        let plan_of = |file: &str| {
+            let job = to_go_job(&to_go_args(&wim_fixture(file), "1")).unwrap();
+            let mut input = job.input.open().unwrap();
+            to_go::plan(
+                &mut input,
+                &job.name(),
+                &job.wim,
+                1,
+                600 << 20,
+                512,
+                "t",
+                to_go::Firmware::Uefi,
+            )
+            .unwrap()
         };
-        assert_eq!(e.kind(), "lzms_image");
-        let text = e.to_string();
-        assert!(
-            text.contains(&format!(
-                "dism /Export-Image /SourceImageFile:{image} /SourceIndex:1"
-            )),
-            "{text}"
+        let lzx = plan_of("to-go.wim");
+        let lzms = plan_of("lzms-solid.wim");
+        assert_eq!(
+            (lzms.files, lzms.links, lzms.boot_files, lzms.total_bytes()),
+            (lzx.files, lzx.links, lzx.boot_files, lzx.total_bytes())
         );
-        assert!(
-            text.contains("burnout write install.wim <drive> --to-go --edition 1"),
-            "{text}"
-        );
-        if !cfg!(windows) {
-            assert!(
-                text.contains(&format!("wimlib-imagex export {image} 1 install.wim")),
-                "{text}"
-            );
-        }
     }
 
     #[test]
