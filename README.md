@@ -118,6 +118,18 @@ cargo install burnout
 
 Or download the binary for your host from the
 [latest release](https://github.com/Stiven-Gjekaj/burnout/releases/latest).
+
+The program with windows, `burnout-gui`, is a package of its own, and it
+installs `burnout` with it:
+
+```bash
+brew install stiven-gjekaj/tap/burnout-gui
+```
+
+```powershell
+scoop install stiven-gjekaj/burnout-gui
+winget install Stiven-Gjekaj.BurnoutGUI
+```
 [docs/releasing.md](docs/releasing.md) says how to check it against
 `SHA256SUMS` and against its build provenance.
 
@@ -146,6 +158,35 @@ Homebrew, Cargo, `curl` and `gh release download` set no mark, so they bring
 no warning.
 
 ---
+
+## The program with windows
+
+`burnout-gui` writes a drive for a person who does not use a terminal. It
+lists the drives, takes the image and the drive that you choose, and shows
+what it will erase. Then it asks for the same answer that the command line
+asks for, and shows the progress and the result.
+
+The program writes nothing itself. It starts `burnout write --json` with the
+privilege of the host, shows the events, and passes on the answer that you
+type:
+
+- **macOS** asks for your password, or for Touch ID, in its own dialog.
+- **Linux** asks through polkit, with `pkexec`.
+- **Windows** asks through UAC.
+
+So the confirmation, the refusal of the system disk and the check after the
+write are the same code as on the command line. A cancel stops the write as
+Ctrl+C does, and the program shows what the drive holds after it.
+
+The program writes an image byte for byte, and lays out a Windows ISO for
+Setup. Windows To Go, one partition, and the options of Setup are on the
+command line only. A screen reader can choose a drive, and so can the arrow
+keys.
+
+`burnout-gui` needs `burnout` of the same version, beside it or on the path,
+and refuses another version. On macOS it is a command and not an app yet:
+start it from a terminal. On Linux it needs glibc 2.35 or later and
+fontconfig, as a desktop has.
 
 ## The two modes
 
@@ -558,6 +599,12 @@ and a stop prints `{"event":"stopped","reached":"writing","message":"..."}`.
 Test the `kind`, and not the message: the message is for a person, and it can
 change.
 
+A program that cannot send Ctrl+C to `burnout` gives `--stop-on-input`.
+`pkexec` runs `burnout` as root, for example. After the answer, the word
+`stop` on the input, or the end of the input, then stops the write as Ctrl+C
+does, with the exit code 130. Without the option, an input that ends does not
+stop the write, so `printf 'yes\n' | burnout write ...` works as before.
+
 On Windows, a program that starts `burnout` through UAC gets none of its
 streams. The program makes two named pipes, `\\.\pipe\NAME.out` and
 `\\.\pipe\NAME.in`, and starts `burnout write ... --json --pipe NAME`.
@@ -631,6 +678,10 @@ letters itself. The milestones record what to do about that.
 ## Licence
 
 MIT. See [LICENSE](LICENSE) and [TERMS.md](TERMS.md).
+
+`burnout-gui` uses [Slint](https://slint.dev) under the Slint Royalty-free
+Desktop, Mobile, and Web Applications License. **Help > About** shows the
+attribution that the licence asks for.
 
 <div align="center">
 <sub>Burnout erases drives. Read the warning above before you run it.</sub>
