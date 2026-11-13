@@ -36,7 +36,10 @@ wimlib-imagex capture "$tree" "$here/lzx-32k.wim" "Test" --compress=lzx --chunk-
 wimlib-imagex capture "$tree" "$here/lzx-64k.wim" "Test" --compress=lzx --chunk-size=65536 --no-acls --norpfix >/dev/null
 wimlib-imagex capture "$tree" "$here/xpress-32k.wim" "Test" --compress=xpress --chunk-size=32768 --no-acls --norpfix >/dev/null
 wimlib-imagex capture "$tree" "$here/xpress-64k.wim" "Test" --compress=xpress --chunk-size=65536 --no-acls --norpfix >/dev/null
+# LZMS in chunks of 32 KiB, and LZMS in one solid resource of chunks of
+# 64 KiB, so a stream crosses from one chunk to the next.
 wimlib-imagex capture "$tree" "$here/lzms-32k.wim" "Test" --compress=lzms --chunk-size=32768 --no-acls --norpfix >/dev/null
+wimlib-imagex capture "$tree" "$here/lzms-solid-64k.wim" "Test" --compress=lzms --solid --solid-chunk-size=65536 --no-acls --norpfix >/dev/null
 
 # A small tree of Windows for a drive of Windows To Go: the boot manager
 # and its files, a font, a file with two names and a file of the system.
