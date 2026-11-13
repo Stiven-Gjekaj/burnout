@@ -252,7 +252,27 @@ thread_local! {
     static STATE: Rc<RefCell<State>> = Rc::new(RefCell::new(State::default()));
 }
 
+/// The line that `--version` prints, as `burnout --version` prints its own.
+fn version_line() -> String {
+    format!("burnout-gui {}", env!("CARGO_PKG_VERSION"))
+}
+
 fn main() -> Result<(), slint::PlatformError> {
+    // A package manager checks the install with this, where no window can
+    // open. On Windows the program has no console, so it attaches to the one
+    // of its parent first.
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        #[cfg(windows)]
+        // SAFETY: the call takes a plain number and touches no memory of
+        // this program.
+        unsafe {
+            windows_sys::Win32::System::Console::AttachConsole(
+                windows_sys::Win32::System::Console::ATTACH_PARENT_PROCESS,
+            );
+        }
+        println!("{}", version_line());
+        return Ok(());
+    }
     let window = MainWindow::new()?;
     let burnout = Rc::new(Burnout::locate());
     let answer: Answer = Arc::new(Mutex::new(None));
@@ -371,6 +391,17 @@ mod tests {
             removable: true,
             system,
         }
+    }
+
+    #[test]
+    fn the_version_line_is_the_name_and_a_version_of_three_numbers() {
+        let line = version_line();
+        let version = line
+            .strip_prefix("burnout-gui ")
+            .expect("the name comes first");
+        let parts: Vec<&str> = version.split('.').collect();
+        assert_eq!(parts.len(), 3, "{line}");
+        assert!(parts.iter().all(|p| p.parse::<u32>().is_ok()), "{line}");
     }
 
     #[test]
