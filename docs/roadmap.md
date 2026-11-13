@@ -1668,12 +1668,24 @@ same image of 200 MiB to a disk image of 400 MiB, through the windows of
   `burnout` took them. The binary was built on the Mac with `cargo zigbuild`
   and the `libfontconfig.so` of the Fedora package.
 - Windows, in the Windows 11 VM: the program started `burnout` through UAC.
-  Nobody answered the prompt, and after about 2 minutes the program showed
-  "Cancelled". A write through the program on Windows is not measured. The
-  same pipes passed with the test program above.
-- Two faults to fix: the table of drives has no action of accessibility that
-  selects a row, and the window draws no picture for a capture of macOS while
-  it renders through OpenGL. The software renderer of Slint draws one.
+  Nobody answered the first prompt, and after about 2 minutes the program
+  showed "Cancelled". On a later run the person answered yes, and the
+  confirmation, the progress and the result came through the two pipes.
+- The table of drives had no action of accessibility that selects a row. A
+  list of its own replaced it: each row is a list item with a label and a
+  default action that selects it, and the arrow keys move the selection.
+  Measured on macOS through the accessibility interface.
+- The window draws no picture for a capture of macOS while it renders through
+  OpenGL. The software renderer of Slint draws one, so a test sets
+  `SLINT_BACKEND=winit-software`.
+
+**The release.** Each release builds `burnout-gui` for the six hosts beside
+`burnout`. On Linux it builds against glibc on Ubuntu 22.04, because a static
+binary cannot load the libraries of a desktop. The tap, the bucket and winget
+get a package of their own for it, which depends on the package of `burnout`.
+[releasing.md](releasing.md) has the steps. The macOS package is a command and
+not an app bundle, so the first release opens it from a terminal or from a
+link that a person makes.
 
 ### Decisions, made on 2026-11-12
 
