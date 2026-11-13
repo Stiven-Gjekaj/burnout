@@ -76,9 +76,60 @@ jobs:
           path: out/
           if-no-files-found: error
 
+  # The program with windows. It links the libraries of the desktop, so on
+  # Linux it builds against glibc and not musl: a static binary cannot load
+  # the libraries of a desktop. Ubuntu 22.04 has an old glibc, so the binary
+  # runs on the distributions of the last years too.
+  build-gui:
+    name: build the program with windows for ${{ matrix.target }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      # The fonts come through fontconfig on Linux, and the program links it.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfontconfig-dev
+
+      - name: build
+        run: cargo build --release --locked -p burnout-gui --target ${{ matrix.target }}
+
+      - name: collect
+        shell: bash
+        run: |
+          mkdir out
+          suffix=""
+          case "${{ matrix.target }}" in *windows*) suffix=".exe" ;; esac
+          cp "target/${{ matrix.target }}/release/burnout-gui${suffix}" "out/burnout-gui${suffix}"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gui-${{ matrix.target }}
+          path: out/
+          if-no-files-found: error
+
   checksums:
     name: name the files and hash them
-    needs: build
+    needs: [build, build-gui]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -93,6 +144,11 @@ jobs:
           pattern: burnout-*
           path: built/
 
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: gui-*
+          path: built/
+
       # One machine hashes every file, so every checksum comes from the same
       # tool and nobody has to trust six different ones.
       - name: name and hash
@@ -102,12 +158,17 @@ jobs:
           version=$(cargo metadata --no-deps --format-version 1 \
             | jq -r '.packages[] | select(.name == "burnout") | .version')
           mkdir dist
-          for dir in built/burnout-*; do
-            target=${dir#built/burnout-}
+          # built/burnout-<target> holds the command line, and
+          # built/gui-<target> holds the program with windows.
+          for dir in built/burnout-* built/gui-*; do
+            case "$dir" in
+              built/burnout-*) name=burnout; target=${dir#built/burnout-} ;;
+              built/gui-*) name=burnout-gui; target=${dir#built/gui-} ;;
+            esac
             for file in "$dir"/*; do
               suffix=""
               case "$file" in *.exe) suffix=".exe" ;; esac
-              cp "$file" "dist/burnout-${version}-${target}${suffix}"
+              cp "$file" "dist/${name}-${version}-${target}${suffix}"
             done
           done
           cd dist
