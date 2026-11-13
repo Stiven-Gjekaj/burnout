@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use slint::{ComponentHandle, ModelRc, SharedString, StandardListViewItem, VecModel};
+use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::burnout::{size_text, Burnout, Drive};
 use crate::child::Ending;
@@ -25,22 +25,16 @@ use crate::events::{stage_text, Event};
 
 slint::include_modules!();
 
-/// The rows of the table, one for each drive.
-fn rows(drives: &[Drive]) -> ModelRc<ModelRc<StandardListViewItem>> {
-    let rows: Vec<ModelRc<StandardListViewItem>> = drives
+/// The rows of the list, one for each drive.
+fn rows(drives: &[Drive]) -> ModelRc<DriveRow> {
+    let rows: Vec<DriveRow> = drives
         .iter()
-        .map(|d| {
-            let cells: Vec<StandardListViewItem> = [
-                d.number.to_string(),
-                d.name.clone(),
-                size_text(d.size_bytes),
-                d.bus.clone(),
-                d.kind().to_string(),
-            ]
-            .into_iter()
-            .map(|text| StandardListViewItem::from(SharedString::from(text)))
-            .collect();
-            ModelRc::new(VecModel::from(cells))
+        .map(|d| DriveRow {
+            number: d.number.to_string().into(),
+            name: d.name.clone().into(),
+            size: size_text(d.size_bytes).into(),
+            bus: d.bus.clone().into(),
+            kind: d.kind().into(),
         })
         .collect();
     ModelRc::new(VecModel::from(rows))

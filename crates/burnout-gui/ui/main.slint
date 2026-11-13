@@ -1,4 +1,92 @@
-import { AboutSlint, Button, LineEdit, ProgressIndicator, StandardTableView, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { AboutSlint, Button, LineEdit, ListView, Palette, ProgressIndicator, VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+// One drive, as the list shows it.
+export struct DriveRow {
+    number: string,
+    name: string,
+    size: string,
+    bus: string,
+    kind: string,
+}
+
+// The cells of one row, with the same widths in the head and in each row.
+component Cells inherits HorizontalLayout {
+    in property <DriveRow> drive;
+    in property <brush> color;
+    in property <int> weight: 400;
+    padding-left: 8px;
+    padding-right: 8px;
+    spacing: 8px;
+    Text { text: root.drive.number; width: 32px; color: root.color; font-weight: root.weight; vertical-alignment: center; }
+    Text { text: root.drive.name; horizontal-stretch: 1; color: root.color; font-weight: root.weight; vertical-alignment: center; overflow: elide; }
+    Text { text: root.drive.size; width: 90px; color: root.color; font-weight: root.weight; vertical-alignment: center; }
+    Text { text: root.drive.bus; width: 80px; color: root.color; font-weight: root.weight; vertical-alignment: center; }
+    Text { text: root.drive.kind; width: 100px; color: root.color; font-weight: root.weight; vertical-alignment: center; }
+}
+
+// The list of drives. A screen reader selects a row through its default
+// action, and the arrow keys move the selection.
+component DriveList inherits Rectangle {
+    in property <[DriveRow]> rows;
+    in-out property <int> selected: -1;
+    callback chosen(int);
+
+    // A selection takes the keyboard too, so the arrow keys go on from it.
+    function select(i: int) {
+        root.selected = i;
+        root.chosen(i);
+        keys.focus();
+    }
+
+    accessible-role: list;
+    accessible-label: "Drives";
+    accessible-item-count: root.rows.length;
+    forward-focus: keys;
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.DownArrow && root.selected < root.rows.length - 1 {
+                root.select(root.selected + 1);
+                return accept;
+            }
+            if event.text == Key.UpArrow && root.selected > 0 {
+                root.select(root.selected - 1);
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            Cells {
+                height: 32px;
+                drive: { number: "#", name: "Drive", size: "Size", bus: "Bus", kind: "Kind" };
+                color: Palette.foreground.transparentize(0.4);
+                accessible-role: none;
+            }
+            ListView {
+                for row[i] in root.rows: Rectangle {
+                    height: 32px;
+                    border-radius: 4px;
+                    background: i == root.selected ? Palette.selection-background
+                        : touch.has-hover ? Palette.alternate-background : transparent;
+                    accessible-role: list-item;
+                    accessible-label: "Drive \{row.number}, \{row.name}, \{row.size}, \{row.bus}, \{row.kind}";
+                    accessible-item-index: i;
+                    accessible-item-selectable: true;
+                    accessible-item-selected: i == root.selected;
+                    accessible-action-default => { root.select(i); }
+                    touch := TouchArea {
+                        clicked => { root.select(i); }
+                    }
+                    Cells {
+                        drive: row;
+                        color: i == root.selected ? Palette.selection-foreground : Palette.foreground;
+                    }
+                }
+            }
+        }
+    }
+}
 
 // The pages of the window, in the order of a write.
 export enum Page { choose, confirm, running, finished }
@@ -13,7 +101,7 @@ export component MainWindow inherits Window {
     in-out property <Page> page: Page.choose;
 
     // The page to choose: one row for each drive, and the image.
-    in property <[[StandardListViewItem]]> drives;
+    in property <[DriveRow]> drives;
     in-out property <int> selected-row: -1;
     in property <string> image-path;
     in property <bool> can-write;
@@ -99,21 +187,11 @@ export component MainWindow inherits Window {
             font-size: 1.15rem;
             font-weight: 600;
         }
-        table := StandardTableView {
+        DriveList {
             vertical-stretch: 1;
-            columns: [
-                { title: "#", min-width: 40px, horizontal-stretch: 0 },
-                { title: "Drive", min-width: 220px, horizontal-stretch: 1 },
-                { title: "Size", min-width: 90px, horizontal-stretch: 0 },
-                { title: "Bus", min-width: 80px, horizontal-stretch: 0 },
-                { title: "Kind", min-width: 110px, horizontal-stretch: 0 },
-            ];
             rows: root.drives;
-            current-row: root.selected-row;
-            current-row-changed(row) => {
-                root.selected-row = row;
-                root.row-chosen(row);
-            }
+            selected <=> root.selected-row;
+            chosen(row) => { root.row-chosen(row); }
         }
         Text {
             text: root.status;
